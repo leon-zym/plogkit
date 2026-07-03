@@ -9,7 +9,9 @@ borders/backgrounds, stitch photos, and export with social-friendly presets.
 It complements the system Photos app and deliberately excludes filters, beauty
 editing, AI generation, and cloud features.
 
-- Stack: React Native (Expo SDK 56, New Architecture) + TypeScript (strict) + Skia.
+- Stack: React Native (Expo SDK 57, New Architecture) + TypeScript (strict) + Skia.
+  Expo has changed significantly over time — consult the versioned docs at
+  https://docs.expo.dev/versions/v57.0.0/ before writing Expo-related code.
 - State: Zustand document store; Reanimated shared values hold transient gesture
   state only. The serializable document is the single source of truth (ADR 0003).
 - All significant decisions live in `docs/adr/` (one file per decision).

@@ -14,7 +14,7 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [0001](0001-core-stack-rn-skia.md) | 核心技术栈：React Native + Skia + TypeScript | 已接受 |
-| [0002](0002-expo-foundation.md) | 工程底座：Expo SDK 56 + CNG + dev client + pnpm，iOS 先行 | 已接受 |
+| [0002](0002-expo-foundation.md) | 工程底座：Expo SDK（56/57）+ CNG + dev client + pnpm，iOS 先行 | 已接受 |
 | [0003](0003-document-driven-architecture.md) | 文档驱动的编辑器架构与统一文档模型 | 已接受 |
 | [0004](0004-state-management-undo.md) | 状态管理与撤销重做：Zustand + 有界快照栈 | 已接受 |
 | [0005](0005-text-editing-model.md) | 文本编辑模型：原生输入提交 + Skia Paragraph 渲染 | 已接受 |

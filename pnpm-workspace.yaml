@@ -1,0 +1,3 @@
+allowBuilds:
+  "@shopify/react-native-skia": true
+  unrs-resolver: true

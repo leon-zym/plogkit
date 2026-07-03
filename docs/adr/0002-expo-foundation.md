@@ -1,4 +1,4 @@
-# ADR 0002：工程底座：Expo SDK 56 + CNG + dev client + pnpm，iOS 先行
+# ADR 0002：工程底座：Expo SDK（56/57）+ CNG + dev client + pnpm，iOS 先行
 
 - 状态：已接受（2026-07-02）
 - 关联：ADR 0001、0016
@@ -11,7 +11,8 @@
 
 ## 决策
 
-- 采用 Expo SDK 56 + CNG/prebuild + development build（dev client），不使用 Expo Go。
+- 采用 Expo SDK + CNG/prebuild + development build（dev client），不使用 Expo Go。
+  - 版本勘误（2026-07-02 脚手架时点）：实际采用 SDK 57（2026-06 发布，内容为 SDK 56 + RN 0.86 的官方无破坏延续，工具链要求不变），决策实质不变。
 - 包管理器使用 pnpm；本地构建（`expo run:ios`），不强制依赖 EAS。
 - 路由使用 Expo Router。
 - `ios/`、`android/` 为 prebuild 生成目录，不入版本库；原生配置一律通过 app config 与 config plugins 表达。
