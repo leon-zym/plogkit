@@ -8,7 +8,7 @@
 |---|---|---|
 | Xcode 27.0 beta | 已安装，`xcode-select` 当前指向 | 供 iOS 27 beta 真机部署调试 |
 | Xcode 26.5 稳定版 | 已安装（`/Applications/Xcode.app`） | 日常模拟器构建首选 |
-| iOS 模拟器 runtime | 首次下载中（约 8GB，经稳定版 Xcode） | RN 日常开发与 Maestro E2E 的前提 |
+| iOS 模拟器 runtime | iOS 26.5（23F77）已安装 | 首次冒烟：iPhone 17 Pro 模拟器构建/启动/渲染通过（2026-07-02） |
 | 真机 | iPhone 15 Pro，iOS 27.0 beta，Device Hub 已配对 | 人工冒烟用，UDID 见 `xcrun devicectl list devices` |
 | Node.js | v26.4.0 | 满足 RN 0.85 要求（≥ 20.19.4） |
 | pnpm | 11.9.0 | 本项目唯一包管理器 |
@@ -54,5 +54,6 @@ xcrun devicectl device process launch --device <udid> <bundleId>
 
 ## 已知风险
 
-- Xcode 27 beta + RN 0.85 的组合未经官方验证（Expo SDK 56 官方支持 Xcode 26.4+），真机构建遇到工具链报错属预期内风险，优先用稳定版隔离定位。
+- Xcode 27 beta + RN 0.86 的组合未经官方验证（Expo SDK 57 官方支持 Xcode 26.4+），真机构建遇到工具链报错属预期内风险，优先用稳定版隔离定位。已观测：Expo CLI 对 beta `devicectl` 的 JSON 版本输出有告警（不影响模拟器流程）。
 - 真机系统为 beta，行为异常时先在模拟器（稳定 runtime）交叉验证。
+- 真机部署尚未配置代码签名（`expo run:ios --device` 报 "No code signing certificates"）：需在 Xcode 中登录 Apple ID 并为 target 选择开发团队后重试，属一次性人工配置。
