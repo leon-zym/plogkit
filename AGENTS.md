@@ -5,7 +5,7 @@ Guidance for AI coding agents working on PlogKit. Read this before making change
 ## Project Overview
 
 PlogKit is a lightweight, local-first mobile app for plog creators: add text,
-borders/backgrounds, stitch photos, and export with social-friendly presets.
+backgrounds, stitch photos, and export with social-friendly presets.
 It complements the system Photos app and deliberately excludes filters, beauty
 editing, AI generation, and cloud features.
 

@@ -4,7 +4,7 @@
 
 [简体中文](README.zh-Hans.md)
 
-PlogKit is a lightweight mobile app for plog creators. It does not try to replace the system Photos app or heavy photo editors. The system Photos app remains responsible for photo adjustment and color tuning; PlogKit focuses on the missing lightweight publishing steps: adding text, adding borders or backgrounds, stitching multiple photos, and exporting with social-platform-friendly compression presets.
+PlogKit is a lightweight mobile app for plog creators. It does not try to replace the system Photos app or heavy photo editors. The system Photos app remains responsible for photo adjustment and color tuning; PlogKit fulfills the essential needs of plog creation: adding text, backgrounds, stitching multiple photos, and exporting with presets optimized for multiple social platforms.
 
 ## Status
 
@@ -12,14 +12,14 @@ Pre-development. Product scope, architecture decisions, and acceptance specs are
 
 ## Product Positioning
 
-PlogKit is a system Photos app companion, not a full photo editor. It is a small, fast, local-first toolkit — no accounts, no watermarks, no network calls — that helps users finish plog posts after they have already selected and adjusted photos in the system Photos app.
+PlogKit is a system Photos app companion, not a full photo editor. It is a small, fast, local-first toolkit — no accounts, no network calls — that helps users complete the final step of plog creation after they have already selected and adjusted photos in the system Photos app.
 
 ## MVP Scope
 
 - Add text to images, with clean limited styles and long-text (CJK-first) layout support.
-- Add borders, margins, rounded corners, and background colors.
+- Background colors.
 - Stitch multiple images vertically or in grid layouts.
-- Export with data-driven compression presets for social publishing.
+- Export with presets optimized for multiple social platforms.
 - Undo and redo, auto-saved editing session, and continue editing after export.
 
 Deliberately out of scope: beauty/retouch, filters, AI editing, video, cloud sync, accounts, and template marketplaces. See `docs/product/` for the full boundary list.

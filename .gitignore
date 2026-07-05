@@ -44,3 +44,6 @@ pnpm-debug.*
 
 # typescript
 *.tsbuildinfo
+
+# temporary documentation
+TODO.md

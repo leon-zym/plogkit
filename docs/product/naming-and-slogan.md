@@ -29,7 +29,7 @@
 
 - A lightweight plog toolkit beyond your system Photos app.
 - A lightweight photo finishing toolkit for plog creators.
-- Text, borders, stitching, and export tools for plog posts.
+- Text, backgrounds, stitching, and export tools for plog posts.
 - Beyond Photos: lightweight tools for plog publishing.
 - Finish your plog posts after Photos.
 - A simple toolkit for photos, words, and plog publishing.
