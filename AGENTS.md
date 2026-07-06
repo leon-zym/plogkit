@@ -105,9 +105,11 @@ Keep this table in sync with `package.json` scripts.
 
 See `docs/guides/dev-environment.md` for the full picture. Key facts:
 
-- Xcode 27.0 beta is selected via `xcode-select`; Xcode 26.5 stable coexists at
+- Xcode 27.0 beta is selected via `xcode-select`; Xcode 26.6 stable coexists at
   `/Applications/Xcode.app`. Prefer stable (`DEVELOPER_DIR` override) for
-  simulator work; the physical iPhone (iOS 27 beta) requires the beta toolchain.
-- No Android SDK/JDK 17 locally yet: keep Android compiling (CI check), do not
-  attempt local Android runs.
-- Package manager is pnpm. Node ≥ 20.19.4 required (v26 installed).
+  simulator work. No physical device is currently connected; do not attempt
+  device deployment unless the maintainer explicitly restores that scope.
+- Android Studio, JDK 17, SDK, adb, API 36 Platform, NDK 27.1, CMake 3.30.5,
+  and the `plogkit-api35` AVD are installed. Run only one simulator at a time
+  and serialize native builds, rendering tests, and E2E to control host load.
+- Package manager is pnpm. Expo SDK 57 requires Node ≥ 22.13 (v26 installed).

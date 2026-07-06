@@ -30,6 +30,7 @@
 | [0015](0015-license-gpl3-cla.md)             | 许可证：GPL-3.0 + CLA，资产许可纪律                            | 已接受 |
 | [0016](0016-git-workflow.md)                 | Git 工作流：Conventional Commits + PR 门禁                     | 已接受 |
 | [0017](0017-share-extension-deferred.md)     | Share Extension 延后至 v1.1，预留外部图片入口                  | 已接受 |
+| [0018](0018-mvp-srgb-color-strategy.md)      | MVP 色彩策略：Skia 离屏导出统一为 sRGB                         | 已接受 |
 
 ## 决策台账
 

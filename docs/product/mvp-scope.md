@@ -70,6 +70,7 @@
 
 - 导出统一为 SDR，HDR（增益图）不保留，列 vNext 重评估。
 - Live Photo 导入取封面静帧，Live 属性不保留，列 vNext 重评估。
+- Display P3 源图经合成后统一导出为 sRGB；MVP 不承诺广色域保真（见 [ADR 0018](../adr/0018-mvp-srgb-color-strategy.md)）。
 
 产品措辞纪律：
 
