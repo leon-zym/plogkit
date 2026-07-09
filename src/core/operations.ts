@@ -2,6 +2,7 @@ import {
   isExactImageOrder,
   parseDocument,
   type CanvasRatio,
+  type ExportSettings,
   type PlogDocument,
   type Point,
   type StitchMode,
@@ -108,4 +109,11 @@ export function reorderImages(document: PlogDocument, order: readonly string[]):
     ...document,
     stitch: { ...document.stitch, order },
   });
+}
+
+export function setExportSettings(
+  document: PlogDocument,
+  exportSettings: ExportSettings,
+): PlogDocument {
+  return parseDocument({ ...document, exportSettings });
 }

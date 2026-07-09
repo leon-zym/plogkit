@@ -5,6 +5,7 @@ import {
   reorderImages,
   setBackgroundColor,
   setCanvasRatio,
+  setExportSettings,
   setStitchMode,
   setStitchSpacing,
   updateTextElement,
@@ -88,6 +89,22 @@ describe("immutable document operations", () => {
     expect(updated.canvas).toEqual({ ratio: "4:5", backgroundColor: "#112233" });
     expect(updated.stitch).toMatchObject({ mode: "grid", spacing: 16 });
     expect(initial).toEqual(createDocument(images));
+  });
+
+  it("updates export settings as one immutable document operation", () => {
+    const initial = createDocument(images);
+    const updated = setExportSettings(initial, {
+      presetId: "compact",
+      format: "png",
+      metadataPolicy: "strip",
+    });
+
+    expect(updated.exportSettings).toEqual({
+      presetId: "compact",
+      format: "png",
+      metadataPolicy: "strip",
+    });
+    expect(initial.exportSettings.presetId).toBe("original");
   });
 
   it("reorders images using an exact permutation", () => {

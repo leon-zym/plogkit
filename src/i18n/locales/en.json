@@ -1,6 +1,115 @@
 {
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "decrease": "Decrease",
+    "increase": "Increase",
+    "notAvailable": "Not available"
+  },
   "home": {
     "title": "PlogKit",
-    "tagline": "A lightweight plog toolkit beyond your system Photos app."
+    "tagline": "Photos, words, and layouts ready to post.",
+    "description": "Choose up to nine photos. Everything stays on this device.",
+    "choosePhotos": "Choose photos",
+    "resume": "Continue editing",
+    "resumeDescription": "Your current session is saved on this device.",
+    "importing": "Preparing photos…",
+    "importPartial": "Some photos could not be imported. The completed photos are ready.",
+    "importFailed": "We couldn't prepare those photos. Try choosing them again.",
+    "recoveryFailed": "The previous session was damaged. We kept a backup and opened a new session."
+  },
+  "settings": {
+    "title": "Settings",
+    "retainBasic": "Keep photo details by default",
+    "retainBasicDescription": "New editing sessions keep the capture date and device details by default. You can override this before export.",
+    "privacyNotice": "GPS location is always removed. Settings stay on this device."
+  },
+  "editor": {
+    "photoCount_one": "{{count}} photo",
+    "photoCount_other": "{{count}} photos",
+    "undo": "Undo",
+    "redo": "Redo",
+    "export": "Export",
+    "saving": "Saving",
+    "saved": "Saved",
+    "tools": {
+      "background": "Background",
+      "stitch": "Stitch",
+      "text": "Text"
+    }
+  },
+  "background": {
+    "title": "Background",
+    "color": "Color",
+    "ratio": "Output ratio",
+    "ratios": {
+      "original": "Original",
+      "1:1": "1:1",
+      "3:4": "3:4",
+      "4:5": "4:5",
+      "9:16": "9:16"
+    },
+    "colors": {
+      "warmWhite": "Warm white",
+      "white": "White",
+      "charcoal": "Charcoal",
+      "sand": "Sand",
+      "rose": "Rose",
+      "sage": "Sage"
+    }
+  },
+  "stitch": {
+    "title": "Stitch",
+    "layout": "Layout",
+    "vertical": "Vertical",
+    "grid": "Grid",
+    "spacing": "Spacing",
+    "order": "Photo order",
+    "moveEarlier": "Move photo earlier",
+    "moveLater": "Move photo later"
+  },
+  "text": {
+    "title": "Text",
+    "add": "Add text",
+    "edit": "Edit text",
+    "placeholder": "Write your plog note",
+    "fontSize": "Size",
+    "preset": "Style preset",
+    "presets": {
+      "body": "Body",
+      "headline": "Headline",
+      "caption": "Caption",
+      "custom": "Custom"
+    },
+    "lineHeight": "Line height",
+    "color": "Text color",
+    "alignment": "Alignment",
+    "alignLeft": "Align left",
+    "alignCenter": "Align center",
+    "alignRight": "Align right",
+    "background": "Text background",
+    "noBackground": "None"
+  },
+  "export": {
+    "title": "Export",
+    "preset": "Preset",
+    "presets": {
+      "original": "Original",
+      "social": "Social",
+      "compact": "Compact"
+    },
+    "format": "Format",
+    "privacy": "Photo details",
+    "stripMetadata": "Remove all photo details",
+    "retainBasic": "Keep date and device",
+    "retainUnavailablePng": "Keeping photo details is available for JPEG only.",
+    "sRGBNotice": "Exports are SDR/sRGB. GPS is always removed.",
+    "action": "Save to Photos",
+    "exporting": "Rendering export…",
+    "success": "Saved to Photos",
+    "failure": "We couldn't save the export. Your editing session is unchanged.",
+    "reduced": "Reduced to {{width}} × {{height}} to stay within export limits."
   }
 }
