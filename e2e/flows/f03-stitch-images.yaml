@@ -1,0 +1,21 @@
+appId: com.leonzym.plogkit
+name: Switch to grid and reorder imported photos
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: editor-tool-stitch
+- assertVisible: Stitch
+- tapOn:
+    id: stitch-mode-grid
+- scrollUntilVisible:
+    element:
+      text: Move photo later 1
+    direction: DOWN
+- swipe:
+    start: 8%, 79%
+    end: 60%, 79%
+    duration: 500
+- assertVisible: "40"
+- tapOn: Move photo later 1
+- assertVisible:
+    id: editor-undo

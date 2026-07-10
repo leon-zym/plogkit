@@ -13,7 +13,9 @@
     "lint": "expo lint",
     "check": "pnpm typecheck && pnpm lint",
     "test": "jest",
-    "verify": "pnpm check && pnpm test"
+    "test:render": "jest --config jest.render.config.js --runInBand",
+    "e2e": "maestro test e2e/flows/",
+    "verify": "pnpm check && pnpm test && pnpm test:render"
   },
   "dependencies": {
     "@shopify/react-native-skia": "2.6.2",

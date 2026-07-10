@@ -1,0 +1,13 @@
+appId: com.leonzym.plogkit
+name: Change background color and output ratio
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: background-color-e8d8bd
+- tapOn:
+    id: canvas-ratio-4:5
+- assertVisible: 4:5
+- tapOn:
+    id: editor-undo
+- tapOn:
+    id: editor-redo

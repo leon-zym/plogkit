@@ -1,0 +1,23 @@
+appId: com.leonzym.plogkit
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: choose-photos
+- tapOn:
+    id: choose-photos
+- extendedWaitUntil:
+    visible: Done
+    timeout: 10000
+- tapOn:
+    id: PXGGridLayout-Info
+    index: 0
+- tapOn:
+    id: PXGGridLayout-Info
+    index: 1
+- tapOn: Done
+- extendedWaitUntil:
+    visible:
+      id: editor-screen
+    timeout: 30000
+- assertVisible: 2 photos

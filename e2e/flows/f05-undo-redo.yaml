@@ -1,0 +1,12 @@
+appId: com.leonzym.plogkit
+name: Undo and redo a committed document change
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: background-color-242321
+- tapOn:
+    id: editor-undo
+- tapOn:
+    id: editor-redo
+- assertVisible:
+    id: editor-screen
