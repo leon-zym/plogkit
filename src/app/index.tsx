@@ -69,7 +69,7 @@ export default function HomeScreen() {
             style={({ pressed }) => [styles.settingsButton, pressed && styles.pressed]}
             testID="open-settings"
           >
-            <Text style={styles.settingsSymbol}>⚙</Text>
+            <Text style={styles.settingsSymbol}>•••</Text>
           </Pressable>
         </View>
         <Text style={styles.title}>{t("home.title")}</Text>
@@ -163,8 +163,9 @@ const styles = StyleSheet.create({
   },
   settingsSymbol: {
     color: colors.inkMuted,
-    fontSize: 21,
+    fontSize: 15,
     lineHeight: 24,
+    letterSpacing: 1.5,
   },
   title: {
     ...typography.display,

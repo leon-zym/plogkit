@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { CANVAS_RATIOS, type CanvasRatio } from "@/core/document";
 import { ColorSwatch } from "@/ui/ColorSwatch";
 import { OptionRow } from "@/ui/OptionRow";
-import { colors, spacing, typography } from "@/ui/theme";
+import { spacing } from "@/ui/theme";
 
 import { PanelShell, panelStyles } from "./PanelShell";
 
@@ -16,6 +16,14 @@ const BACKGROUND_COLORS = [
   { value: "#E7C8C4", labelKey: "background.colors.rose" },
   { value: "#C9D3C2", labelKey: "background.colors.sage" },
 ] as const;
+
+const RATIO_LABEL_KEYS: Readonly<Record<CanvasRatio, string>> = {
+  original: "background.ratios.original",
+  "1:1": "background.ratios.square",
+  "3:4": "background.ratios.portrait3x4",
+  "4:5": "background.ratios.portrait4x5",
+  "9:16": "background.ratios.story",
+};
 
 export interface BackgroundPanelProps {
   readonly ratio: CanvasRatio;
@@ -33,8 +41,8 @@ export function BackgroundPanel({
   const { t } = useTranslation();
   const ratioOptions = CANVAS_RATIOS.map((value) => ({
     value,
-    label: t(`background.ratios.${value}`),
-    accessibilityLabel: t(`background.ratios.${value}`),
+    label: t(RATIO_LABEL_KEYS[value]),
+    accessibilityLabel: t(RATIO_LABEL_KEYS[value]),
   }));
 
   return (
@@ -73,9 +81,5 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.s2,
     minHeight: 44,
-  },
-  hiddenReference: {
-    ...typography.caption,
-    color: colors.inkMuted,
   },
 });

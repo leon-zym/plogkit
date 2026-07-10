@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  InputAccessoryView,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useTranslation } from "react-i18next";
 
 import type { TextAlignment, TextElement } from "@/core/document";
@@ -23,6 +33,8 @@ const DEFAULT_DRAFT: TextDraft = {
   lineHeight: 1.35,
   backgroundColor: null,
 };
+
+const TEXT_INPUT_ACCESSORY_ID = "text-input-accessory";
 
 const TEXT_COLORS = ["#FFFFFF", "#1D1B18", "#D95D3F", "#E8D8BD", "#347A55"] as const;
 
@@ -65,9 +77,13 @@ function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: Tex
     label: string;
     accessibilityLabel: string;
   }[] = [
-    { value: "left", label: "≡", accessibilityLabel: t("text.alignLeft") },
-    { value: "center", label: "≡", accessibilityLabel: t("text.alignCenter") },
-    { value: "right", label: "≡", accessibilityLabel: t("text.alignRight") },
+    { value: "left", label: t("text.alignLeft"), accessibilityLabel: t("text.alignLeft") },
+    {
+      value: "center",
+      label: t("text.alignCenter"),
+      accessibilityLabel: t("text.alignCenter"),
+    },
+    { value: "right", label: t("text.alignRight"), accessibilityLabel: t("text.alignRight") },
   ];
   const backgroundOptions = [
     { value: "none", label: t("text.noBackground"), accessibilityLabel: t("text.noBackground") },
@@ -124,11 +140,19 @@ function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: Tex
           },
         ]
       : presetOptions;
+  const submit = () => {
+    Keyboard.dismiss();
+    onSubmit({ ...draft, content: draft.content.trim() });
+  };
 
   return (
     <PanelShell title={selected ? t("text.edit") : t("text.add")}>
       {elements.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView
+          horizontal
+          keyboardShouldPersistTaps="always"
+          showsHorizontalScrollIndicator={false}
+        >
           <View style={styles.textSelectionRow}>
             <Pressable
               accessibilityLabel={t("text.add")}
@@ -162,6 +186,7 @@ function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: Tex
       ) : null}
       <TextInput
         accessibilityLabel={t("text.placeholder")}
+        inputAccessoryViewID={Platform.OS === "ios" ? TEXT_INPUT_ACCESSORY_ID : undefined}
         maxLength={2000}
         multiline
         onChangeText={(content) => setDraft((current) => ({ ...current, content }))}
@@ -172,6 +197,24 @@ function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: Tex
         textAlignVertical="top"
         value={draft.content}
       />
+      {Platform.OS === "ios" ? (
+        <InputAccessoryView nativeID={TEXT_INPUT_ACCESSORY_ID}>
+          <View style={styles.inputAccessory}>
+            <Pressable
+              accessibilityLabel={t("common.done")}
+              accessibilityRole="button"
+              onPress={() => Keyboard.dismiss()}
+              style={({ pressed }) => [
+                styles.inputAccessoryButton,
+                pressed && styles.inputAccessoryButtonPressed,
+              ]}
+              testID="dismiss-text-keyboard"
+            >
+              <Text style={styles.inputAccessoryLabel}>{t("common.done")}</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
       <View style={panelStyles.section}>
         <Text style={panelStyles.sectionLabel}>{t("text.preset")}</Text>
         <OptionRow
@@ -290,7 +333,7 @@ function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: Tex
           accessibilityLabel={t("common.confirm")}
           disabled={draft.content.trim().length === 0 && selected === null}
           label={t("common.confirm")}
-          onPress={() => onSubmit({ ...draft, content: draft.content.trim() })}
+          onPress={submit}
           testID="commit-text"
         />
       </View>
@@ -329,6 +372,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     color: colors.ink,
     ...typography.body,
+  },
+  inputAccessory: {
+    alignItems: "flex-end",
+    paddingHorizontal: spacing.s3,
+    paddingVertical: spacing.s2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  inputAccessoryButton: {
+    minHeight: 44,
+    minWidth: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.s3,
+    borderRadius: radii.r12,
+    backgroundColor: colors.accentSoft,
+  },
+  inputAccessoryButtonPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.97 }],
+  },
+  inputAccessoryLabel: {
+    ...typography.label,
+    color: colors.ink,
   },
   stepper: {
     flexDirection: "row",

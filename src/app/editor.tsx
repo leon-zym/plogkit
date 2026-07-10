@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -93,6 +94,12 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   const [spacingPreview, setSpacingPreview] = useState<number | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ kind: "idle" });
   const [importErrorCount] = useState(() => editorRuntime.takeImportErrorCount());
+  const [textIdPrefix] = useState(() => Date.now().toString(36));
+  const canvasScrollRef = useRef<ScrollView>(null);
+  const canvasScrollY = useRef(0);
+  const canvasScrollYBeforeKeyboard = useRef<number | null>(null);
+  const panelScrollRef = useRef<ScrollView>(null);
+  const nextTextSequence = useRef(0);
 
   const canvasWidth = Math.max(0, stageWidth - spacing.s8);
   const previewDocument = useMemo(
@@ -103,6 +110,30 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
     document.textElements.find((element) => element.id === selectedTextId) ?? null;
   const activeTool: EditorTool =
     activeStoreTool === "stitch" || activeStoreTool === "text" ? activeStoreTool : "background";
+
+  useEffect(() => {
+    panelScrollRef.current?.scrollTo({ animated: false, y: 0 });
+  }, [activeStoreTool, selectedTextId]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      canvasScrollYBeforeKeyboard.current ??= canvasScrollY.current;
+    });
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      const previousOffset = canvasScrollYBeforeKeyboard.current;
+      canvasScrollYBeforeKeyboard.current = null;
+      if (previousOffset !== null) {
+        requestAnimationFrame(() => {
+          canvasScrollRef.current?.scrollTo({ animated: false, y: previousOffset });
+        });
+      }
+    });
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const onStageLayout = (event: LayoutChangeEvent) => {
     setStageWidth(event.nativeEvent.layout.width);
@@ -120,7 +151,8 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
       if (draft.content.length === 0) setSelectedTextId(null);
       return;
     }
-    const id = `text-${Date.now()}`;
+    nextTextSequence.current += 1;
+    const id = `text-${textIdPrefix}-${nextTextSequence.current}`;
     const text: TextElement = {
       id,
       ...draft,
@@ -130,6 +162,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
     };
     commit(addTextElement(document, text));
     setSelectedTextId(id);
+    canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
   };
 
   const deleteSelectedText = () => {
@@ -210,7 +243,10 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
           elements={document.textElements}
           onDelete={selectedText === null ? null : deleteSelectedText}
           onSelect={selectText}
-          onSubmit={submitText}
+          onSubmit={(draft) => {
+            submitText(draft);
+            panelScrollRef.current?.scrollTo({ animated: true, y: 0 });
+          }}
           selected={selectedText}
         />
       );
@@ -229,56 +265,76 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.root} testID="editor-screen">
-      <EditorHeader
-        canRedo={canRedo}
-        canUndo={canUndo}
-        imageCount={document.sourceImages.length}
-        onBack={() => void goBack()}
-        onExport={() => setActiveTool("export")}
-        onRedo={redo}
-        onUndo={undo}
-      />
-      {importErrorCount > 0 ? (
-        <Text accessibilityLiveRegion="polite" style={styles.importWarning} testID="import-warning">
-          {t("home.importPartial")}
-        </Text>
-      ) : null}
-      <View onLayout={onStageLayout} style={styles.stage}>
-        <ScrollView
-          contentContainerStyle={styles.canvasScrollContent}
-          maximumZoomScale={3}
-          minimumZoomScale={1}
-          showsVerticalScrollIndicator={false}
-        >
-          {canvasWidth > 0 ? (
-            <View style={styles.canvasWrapper}>
-              <DocumentCanvas
-                accessibilityLabel={t("editor.photoCount", {
-                  count: document.sourceImages.length,
-                })}
-                document={previewDocument}
-                width={canvasWidth}
-              />
-              <TextGestureOverlay
-                accessibilityLabel={(index) => `${t("text.edit")} ${index + 1}`}
-                canvasWidth={canvasWidth}
-                onCommitPosition={moveText}
-                onSelect={selectText}
-                selectedTextId={selectedTextId}
-                texts={document.textElements}
-              />
-            </View>
-          ) : null}
-        </ScrollView>
-      </View>
-      <EditorToolbar activeTool={activeTool} onToolChange={(tool) => setActiveTool(tool)} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
+        style={styles.keyboardLayout}
       >
+        <EditorHeader
+          canRedo={canRedo}
+          canUndo={canUndo}
+          imageCount={document.sourceImages.length}
+          onBack={() => void goBack()}
+          onExport={() => setActiveTool("export")}
+          onRedo={redo}
+          onUndo={undo}
+        />
+        {importErrorCount > 0 ? (
+          <Text
+            accessibilityLiveRegion="polite"
+            style={styles.importWarning}
+            testID="import-warning"
+          >
+            {t("home.importPartial")}
+          </Text>
+        ) : null}
+        <View onLayout={onStageLayout} style={styles.stage}>
+          <ScrollView
+            contentContainerStyle={styles.canvasScrollContent}
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+            onScroll={(event) => {
+              canvasScrollY.current = event.nativeEvent.contentOffset.y;
+            }}
+            ref={canvasScrollRef}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+          >
+            {canvasWidth > 0 ? (
+              <View style={styles.canvasWrapper}>
+                <DocumentCanvas
+                  accessibilityLabel={t("editor.photoCount", {
+                    count: document.sourceImages.length,
+                  })}
+                  document={previewDocument}
+                  width={canvasWidth}
+                />
+                <TextGestureOverlay
+                  accessibilityLabel={(index) => `${t("text.edit")} ${index + 1}`}
+                  canvasWidth={canvasWidth}
+                  onCommitPosition={moveText}
+                  onSelect={selectText}
+                  selectedTextId={selectedTextId}
+                  texts={document.textElements}
+                />
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
+        <EditorToolbar
+          activeTool={activeTool}
+          onToolChange={(tool) => {
+            setActiveTool(tool);
+            if (tool === "text" && selectedTextId === null) {
+              canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
+            }
+          }}
+        />
         <ScrollView
           contentContainerStyle={styles.panelScrollContent}
-          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="always"
+          ref={panelScrollRef}
           style={styles.panelScroll}
         >
           {renderPanel()}
@@ -292,6 +348,9 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.surface,
+  },
+  keyboardLayout: {
+    flex: 1,
   },
   loading: {
     flex: 1,
@@ -325,6 +384,7 @@ const styles = StyleSheet.create({
     boxShadow: "0 8px 24px rgba(0, 0, 0, 0.22)",
   },
   panelScroll: {
+    flexShrink: 1,
     maxHeight: 344,
     backgroundColor: colors.surface,
   },

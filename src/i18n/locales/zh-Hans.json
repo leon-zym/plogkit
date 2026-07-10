@@ -3,6 +3,7 @@
     "back": "返回",
     "cancel": "取消",
     "confirm": "确认",
+    "done": "完成",
     "delete": "删除",
     "decrease": "减少",
     "increase": "增加",
@@ -45,10 +46,10 @@
     "ratio": "输出比例",
     "ratios": {
       "original": "原始",
-      "1:1": "1:1",
-      "3:4": "3:4",
-      "4:5": "4:5",
-      "9:16": "9:16"
+      "square": "1:1",
+      "portrait3x4": "3:4",
+      "portrait4x5": "4:5",
+      "story": "9:16"
     },
     "colors": {
       "warmWhite": "暖白",

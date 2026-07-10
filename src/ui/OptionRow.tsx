@@ -25,6 +25,7 @@ export function OptionRow<T extends string>({
     <ScrollView
       contentContainerStyle={styles.content}
       horizontal
+      keyboardShouldPersistTaps="always"
       showsHorizontalScrollIndicator={false}
     >
       {options.map((option) => {
