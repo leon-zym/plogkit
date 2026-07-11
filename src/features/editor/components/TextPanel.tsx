@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   InputAccessoryView,
   Keyboard,
@@ -51,16 +51,25 @@ export interface TextPanelProps {
   readonly elements: readonly TextElement[];
   readonly selected: TextElement | null;
   readonly onSelect: (id: string | null) => void;
+  readonly onPreview: (draft: TextDraft | null) => void;
   readonly onSubmit: (draft: TextDraft) => void;
   readonly onDelete: (() => void) | null;
 }
 
-export function TextPanel({ elements, selected, onSelect, onSubmit, onDelete }: TextPanelProps) {
+export function TextPanel({
+  elements,
+  selected,
+  onSelect,
+  onPreview,
+  onSubmit,
+  onDelete,
+}: TextPanelProps) {
   return (
     <TextPanelForm
       elements={elements}
       key={selected?.id ?? "new-text"}
       onDelete={onDelete}
+      onPreview={onPreview}
       onSelect={onSelect}
       onSubmit={onSubmit}
       selected={selected}
@@ -68,9 +77,27 @@ export function TextPanel({ elements, selected, onSelect, onSubmit, onDelete }: 
   );
 }
 
-function TextPanelForm({ elements, selected, onSelect, onSubmit, onDelete }: TextPanelProps) {
+function TextPanelForm({
+  elements,
+  selected,
+  onSelect,
+  onPreview,
+  onSubmit,
+  onDelete,
+}: TextPanelProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<TextDraft>(selected ?? DEFAULT_DRAFT);
+
+  useEffect(() => {
+    onPreview(selected === null ? null : draft);
+  }, [draft, onPreview, selected]);
+
+  useEffect(
+    () => () => {
+      onPreview(null);
+    },
+    [onPreview],
+  );
 
   const alignmentOptions: readonly {
     value: TextAlignment;

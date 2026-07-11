@@ -92,6 +92,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
 
   const [stageWidth, setStageWidth] = useState(0);
   const [spacingPreview, setSpacingPreview] = useState<number | null>(null);
+  const [textPreview, setTextPreview] = useState<TextDraft | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ kind: "idle" });
   const [importErrorCount] = useState(() => editorRuntime.takeImportErrorCount());
   const [textIdPrefix] = useState(() => Date.now().toString(36));
@@ -102,10 +103,15 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   const nextTextSequence = useRef(0);
 
   const canvasWidth = Math.max(0, stageWidth - spacing.s8);
-  const previewDocument = useMemo(
-    () => (spacingPreview === null ? document : setStitchSpacing(document, spacingPreview)),
-    [document, spacingPreview],
-  );
+  const previewDocument = useMemo(() => {
+    const spacingDocument =
+      spacingPreview === null ? document : setStitchSpacing(document, spacingPreview);
+    if (textPreview === null || selectedTextId === null) return spacingDocument;
+    if (!spacingDocument.textElements.some(({ id }) => id === selectedTextId)) {
+      return spacingDocument;
+    }
+    return updateTextElement(spacingDocument, selectedTextId, textPreview);
+  }, [document, selectedTextId, spacingPreview, textPreview]);
   const selectedText =
     document.textElements.find((element) => element.id === selectedTextId) ?? null;
   const activeTool: EditorTool =
@@ -140,6 +146,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   };
 
   const selectText = (id: string | null) => {
+    setTextPreview(null);
     setSelectedTextId(id);
     setActiveTool("text");
   };
@@ -148,6 +155,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
     if (selectedText !== null) {
       const next = updateTextElement(document, selectedText.id, draft);
       commit(next);
+      setTextPreview(null);
       if (draft.content.length === 0) setSelectedTextId(null);
       return;
     }
@@ -161,6 +169,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
       fontId: "system-sans",
     };
     commit(addTextElement(document, text));
+    setTextPreview(null);
     setSelectedTextId(id);
     canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
   };
@@ -168,6 +177,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   const deleteSelectedText = () => {
     if (selectedText === null) return;
     commit(removeTextElement(document, selectedText.id));
+    setTextPreview(null);
     setSelectedTextId(null);
   };
 
@@ -242,6 +252,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
         <TextPanel
           elements={document.textElements}
           onDelete={selectedText === null ? null : deleteSelectedText}
+          onPreview={setTextPreview}
           onSelect={selectText}
           onSubmit={(draft) => {
             submitText(draft);
@@ -276,8 +287,14 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
           imageCount={document.sourceImages.length}
           onBack={() => void goBack()}
           onExport={() => setActiveTool("export")}
-          onRedo={redo}
-          onUndo={undo}
+          onRedo={() => {
+            setTextPreview(null);
+            redo();
+          }}
+          onUndo={() => {
+            setTextPreview(null);
+            undo();
+          }}
         />
         {importErrorCount > 0 ? (
           <Text
@@ -315,7 +332,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
                   onCommitPosition={moveText}
                   onSelect={selectText}
                   selectedTextId={selectedTextId}
-                  texts={document.textElements}
+                  texts={previewDocument.textElements}
                 />
               </View>
             ) : null}
@@ -324,6 +341,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
         <EditorToolbar
           activeTool={activeTool}
           onToolChange={(tool) => {
+            setTextPreview(null);
             setActiveTool(tool);
             if (tool === "text" && selectedTextId === null) {
               canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
