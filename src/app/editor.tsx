@@ -32,7 +32,11 @@ import { EditorToolbar, type EditorTool } from "@/features/editor/components/Edi
 import { ExportPanel, type ExportStatus } from "@/features/editor/components/ExportPanel";
 import { StitchPanel } from "@/features/editor/components/StitchPanel";
 import { TextGestureOverlay } from "@/features/editor/components/TextGestureOverlay";
-import { TextPanel, type TextDraft } from "@/features/editor/components/TextPanel";
+import {
+  TextPanel,
+  type TextDraft,
+  type TextStyleDraft,
+} from "@/features/editor/components/TextPanel";
 import { editorRuntime } from "@/features/editor/runtime";
 import {
   useEditorDocumentStore,
@@ -49,6 +53,27 @@ function LoadingEditor() {
       <ActivityIndicator color={colors.accent} />
       <Text style={styles.loadingText}>{t("editor.saving")}</Text>
     </SafeAreaView>
+  );
+}
+
+function textDraftMatches(element: TextElement, draft: TextDraft): boolean {
+  return (
+    element.content === draft.content &&
+    element.fontSize === draft.fontSize &&
+    element.color === draft.color &&
+    element.alignment === draft.alignment &&
+    element.lineHeight === draft.lineHeight &&
+    element.backgroundColor === draft.backgroundColor
+  );
+}
+
+function textStyleMatches(element: TextElement, style: TextStyleDraft): boolean {
+  return (
+    element.fontSize === style.fontSize &&
+    element.color === style.color &&
+    element.alignment === style.alignment &&
+    element.lineHeight === style.lineHeight &&
+    element.backgroundColor === style.backgroundColor
   );
 }
 
@@ -154,7 +179,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   const submitText = (draft: TextDraft) => {
     if (selectedText !== null) {
       const next = updateTextElement(document, selectedText.id, draft);
-      commit(next);
+      if (!textDraftMatches(selectedText, draft)) commit(next);
       setTextPreview(null);
       if (draft.content.length === 0) setSelectedTextId(null);
       return;
@@ -172,6 +197,11 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
     setTextPreview(null);
     setSelectedTextId(id);
     canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
+  };
+
+  const commitSelectedTextStyle = (style: TextStyleDraft) => {
+    if (selectedText === null || textStyleMatches(selectedText, style)) return;
+    commit(updateTextElement(document, selectedText.id, style));
   };
 
   const deleteSelectedText = () => {
@@ -254,6 +284,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
           onDelete={selectedText === null ? null : deleteSelectedText}
           onPreview={setTextPreview}
           onSelect={selectText}
+          onStyleCommit={commitSelectedTextStyle}
           onSubmit={(draft) => {
             submitText(draft);
             panelScrollRef.current?.scrollTo({ animated: true, y: 0 });

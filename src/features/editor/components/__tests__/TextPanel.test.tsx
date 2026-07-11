@@ -14,6 +14,7 @@ describe("TextPanel", () => {
         onDelete={null}
         onPreview={jest.fn()}
         onSelect={jest.fn()}
+        onStyleCommit={jest.fn()}
         onSubmit={jest.fn()}
         selected={null}
       />,
@@ -26,6 +27,7 @@ describe("TextPanel", () => {
 
   it("publishes style changes for immediate canvas preview", async () => {
     const onPreview = jest.fn();
+    const onStyleCommit = jest.fn();
     const selected: TextElement = {
       id: "text-1",
       content: "周末的海边日记",
@@ -44,6 +46,7 @@ describe("TextPanel", () => {
         onDelete={jest.fn()}
         onPreview={onPreview}
         onSelect={jest.fn()}
+        onStyleCommit={onStyleCommit}
         onSubmit={jest.fn()}
         selected={selected}
       />,
@@ -56,5 +59,9 @@ describe("TextPanel", () => {
         expect.objectContaining({ fontSize: 64, lineHeight: 1.1 }),
       );
     });
+    expect(onStyleCommit).toHaveBeenCalledTimes(1);
+    expect(onStyleCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ fontSize: 64, lineHeight: 1.1 }),
+    );
   });
 });

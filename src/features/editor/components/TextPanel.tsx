@@ -25,6 +25,8 @@ export type TextDraft = Pick<
   "content" | "fontSize" | "color" | "alignment" | "lineHeight" | "backgroundColor"
 >;
 
+export type TextStyleDraft = Omit<TextDraft, "content">;
+
 const DEFAULT_DRAFT: TextDraft = {
   content: "",
   fontSize: 40,
@@ -52,8 +54,19 @@ export interface TextPanelProps {
   readonly selected: TextElement | null;
   readonly onSelect: (id: string | null) => void;
   readonly onPreview: (draft: TextDraft | null) => void;
+  readonly onStyleCommit: (style: TextStyleDraft) => void;
   readonly onSubmit: (draft: TextDraft) => void;
   readonly onDelete: (() => void) | null;
+}
+
+function toTextStyleDraft(draft: TextDraft): TextStyleDraft {
+  return {
+    fontSize: draft.fontSize,
+    color: draft.color,
+    alignment: draft.alignment,
+    lineHeight: draft.lineHeight,
+    backgroundColor: draft.backgroundColor,
+  };
 }
 
 export function TextPanel({
@@ -61,6 +74,7 @@ export function TextPanel({
   selected,
   onSelect,
   onPreview,
+  onStyleCommit,
   onSubmit,
   onDelete,
 }: TextPanelProps) {
@@ -71,6 +85,7 @@ export function TextPanel({
       onDelete={onDelete}
       onPreview={onPreview}
       onSelect={onSelect}
+      onStyleCommit={onStyleCommit}
       onSubmit={onSubmit}
       selected={selected}
     />
@@ -82,6 +97,7 @@ function TextPanelForm({
   selected,
   onSelect,
   onPreview,
+  onStyleCommit,
   onSubmit,
   onDelete,
 }: TextPanelProps) {
@@ -141,17 +157,23 @@ function TextPanelForm({
         ? "dark"
         : "light";
 
+  const updateStyle = (next: TextDraft) => {
+    setDraft(next);
+    if (selected !== null) {
+      onStyleCommit(toTextStyleDraft(next));
+    }
+  };
   const adjustFontSize = (delta: number) => {
-    setDraft((current) => ({
-      ...current,
-      fontSize: Math.min(96, Math.max(16, current.fontSize + delta)),
-    }));
+    updateStyle({
+      ...draft,
+      fontSize: Math.min(96, Math.max(16, draft.fontSize + delta)),
+    });
   };
   const adjustLineHeight = (delta: number) => {
-    setDraft((current) => ({
-      ...current,
-      lineHeight: Math.round(Math.min(2, Math.max(0.9, current.lineHeight + delta)) * 100) / 100,
-    }));
+    updateStyle({
+      ...draft,
+      lineHeight: Math.round(Math.min(2, Math.max(0.9, draft.lineHeight + delta)) * 100) / 100,
+    });
   };
   const selectedPreset = Object.entries(TEXT_PRESETS).find(
     ([, preset]) => preset.fontSize === draft.fontSize && preset.lineHeight === draft.lineHeight,
@@ -247,7 +269,7 @@ function TextPanelForm({
         <OptionRow
           onChange={(presetId) => {
             if (presetId !== "custom") {
-              setDraft((current) => ({ ...current, ...TEXT_PRESETS[presetId] }));
+              updateStyle({ ...draft, ...TEXT_PRESETS[presetId] });
             }
           }}
           options={displayedPresetOptions}
@@ -315,7 +337,7 @@ function TextPanelForm({
               accessibilityLabel={`${t("text.color")} ${color}`}
               color={color}
               key={color}
-              onPress={() => setDraft((current) => ({ ...current, color }))}
+              onPress={() => updateStyle({ ...draft, color })}
               selected={draft.color === color}
               testID={`text-color-${color.slice(1).toLowerCase()}`}
             />
@@ -325,7 +347,7 @@ function TextPanelForm({
       <View style={panelStyles.section}>
         <Text style={panelStyles.sectionLabel}>{t("text.alignment")}</Text>
         <OptionRow
-          onChange={(alignment) => setDraft((current) => ({ ...current, alignment }))}
+          onChange={(alignment) => updateStyle({ ...draft, alignment })}
           options={alignmentOptions}
           testIDPrefix="text-alignment"
           value={draft.alignment}
@@ -335,11 +357,11 @@ function TextPanelForm({
         <Text style={panelStyles.sectionLabel}>{t("text.background")}</Text>
         <OptionRow
           onChange={(value) =>
-            setDraft((current) => ({
-              ...current,
+            updateStyle({
+              ...draft,
               backgroundColor:
                 value === "none" ? null : value === "dark" ? colors.stage : colors.canvasWarm,
-            }))
+            })
           }
           options={backgroundOptions}
           testIDPrefix="text-background"
