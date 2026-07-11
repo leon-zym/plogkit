@@ -12,9 +12,9 @@ import {
 import React, { useEffect, useMemo, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 
-import type { PlogDocument } from "../core/document";
-import { documentToRenderScene, type SceneImage, type SceneText } from "./scene";
-import { makeSceneParagraph } from "./skiaDraw";
+import type { PlogDocument } from "@/core/document";
+import { documentToRenderScene, type SceneImage, type SceneText } from "@/render/scene";
+import { makeSceneParagraph } from "@/render/skiaDraw";
 
 interface ImageLoadState {
   readonly uri: string;

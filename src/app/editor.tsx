@@ -42,7 +42,7 @@ import {
   useEditorDocumentStore,
   type EditorDocumentStore,
 } from "@/features/editor/state/documentStore";
-import { DocumentCanvas } from "@/render/DocumentCanvas";
+import { DocumentCanvas } from "@/features/editor/components/DocumentCanvas";
 import { exportDocument } from "@/services/export";
 import { colors, spacing, typography } from "@/ui/theme";
 
