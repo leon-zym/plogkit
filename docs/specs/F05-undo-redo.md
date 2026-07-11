@@ -1,6 +1,6 @@
 # F05 撤销与重做
 
-- 状态：已确认
+- 状态：已实现
 - 关联：[ADR 0004](../adr/0004-state-management-undo.md)
 
 ## 概述

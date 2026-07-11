@@ -1,6 +1,6 @@
 # F04 导出与压缩预设
 
-- 状态：已确认（平台参数待定义）
+- 状态：已实现（平台参数待定义）
 - 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)
 
 ## 概述
