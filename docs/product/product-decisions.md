@@ -1,16 +1,8 @@
 # 产品决策
 
-## 应用名称
+## 应用名称与 Slogan
 
-产品名称为 **PlogKit**。
-
-## 当前 Slogan
-
-工作版 slogan：
-
-> A lightweight plog toolkit beyond your system Photos app.
-
-当前可用，上线前可能继续打磨（英文表述待母语级润色）。
+见 [命名与 Slogan](naming-and-slogan.md)。
 
 ## 定位
 
@@ -67,8 +59,3 @@ PlogKit 更接近**照片整理/收尾工具箱**，而非传统修图应用。
 - 照片收尾工具箱。
 - plog 发布助手。
 - 轻量图片整理工具。
-
-## 入口规划
-
-- MVP 入口：应用内从系统相册选图。
-- v1.1 规划：Share Extension（相册分享菜单直达 PlogKit），架构已预留外部图片入口，见 [ADR 0017](../adr/0017-share-extension-deferred.md)。

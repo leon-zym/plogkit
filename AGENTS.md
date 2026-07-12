@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working on PlogKit. Read this before making changes.
+Guidance for AI coding agents working on PlogKit.
 
 ## Project Overview
 
@@ -39,15 +39,13 @@ editing, AI generation, and cloud features.
 
 ## Commands
 
-Keep this table in sync with `package.json` scripts.
-
 - Install: `pnpm install`
 - Dev (iOS simulator): `pnpm ios`
 - Type check + lint: `pnpm check`
 - Unit/component tests: `pnpm test`
 - Rendering goldens: `pnpm test:render` (update with `-u` only after inspecting diffs)
 - E2E (booted simulator): `pnpm e2e`
-- Full verification before finishing any task: `pnpm verify`
+- Full verification: `pnpm verify`
 
 ## Workflow
 
@@ -62,9 +60,7 @@ Keep this table in sync with `package.json` scripts.
 ## Code Style
 
 - TypeScript strict. Never use `any`; prefer precise types and discriminated unions.
-- Functional components + hooks. No class components.
 - No premature abstraction, no defensive/compat code, no feature flags.
-  Do the simplest thing that satisfies the spec.
 - Comments: only for non-obvious intent or constraints; never narrate the code.
 - Every interactive element must have a `testID` and a sensible
   `accessibilityLabel` (required for Maestro and real accessibility).
@@ -101,15 +97,6 @@ Keep this table in sync with `package.json` scripts.
   preview); respect per-preset caps (≤ 64MP total, ≤ 16384px long edge);
   strip EXIF/GPS by default; SDR output only in MVP (ADR 0007–0009).
 
-## Environment Notes (primary dev machine)
+## Environment Notes
 
-See `docs/guides/dev-environment.md` for the full picture. Key facts:
-
-- Xcode 27.0 beta is selected via `xcode-select`; Xcode 26.6 stable coexists at
-  `/Applications/Xcode.app`. Prefer stable (`DEVELOPER_DIR` override) for
-  simulator work. No physical device is currently connected; do not attempt
-  device deployment unless the maintainer explicitly restores that scope.
-- Android Studio, JDK 17, SDK, adb, API 36 Platform, NDK 27.1, CMake 3.30.5,
-  and the `plogkit-api35` AVD are installed. Run only one simulator at a time
-  and serialize native builds, rendering tests, and E2E to control host load.
-- Package manager is pnpm. Expo SDK 57 requires Node ≥ 22.13 (v26 installed).
+See `docs/guides/dev-environment.md` for setup requirements and verified configurations.

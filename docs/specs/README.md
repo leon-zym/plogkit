@@ -1,6 +1,6 @@
 # 功能需求 Specs
 
-本目录以 BDD 风格固化各功能的需求边界与验收场景，是 Maestro E2E flow、组件测试命名与 Agent 开发验收的共同蓝本（见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0013](../adr/0013-doc-system.md)）。
+本目录以 BDD 风格固化各功能的需求边界与验收场景，是 Maestro E2E flow、组件测试命名与自动化验收的共同蓝本（见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0013](../adr/0013-doc-system.md)）。
 
 ## 规范
 
