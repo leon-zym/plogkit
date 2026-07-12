@@ -60,7 +60,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.safeArea} testID="home-screen">
       <View style={styles.header}>
         <View style={styles.eyebrowRow}>
-          <Text style={styles.eyebrow}>PLOG / LOCAL</Text>
+          <Text style={styles.eyebrow}>{t("home.eyebrow")}</Text>
           <Pressable
             accessibilityLabel={t("settings.title")}
             accessibilityRole="button"

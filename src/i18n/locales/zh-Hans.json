@@ -10,6 +10,7 @@
     "notAvailable": "不可用"
   },
   "home": {
+    "eyebrow": "PLOG / 本地",
     "title": "PlogKit",
     "tagline": "把照片、文字与排版整理好，再发布。",
     "description": "一次选择最多 9 张照片，所有内容只保存在本机。",
