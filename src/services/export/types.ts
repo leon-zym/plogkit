@@ -14,11 +14,7 @@ export interface ExportRenderStage {
 }
 
 export interface ExportEncodeStage {
-  encode(
-    pixels: RenderedPixels,
-    plan: ExportPlan,
-    metadata?: BasicExifMetadata,
-  ): Uint8Array;
+  encode(pixels: RenderedPixels, plan: ExportPlan, metadata?: BasicExifMetadata): Uint8Array;
 }
 
 export interface ExportDestination {

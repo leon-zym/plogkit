@@ -1,9 +1,5 @@
 import { createDocument, type PlogDocument, type SourceImage } from "../../core/document";
-import {
-  documentToRenderScene,
-  getNaturalSceneSize,
-  LOGICAL_CANVAS_WIDTH,
-} from "../scene";
+import { documentToRenderScene, getNaturalSceneSize, LOGICAL_CANVAS_WIDTH } from "../scene";
 
 const images: readonly SourceImage[] = [
   {
@@ -73,7 +69,9 @@ describe("document render scene", () => {
     const scene = documentToRenderScene(document, "original");
 
     expect(scene.height).toBe(2770);
-    expect(scene.images.map(({ imageId, uri, destination }) => ({ imageId, uri, destination }))).toEqual([
+    expect(
+      scene.images.map(({ imageId, uri, destination }) => ({ imageId, uri, destination })),
+    ).toEqual([
       {
         imageId: "tall",
         uri: "file:///tall-original.jpg",

@@ -22,13 +22,7 @@ function createFixture(Skia, name, width, height, palette) {
   const paint = Skia.Paint();
 
   fill(Skia, canvas, paint, palette.sky, Skia.XYWHRect(0, 0, width, height * 0.58));
-  fill(
-    Skia,
-    canvas,
-    paint,
-    palette.ground,
-    Skia.XYWHRect(0, height * 0.58, width, height * 0.42),
-  );
+  fill(Skia, canvas, paint, palette.ground, Skia.XYWHRect(0, height * 0.58, width, height * 0.42));
   paint.setColor(Skia.Color(palette.sun));
   canvas.drawCircle(width * 0.73, height * 0.25, Math.min(width, height) * 0.11, paint);
   paint.setColor(Skia.Color(palette.subject));

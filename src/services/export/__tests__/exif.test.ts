@@ -6,11 +6,12 @@ function readUint16(bytes: Uint8Array, offset: number): number {
 
 function readUint32(bytes: Uint8Array, offset: number): number {
   return (
-    bytes[offset]! |
-    (bytes[offset + 1]! << 8) |
-    (bytes[offset + 2]! << 16) |
-    (bytes[offset + 3]! << 24)
-  ) >>> 0;
+    (bytes[offset]! |
+      (bytes[offset + 1]! << 8) |
+      (bytes[offset + 2]! << 16) |
+      (bytes[offset + 3]! << 24)) >>>
+    0
+  );
 }
 
 function exifTags(jpeg: Uint8Array): readonly number[] {
@@ -56,44 +57,9 @@ function minimalJpeg(extraSegments: Uint8Array = new Uint8Array()): Uint8Array {
 
 function gpsExifSegment(): Uint8Array {
   const payload = new Uint8Array([
-    0x45,
-    0x78,
-    0x69,
-    0x66,
-    0x00,
-    0x00,
-    0x49,
-    0x49,
-    0x2a,
-    0x00,
-    0x08,
-    0x00,
-    0x00,
-    0x00,
-    0x01,
-    0x00,
-    0x25,
-    0x88,
-    0x04,
-    0x00,
-    0x01,
-    0x00,
-    0x00,
-    0x00,
-    0x1a,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0x25, 0x88, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   ]);
   const length = payload.length + 2;
   return new Uint8Array([0xff, 0xe1, length >>> 8, length & 0xff, ...payload]);
@@ -125,7 +91,9 @@ describe("JPEG retain-basic EXIF", () => {
   it("rejects non-whitelisted, non-ASCII, and malformed capture-time metadata", () => {
     const unknown = { make: "Apple", gpsLatitude: "31.2" } as BasicExifMetadata;
 
-    expect(() => injectBasicExif(minimalJpeg(), unknown)).toThrow("not in the basic metadata whitelist");
+    expect(() => injectBasicExif(minimalJpeg(), unknown)).toThrow(
+      "not in the basic metadata whitelist",
+    );
     expect(() => injectBasicExif(minimalJpeg(), { model: "手机" })).toThrow("printable ASCII");
     expect(() => injectBasicExif(minimalJpeg(), { dateTimeOriginal: "2026-07-11" })).toThrow(
       "YYYY:MM:DD",

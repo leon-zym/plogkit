@@ -78,12 +78,7 @@ export function documentToRenderScene(
       imageId: item.imageId,
       uri: imageSource === "preview" ? source.previewUri : source.originalUri,
       sourceSize: { width: source.width, height: source.height },
-      destination: transformRect(
-        item.content,
-        contentScale,
-        contentBounds.x,
-        contentBounds.y,
-      ),
+      destination: transformRect(item.content, contentScale, contentBounds.x, contentBounds.y),
     };
   });
 

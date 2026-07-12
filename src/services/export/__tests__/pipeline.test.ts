@@ -58,9 +58,9 @@ describe("two-stage export orchestration", () => {
       },
     };
 
-    await expect(runExportPipeline(document, {}, { renderer, encoder, destination })).rejects.toThrow(
-      "save failed",
-    );
+    await expect(
+      runExportPipeline(document, {}, { renderer, encoder, destination }),
+    ).rejects.toThrow("save failed");
     expect(pixels.dispose).toHaveBeenCalledTimes(1);
   });
 

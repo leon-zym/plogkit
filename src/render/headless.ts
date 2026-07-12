@@ -110,13 +110,7 @@ export async function renderHeadlessScene(
       drawSceneImage(sceneSkia, canvas, node, image);
     }
     for (const text of scene.texts) {
-      drawSceneText(
-        sceneSkia,
-        canvas,
-        text,
-        options.fontProvider,
-        options.resolveFontFamilies,
-      );
+      drawSceneText(sceneSkia, canvas, text, options.fontProvider, options.resolveFontFamilies);
     }
     surface.flush();
     snapshot = surface.makeImageSnapshot();

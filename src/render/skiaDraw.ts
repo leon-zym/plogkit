@@ -44,8 +44,7 @@ export function makeSceneParagraph(
   fontProvider?: SkTypefaceFontProvider,
   resolveFontFamilies: FontFamilyResolver = systemFontFamilies,
 ): SkParagraph {
-  const resolvedFontProvider =
-    fontProvider ?? (api.FontMgr.System() as SkTypefaceFontProvider);
+  const resolvedFontProvider = fontProvider ?? (api.FontMgr.System() as SkTypefaceFontProvider);
   const builder = api.ParagraphBuilder.Make(
     {
       textAlign: textAlign(text.alignment),
