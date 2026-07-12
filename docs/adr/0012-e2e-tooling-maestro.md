@@ -7,8 +7,8 @@
 
 iOS 平台一切第三方 UI 自动化（Appium、Maestro、Detox）底层均为 Apple XCUITest。候选现状（2026-07 核实）：
 
-- Maestro：YAML 声明式、无障碍树驱动、内置智能等待、无需植入 SDK，对 AI Agent 最友好；官方仅支持 iOS 模拟器，不支持 iOS 真机。
-- Appium（XCUITest driver）：行业标准、真机支持一流；但对新系统支持滞后（iOS 26 支持至 driver 9.5.0 才修齐），本机真机为 iOS 27 beta，现阶段大概率踩生态未填之坑。
+- Maestro：YAML 声明式、无障碍树驱动、内置智能等待、无需植入 SDK；官方仅支持 iOS 模拟器，不支持 iOS 真机。
+- Appium（XCUITest driver）：行业标准、真机支持一流；但对新系统支持滞后（iOS 26 支持至 driver 9.5.0 才修齐），iOS 27 beta 现阶段大概率踩生态未填之坑。
 - Detox：官方不支持 iOS 真机，且 RN 官方兼容目前止于 0.84（本项目为 0.86），排除。
 - Device Hub（Xcode 27 新工具）：真机/模拟器统一管理与远程操控，是人工调试与设备编排工具，不暴露手势自动化 API。
 

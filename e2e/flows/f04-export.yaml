@@ -1,0 +1,27 @@
+appId: com.leonzym.plogkit
+name: Export from the document with a one-time metadata override
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: editor-open-export
+- assertVisible: Export
+- tapOn:
+    id: export-preset-social
+- tapOn:
+    id: export-retain-basic
+- scrollUntilVisible:
+    element:
+      id: export-document
+    direction: DOWN
+- tapOn:
+    id: export-document
+- runFlow:
+    when:
+      visible: Allow
+    commands:
+      - tapOn: Allow
+- extendedWaitUntil:
+    visible:
+      id: export-success
+    timeout: 60000
+- assertVisible: Saved to Photos

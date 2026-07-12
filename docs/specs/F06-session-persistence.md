@@ -1,6 +1,6 @@
 # F06 会话自动保存与恢复
 
-- 状态：已确认
+- 状态：已实现
 - 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)
 
 ## 概述

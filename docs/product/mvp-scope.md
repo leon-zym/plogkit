@@ -52,31 +52,23 @@
 必备能力：
 
 - 提供若干面向社交发布场景的导出预设。
-- 预设为数据驱动结构（见 [ADR 0008](../adr/0008-export-presets-data-driven.md)），各平台（微信朋友圈、小红书、抖音等）的具体分辨率、画质与格式参数由维护者后续定义，结构先行。
+- 预设为数据驱动结构（见 [ADR 0008](../adr/0008-export-presets-data-driven.md)），各平台（微信朋友圈、小红书、抖音等）的具体分辨率、画质与格式参数待后续版本定义，当前版本仅实现数据结构与通用占位参数。
 - 支持 JPEG 与 PNG。
 - 质量与体积的取舍对用户可理解。
 
-尺寸与语义约束（见 [ADR 0007](../adr/0007-export-pipeline.md)）：
+导出约束与元数据策略详见 ADR：
 
-- 输出上限：总像素 ≤ 64MP 且长边 ≤ 16384px，超限自动降级。
-- "原始"预设的语义为"在上限内尽量保留"，不承诺无条件保留原尺寸。
-
-元数据（见 [ADR 0008](../adr/0008-export-presets-data-driven.md)）：
-
-- 默认剥离全部 EXIF（含 GPS 定位）。
-- App 设置提供全局开关；导出面板提供本次导出的临时开关。
-
-明确的 MVP 限制（见 [ADR 0009](../adr/0009-sdr-export-live-photo-still.md)）：
-
-- 导出统一为 SDR，HDR（增益图）不保留，列 vNext 重评估。
-- Live Photo 导入取封面静帧，Live 属性不保留，列 vNext 重评估。
+- [ADR 0007](../adr/0007-export-pipeline.md)：尺寸上限与原始预设语义。
+- [ADR 0008](../adr/0008-export-presets-data-driven.md)：EXIF 剥离与元数据开关。
+- [ADR 0009](../adr/0009-sdr-export-live-photo-still.md)：SDR 输出、Live Photo 静帧。
+- [ADR 0018](../adr/0018-mvp-srgb-color-strategy.md)：MVP sRGB 色彩策略。
 
 产品措辞纪律：
 
 - 不承诺预设能阻止社交平台上传后的二次压缩。
 - 应用能优化上传前的导出，平台侧处理不在控制范围内。
 
-初始预设方向（占位，待参数定义）：
+初始预设方向：
 
 - 原始：在上限内尽量保留尺寸，高质量。
 - 社交：平台友好的尺寸与质量。

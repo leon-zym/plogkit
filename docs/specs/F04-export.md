@@ -1,6 +1,6 @@
 # F04 导出与压缩预设
 
-- 状态：已确认（平台参数待定义）
+- 状态：已实现（平台参数待定义）
 - 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)
 
 ## 概述
@@ -13,7 +13,7 @@
 - JPEG 与 PNG 输出，保存到系统相册。
 - 尺寸上限与自动降级。
 - EXIF 两级开关（全局设置 + 单次导出）。
-- 导出统一 SDR。
+- 导出统一 SDR/sRGB。
 
 ## 非目标
 
@@ -44,6 +44,12 @@
 - WHEN 用户以"原始"预设导出
 - THEN 导出图片按比例降级至上限内（总像素 ≤ 64MP 且长边 ≤ 16384px）
 - AND 导出过程不发生内存崩溃
+
+#### Scenario: Display P3 输入导出为 sRGB
+
+- GIVEN 源图片使用 Display P3 色彩空间
+- WHEN 用户通过任一预设导出
+- THEN 导出图片为 SDR/sRGB，应用不宣称保留广色域
 
 ### 需求 3：EXIF 控制
 

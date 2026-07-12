@@ -5,7 +5,7 @@
 
 ## 背景
 
-前期讨论产生 30+ 决策点与 7 个功能需求，需要可追溯、可检索、对 AI Agent 友好的固化形式。评估了 OpenSpec（Fission-AI，活跃维护的轻量 SDD 框架，proposal → apply → archive 变更状态机 + spec 校验）。
+前期讨论产生 30+ 决策点与 7 个功能需求，需要可追溯、可检索、结构化的固化形式。评估了 OpenSpec（Fission-AI，活跃维护的轻量 SDD 框架，proposal → apply → archive 变更状态机 + spec 校验）。
 
 ## 决策
 
@@ -19,4 +19,4 @@
 
 ## 影响与代价
 
-- 手写体系无工具校验，spec 完整性依赖 PR 审查与 AGENTS.md 约束。
+- 手写体系无工具校验，spec 完整性依赖 PR 审查与项目约定。

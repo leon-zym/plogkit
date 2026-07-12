@@ -30,10 +30,11 @@
 | [0015](0015-license-gpl3-cla.md)             | 许可证：GPL-3.0 + CLA，资产许可纪律                            | 已接受 |
 | [0016](0016-git-workflow.md)                 | Git 工作流：Conventional Commits + PR 门禁                     | 已接受 |
 | [0017](0017-share-extension-deferred.md)     | Share Extension 延后至 v1.1，预留外部图片入口                  | 已接受 |
+| [0018](0018-mvp-srgb-color-strategy.md)      | MVP 色彩策略：Skia 离屏导出统一为 sRGB                         | 已接受 |
 
 ## 决策台账
 
-与维护者逐项确认的决策编号（D 编号）与 ADR 的对应关系：
+决策编号（D 编号）与 ADR 的对应关系：
 
 | 台账 | 内容                                                               | 对应 ADR               |
 | ---- | ------------------------------------------------------------------ | ---------------------- |
@@ -48,4 +49,3 @@
 | D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文           | 0014                   |
 | D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限、P3 spike 等）    | 0004、0007、0010、0011 |
 | D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                     | 0016                   |
-| D12  | 环境安装一次性授权                                                 | —（执行类，无 ADR）    |

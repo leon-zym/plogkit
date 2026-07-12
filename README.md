@@ -8,7 +8,7 @@ PlogKit is a lightweight mobile app for plog creators. It does not try to replac
 
 ## Status
 
-Pre-development. Product scope, architecture decisions, and acceptance specs are finalized; scaffolding is in progress.
+MVP implementation complete on the simulator track. The document-driven editor, local media pipeline, Skia preview/export, autosave, and bilingual UI have been verified on iOS and Android simulators. Store signing and physical-device release validation remain outside the current development scope.
 
 ## Product Positioning
 

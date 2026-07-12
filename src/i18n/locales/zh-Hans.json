@@ -1,6 +1,116 @@
 {
+  "common": {
+    "back": "返回",
+    "cancel": "取消",
+    "confirm": "确认",
+    "done": "完成",
+    "delete": "删除",
+    "decrease": "减少",
+    "increase": "增加",
+    "notAvailable": "不可用"
+  },
   "home": {
+    "eyebrow": "PLOG / 本地",
     "title": "PlogKit",
-    "tagline": "系统相册之外的轻量 plog 工具箱。"
+    "tagline": "把照片、文字与排版整理好，再发布。",
+    "description": "一次选择最多 9 张照片，所有内容只保存在本机。",
+    "choosePhotos": "选择照片",
+    "resume": "继续编辑",
+    "resumeDescription": "当前编辑会话已保存在本机。",
+    "importing": "正在准备照片…",
+    "importPartial": "部分照片未能导入，已完成的照片可以继续编辑。",
+    "importFailed": "无法准备这些照片，请重新选择。",
+    "recoveryFailed": "上次会话已损坏。损坏文件已备份，并已打开新会话。"
+  },
+  "settings": {
+    "title": "设置",
+    "retainBasic": "默认保留拍摄信息",
+    "retainBasicDescription": "新建编辑会话时，默认保留拍摄时间与设备信息。导出前仍可临时修改。",
+    "privacyNotice": "GPS 位置信息始终移除。设置仅保存在本机。"
+  },
+  "editor": {
+    "photoCount": "{{count}} 张照片",
+    "undo": "撤销",
+    "redo": "重做",
+    "export": "导出",
+    "saving": "正在保存",
+    "saved": "已保存",
+    "tools": {
+      "background": "背景",
+      "stitch": "拼接",
+      "text": "文字"
+    }
+  },
+  "background": {
+    "title": "背景",
+    "color": "颜色",
+    "ratio": "输出比例",
+    "ratios": {
+      "original": "原始",
+      "square": "1:1",
+      "portrait3x4": "3:4",
+      "portrait4x5": "4:5",
+      "story": "9:16"
+    },
+    "colors": {
+      "warmWhite": "暖白",
+      "white": "白色",
+      "charcoal": "石墨",
+      "sand": "沙色",
+      "rose": "浅玫瑰",
+      "sage": "鼠尾草绿"
+    }
+  },
+  "stitch": {
+    "title": "拼接",
+    "layout": "布局",
+    "vertical": "竖向",
+    "grid": "网格",
+    "spacing": "图片间距",
+    "order": "照片顺序",
+    "moveEarlier": "将照片前移",
+    "moveLater": "将照片后移"
+  },
+  "text": {
+    "title": "文字",
+    "add": "添加文字",
+    "edit": "编辑文字",
+    "placeholder": "写下这段 plog 文字",
+    "fontSize": "字号",
+    "preset": "样式预设",
+    "presets": {
+      "body": "正文",
+      "headline": "标题",
+      "caption": "注释",
+      "custom": "自定义"
+    },
+    "lineHeight": "行高",
+    "color": "文字颜色",
+    "alignment": "对齐",
+    "alignLeft": "左对齐",
+    "alignCenter": "居中对齐",
+    "alignRight": "右对齐",
+    "background": "文字背景",
+    "noBackground": "无"
+  },
+  "export": {
+    "title": "导出",
+    "preset": "预设",
+    "presets": {
+      "original": "原始",
+      "social": "社交",
+      "compact": "紧凑"
+    },
+    "format": "格式",
+    "privacy": "照片信息",
+    "stripMetadata": "移除全部照片信息",
+    "retainBasic": "保留时间与设备信息",
+    "retainUnavailablePng": "只有 JPEG 可以保留照片信息。",
+    "sRGBNotice": "统一导出为 SDR/sRGB，并始终移除 GPS。",
+    "action": "保存到相册",
+    "exporting": "正在渲染导出…",
+    "success": "已保存到相册",
+    "failure": "无法保存导出，当前编辑会话不受影响。",
+    "reduced": "已按导出上限缩小为 {{width}} × {{height}}。"
   }
 }

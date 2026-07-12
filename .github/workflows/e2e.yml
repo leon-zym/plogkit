@@ -1,0 +1,97 @@
+name: iOS simulator E2E
+
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  maestro:
+    name: Maestro acceptance suite
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
+      MAESTRO_CLI_NO_ANALYTICS: "true"
+      MAESTRO_DISABLE_UPDATE_CHECK: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: pnpm install --frozen-lockfile
+      - name: Install Maestro CLI
+        run: |
+          export MAESTRO_VERSION=2.6.1
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Create and boot simulator
+        run: |
+          xcodebuild -version
+          RUNTIME_ID=$(xcrun simctl list runtimes -j | jq -r '.runtimes[] | select(.isAvailable == true and (.name | startswith("iOS "))) | .identifier' | tail -1)
+          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | jq -r '[.devicetypes[] | select(.name == "iPhone 17 Pro" or .name == "iPhone 16 Pro")][0].identifier')
+          UDID=$(xcrun simctl create "PlogKit CI" "$DEVICE_TYPE" "$RUNTIME_ID")
+          echo "SIMULATOR_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Generate iOS project
+        run: pnpm exec expo prebuild --clean --platform ios
+      - name: Build simulator app
+        run: |
+          xcodebuild \
+            -workspace ios/PlogKit.xcworkspace \
+            -scheme PlogKit \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath ios/build \
+            -jobs 2 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Install app and seed photos
+        run: |
+          xcrun simctl install "$SIMULATOR_UDID" ios/build/Build/Products/Debug-iphonesimulator/PlogKit.app
+          xcrun simctl addmedia "$SIMULATOR_UDID" e2e/fixtures/portrait.jpg e2e/fixtures/landscape.jpg
+      - name: Start Metro
+        run: |
+          pnpm expo start --localhost > "$RUNNER_TEMP/metro.log" 2>&1 &
+          echo "METRO_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8081/status | grep -q running; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Run Maestro flows
+        run: maestro --device "$SIMULATOR_UDID" test e2e/flows/
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-maestro-artifacts
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/metro.log
+            ~/.maestro/tests
+      - name: Clean up simulator and Metro
+        if: always()
+        run: |
+          if [[ -n "${METRO_PID:-}" ]]; then kill "$METRO_PID" || true; fi
+          if [[ -n "${SIMULATOR_UDID:-}" ]]; then
+            xcrun simctl shutdown "$SIMULATOR_UDID" || true
+            xcrun simctl delete "$SIMULATOR_UDID" || true
+          fi

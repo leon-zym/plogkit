@@ -1,59 +1,120 @@
 # 开发环境
 
-主力开发机（macOS）的环境事实与使用约定。环境变化时更新本文。
+本文说明 PlogKit 在 macOS 上进行 iOS 和 Android 开发所需的环境、首次构建会自动补齐的组件，以及当前验证通过的开发环境基线。版本判断以项目锁定的 Expo SDK 57、React Native 0.86 和实际原生构建为准，不合并套用裸 React Native 教程中的版本清单。
 
-## 工具链现状（2026-07-02 核查）
+## 已验证基线
 
-| 项目 | 状态 | 说明 |
-|---|---|---|
-| Xcode 27.0 beta | 已安装，`xcode-select` 当前指向 | 供 iOS 27 beta 真机部署调试 |
-| Xcode 26.5 稳定版 | 已安装（`/Applications/Xcode.app`） | 日常模拟器构建首选 |
-| iOS 模拟器 runtime | iOS 26.5（23F77）已安装 | 首次冒烟：iPhone 17 Pro 模拟器构建/启动/渲染通过（2026-07-02） |
-| 真机 | iPhone 15 Pro，iOS 27.0 beta，Device Hub 已配对 | 人工冒烟用，UDID 见 `xcrun devicectl list devices` |
-| Node.js | v26.4.0 | 满足 RN 0.85 要求（≥ 20.19.4） |
-| pnpm | 11.9.0 | 本项目唯一包管理器 |
-| CocoaPods / watchman / Maestro | 经 Homebrew 安装 | |
-| Android 环境 | **不存在**（Java 8，无 SDK/adb） | 见下文 Android 待办 |
+以下环境于 2026-07-12 完成双端构建和模拟器验证。
 
-## 双 Xcode 使用约定
+| 项目                  | 当前版本或配置                                                                |
+| --------------------- | ----------------------------------------------------------------------------- |
+| macOS                 | 27.0，Apple Silicon                                                           |
+| Node.js / pnpm        | 26.5.0 / 11.11.0；Expo SDK 57 要求 Node.js >= 22.13                           |
+| Expo / React Native   | Expo 57.0.1 / React Native 0.86.0，New Architecture                           |
+| Xcode                 | 27.0 beta，build 27A5194q；`xcode-select` 指向 `/Applications/Xcode-beta.app` |
+| iOS 模拟器            | iOS 26.5，iPhone 17 Pro                                                       |
+| CocoaPods / Maestro   | 1.17.0 / 2.6.1                                                                |
+| Java / Android Studio | Zulu OpenJDK 17.0.19 / Android Studio 2026.1                                  |
+| Android SDK           | Platform 36、Build Tools 36.0.0 和 35.0.0、NDK 27.1.12297006、CMake 3.22.1    |
+| Android 模拟器        | API 36 AOSP ARM64 system image，Pixel 9 AVD，名称为 `Pixel_9`                 |
 
-- 日常模拟器构建使用稳定版：`xcode-select` 若指向 beta，可用环境变量覆盖单次命令：
+当前没有连接 iOS 或 Android 真机。本文的结论只覆盖模拟器开发、调试和测试，不包含真机签名、App Store archive 或 Google Play release 构建。
+
+## 开发者需要提前安装
+
+### 通用工具
+
+- Node.js 22.13 或更高版本，以及 pnpm。
+- 项目依赖：在仓库根目录运行 `pnpm install`。
+- Maestro，仅在本地运行 E2E 时需要。
+
+Expo SDK 56 及以上版本不再要求 Watchman，本项目也没有启用 `resolver.useWatchman`，因此无需安装。
+
+### iOS
+
+- 完整版 Xcode，而不是只有 Command Line Tools。Xcode 中至少安装一个与测试设备匹配的 iOS Simulator runtime。
+- 通过 `xcode-select` 选择要使用的 Xcode：
 
 ```bash
-env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer <command>
+sudo xcode-select --switch /Applications/Xcode-beta.app/Contents/Developer
 ```
 
-- 真机（iOS 27 beta）部署必须使用 Xcode 27 beta 工具链。
-- beta 工具链构建 RN 出现异常时，先回到稳定版复现，确认是否 beta 特有问题。
+- CocoaPods。`expo run:ios` 会执行依赖解析和 `pod install`，但本机仍需先有可用的 CocoaPods 命令。
 
-## 真机冒烟
+### Android
 
-- Device Hub（随 Xcode 27）可从 Mac 远程操控真机屏幕，人工冒烟无需拿起手机。
-- 脚本化编排用 `devicectl`（真机与模拟器统一接口，`--json-output` 供解析）：
+- Android Studio、JDK 17、Android SDK Command-line Tools、Platform Tools 和 Android Emulator。
+- Apple Silicon 使用 API 36 AOSP `arm64-v8a` system image，并创建一个常见手机规格的 AVD。当前基线是 Pixel 9；设备型号只影响屏幕、密度、内存和传感器配置，不是项目构建依赖。
+- 配置环境变量：
 
 ```bash
-xcrun devicectl list devices
-xcrun devicectl device install app --device <udid> <path.app>
-xcrun devicectl device process launch --device <udid> <bundleId>
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools"
 ```
 
-- 当前 beta 阶段 `devicectl` 的部分模拟器子命令尚不可用，模拟器操作仍以 `simctl` 为准。
+- 接受 Android SDK 许可证，Gradle 才能在首次构建时安装缺失组件：
 
-## E2E 依赖
+```bash
+yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+```
 
-- 模拟器种子照片：`xcrun simctl addmedia booted e2e/fixtures/*.jpg`
-- 读取应用沙盒：`xcrun simctl get_app_container booted <bundleId> data`
-- Maestro flow 运行：`maestro test e2e/flows/`（详见 [testing-strategy](testing-strategy.md)）
+项目不依赖 Google Play services，API 36 AOSP image 已通过系统照片选择器和 MediaStore 导出验证。`Sources for Android 36` 只改善 Android Studio 的源码跳转和平台调试，不参与应用编译，可以不安装。
 
-## Android 待办（环境就绪后执行）
+## 首次原生构建会自动完成什么
 
-1. `brew install --cask temurin@21`（RN 0.85 要求 JDK 17+）。
-2. 安装 Android Studio 与 SDK（API 36）、配置 `ANDROID_HOME`。
-3. 创建模拟器并跑通 `pnpm android`。
-4. 将本文与 CI 中的 Android 检查从"仅编译"升级为可运行验证。
+`ios/` 和 `android/` 是 Expo Continuous Native Generation 生成目录，不作为需要手工维护的环境前提。目录不存在时，`expo run:ios` 和 `expo run:android` 会先生成对应原生工程。
 
-## 已知风险
+| 命令           | 自动完成                                                           | 仍需提前具备                                                                 |
+| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `pnpm ios`     | 生成 iOS 工程、解析 Pods、编译、安装并启动 App                     | Xcode、Simulator runtime、CocoaPods、已启动或可用的模拟器                    |
+| `pnpm android` | 生成 Android 工程、下载 Gradle 与 Maven 依赖、编译、安装并启动 App | Android Studio/SDK、JDK 17、adb、emulator、已创建的 AVD、已接受的 SDK 许可证 |
 
-- Xcode 27 beta + RN 0.86 的组合未经官方验证（Expo SDK 57 官方支持 Xcode 26.4+），真机构建遇到工具链报错属预期内风险，优先用稳定版隔离定位。已观测：Expo CLI 对 beta `devicectl` 的 JSON 版本输出有告警（不影响模拟器流程）。
-- 真机系统为 beta，行为异常时先在模拟器（稳定 runtime）交叉验证。
-- 真机部署尚未配置代码签名（`expo run:ios --device` 报 "No code signing certificates"）：需在 Xcode 中登录 Apple ID 并为 target 选择开发团队后重试，属一次性人工配置。
+Android Gradle Plugin 会按生成工程的版本声明安装缺失的 Platform、Build Tools、NDK 和 CMake。当前构建实际需要：
+
+- Platform 36 和 Build Tools 36.0.0，用于 Android 36 的编译、打包和签名工具。
+- Build Tools 35.0.0，已确认由 AGP 在构建时自动安装。虽然根工程使用 36.0.0，当前依赖解析仍会请求 35.0.0，因此保留。
+- NDK 27.1.12297006 和 CMake 3.22.1，用于编译 New Architecture、Skia、Reanimated、Worklets 等依赖中的 C/C++ 和 JNI 代码。
+
+这些版本由项目生成的原生构建配置决定，不需要开发者根据通用教程逐项预装。离线构建或受限网络环境除外，此时应提前用 SDK Manager 安装上述精确版本。
+
+## 日常开发
+
+### iOS 模拟器
+
+Xcode 27 beta 当前可以完成本项目的生成、Pods 安装、Debug 编译、安装、Metro 调试和 Maestro E2E。Expo CLI 对 beta `devicectl` 的输出仍会给出兼容性警告；冷启动时显式传入 `--device` 也可能把模拟器误判为需要签名的设备。先启动模拟器，再运行标准命令最稳定：
+
+```bash
+xcrun simctl boot "iPhone 17 Pro"
+xcrun simctl bootstatus "iPhone 17 Pro" -b
+pnpm ios
+```
+
+设备已经启动时，第一条命令提示已启动可以忽略。不要据此声称 beta Xcode 已覆盖真机签名和发布归档，这两条链路尚未验证。
+
+### Android 模拟器
+
+可从 Android Studio Device Manager 启动 `Pixel_9`，也可使用命令行：
+
+```bash
+"$ANDROID_HOME/emulator/emulator" -avd Pixel_9 -no-snapshot-save
+pnpm android
+```
+
+API 36 Platform 与 API 36 system image 是两份不同组件：前者供编译使用，后者是 AVD 的只读操作系统。一个 system image 可以供多个 AVD 使用，每个 AVD 仍会产生独立的用户数据。日常只保留一个 iOS 或 Android 模拟器运行，并串行执行原生构建和 E2E，避免主机持续高负载。
+
+## 验证命令与当前结果
+
+```bash
+pnpm verify
+pnpm e2e
+```
+
+`pnpm verify` 覆盖类型检查、lint、111 个 Jest 测试和 headless Skia golden。`pnpm e2e` 需要已启动的 iOS 模拟器，具体测试约定见[测试策略](testing-strategy.md)。
+
+2026-07-12 的实测结果：
+
+- iOS：Xcode 27 beta clean build 成功，App 安装和 Metro 启动成功，Maestro 全套 8/8 通过。
+- Android：API 36 AOSP/Pixel 9 上 clean build、安装和启动成功；设置流程通过；系统照片选择器完成两图导入，MediaStore 导出成功。
+- 静态检查、单元/组件测试和渲染 golden 全部通过。
+
+参考：[Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/)、[Expo Android Emulator](https://docs.expo.dev/workflow/android-studio-emulator/)、[Android NDK 与 CMake](https://developer.android.com/studio/projects/install-ndk)、[Android AVD](https://developer.android.com/studio/run/managing-avds)。

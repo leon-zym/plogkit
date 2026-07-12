@@ -1,0 +1,49 @@
+appId: com.leonzym.plogkit
+name: Add and style a text element
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: editor-tool-text
+- assertVisible: Add text
+- tapOn:
+    id: text-input
+- inputText: Morning note
+- tapOn:
+    id: dismiss-text-keyboard
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: text-preset-headline
+    direction: DOWN
+    centerElement: true
+- waitForAnimationToEnd
+- tapOn:
+    id: text-preset-headline
+- swipe:
+    start: 50%, 90%
+    end: 50%, 63%
+    duration: 500
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: text-alignment-center
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 60
+- tapOn:
+    id: text-alignment-center
+- swipe:
+    start: 50%, 84%
+    end: 50%, 55%
+    duration: 500
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: commit-text
+    direction: DOWN
+    visibilityPercentage: 60
+- tapOn:
+    id: commit-text
+- assertVisible: Morning note
+- assertVisible:
+    id: editor-undo

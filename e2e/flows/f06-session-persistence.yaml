@@ -1,0 +1,22 @@
+appId: com.leonzym.plogkit
+name: Restore the current session after relaunch
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: background-color-c9d3c2
+- tapOn:
+    id: editor-back
+- extendedWaitUntil:
+    visible:
+      id: resume-session
+    timeout: 10000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: resume-session
+    timeout: 10000
+- tapOn:
+    id: resume-session
+- assertVisible:
+    id: editor-screen

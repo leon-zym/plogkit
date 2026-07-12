@@ -1,6 +1,6 @@
 # 功能需求 Specs
 
-本目录以 BDD 风格固化各功能的需求边界与验收场景，是 Maestro E2E flow、组件测试命名与 Agent 开发验收的共同蓝本（见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0013](../adr/0013-doc-system.md)）。
+本目录以 BDD 风格固化各功能的需求边界与验收场景，是 Maestro E2E flow、组件测试命名与自动化验收的共同蓝本（见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0013](../adr/0013-doc-system.md)）。
 
 ## 规范
 
@@ -14,10 +14,10 @@
 
 | 编号                              | 功能               | 状态                     |
 | --------------------------------- | ------------------ | ------------------------ |
-| [F01](F01-add-text.md)            | 为图片加字         | 已确认                   |
-| [F02](F02-background.md)          | 背景               | 已确认                   |
-| [F03](F03-stitch-images.md)       | 多图拼接           | 已确认                   |
-| [F04](F04-export.md)              | 导出与压缩预设     | 已确认（平台参数待定义） |
-| [F05](F05-undo-redo.md)           | 撤销与重做         | 已确认                   |
-| [F06](F06-session-persistence.md) | 会话自动保存与恢复 | 已确认                   |
-| [F07](F07-image-import.md)        | 图片导入与资产管理 | 已确认                   |
+| [F01](F01-add-text.md)            | 为图片加字         | 已实现                   |
+| [F02](F02-background.md)          | 背景               | 已实现                   |
+| [F03](F03-stitch-images.md)       | 多图拼接           | 已实现                   |
+| [F04](F04-export.md)              | 导出与压缩预设     | 已实现（平台参数待定义） |
+| [F05](F05-undo-redo.md)           | 撤销与重做         | 已实现                   |
+| [F06](F06-session-persistence.md) | 会话自动保存与恢复 | 已实现                   |
+| [F07](F07-image-import.md)        | 图片导入与资产管理 | 已实现                   |
