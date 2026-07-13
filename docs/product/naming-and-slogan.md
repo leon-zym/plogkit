@@ -1,45 +1,40 @@
 # 命名与 Slogan
 
-## 应用名称
+本文件保留发布前的命名候选。名称与 Slogan 尚未最终确定。
 
-最终应用名：
+## 当前主候选
+
+### 应用名称
+
+当前名称：
 
 > PlogKit
 
-## 当前 Slogan
+### Slogan
 
-当前 slogan：
+英文：
 
 > A lightweight plog toolkit beyond your system Photos app.
 
-该 slogan 传达：
+中文：
 
-- 轻量的产品方向。
-- 面向 plog 创作者的受众。
-- 与系统相册的伴侣关系。
-- 延伸而非替代系统自带照片工具的理念。
+> 系统相册之外的轻量 plog 工具箱。
 
-注：英文表述将在上线前由母语者进一步润色。
+这组表述强调轻量、plog 创作者和系统相册伴侣三个方向。PlogKit 使用“工具箱”而非“编辑器”作为命名方向，因为产品不只做排版，也不覆盖完整修图能力。
 
-## 备选 Slogan 方向
+## 备选方向
 
-### 英文
+名称备选：
 
-- A lightweight plog toolkit beyond your system Photos app.
-- A lightweight photo finishing toolkit for plog creators.
-- Text, backgrounds, stitching, and export tools for plog posts.
-- Beyond Photos: lightweight tools for plog publishing.
-- Finish your plog posts after Photos.
-- A simple toolkit for photos, words, and plog publishing.
+- `PlogFlow`：突出从修图到发布的连续流程。
+- `PlogMate`：突出系统相册伴侣和轻量陪伴感。
 
-### 中文
+Slogan 备选：
 
-- 系统相册之外的轻量 plog 工具箱。
-- 修图交给相册，发布前整理交给 PlogKit。
-- 为 plog 创作者准备的轻量照片工具箱。
-- 不做重修图，只补齐 plog 发布前的最后一步。
-- 加字、加背景、拼接、压缩，轻量完成 plog 发布前整理。
+| 方向         | 英文                                               | 中文                                 |
+| ------------ | -------------------------------------------------- | ------------------------------------ |
+| 轻量工具箱   | A lightweight finishing toolkit for plog creators. | 为 plog 创作者准备的轻量收尾工具箱。 |
+| 完成最后一步 | From edited photos to a finished plog.             | 从修好照片，到完成一篇 plog。        |
+| 相册之后     | Finish your plog after Photos.                     | 修图之后，完成你的 plog。            |
 
-## 命名备注
-
-PlogKit 更契合"工具箱"概念，同时保持产品聚焦。产品不只做排版，还包含文字、背景、拼接与导出准备。"plog"一词在中文社区（小红书语境）认知度高，英文市场偏小众——与"不以商业竞争为先"的项目定位相容。
+正式发布前再结合名称可用性、英文自然度与中英文一致性做最终选择。

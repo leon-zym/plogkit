@@ -1,74 +1,75 @@
 # 测试策略
 
-决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)。本文是操作层面的完整说明，面向项目开发者与贡献者。
+决策依据见 [ADR 0011](../adr/0011-testing-strategy.md) 和 [ADR 0012](../adr/0012-e2e-tooling-maestro.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
-- 测试面向自动化流水线：单命令验证、结果机器可读、最少人工干预。
-- 文档驱动架构是可测试性的基石：文档是纯 JSON，"文档 → Skia 元素树"是纯函数，核心链路可完全脱离设备验证。
-- BDD 作为方法论：验收标准先行（`docs/specs/`），测试命名描述行为；不引入 Cucumber/Gherkin 工具链。
-- TDD 用于 `src/core` 纯逻辑：先写失败测试，再实现，后重构。
-- 不设覆盖率红线（数字指标诱导垃圾测试）；`src/core` 要求接近全覆盖。
+- 验收场景先写入 `docs/specs/`，测试名称描述用户可观察的行为。BDD 是方法，不引入 Cucumber 或 Gherkin 工具链。
+- `src/core` 保持纯 TypeScript，不依赖 React 或 React Native，并采用先写失败测试、再实现和重构的 TDD 循环。
+- 可序列化文档是渲染、持久化和导出的数据源，使核心行为能在设备外验证。
+- 不设置覆盖率百分比门槛。测试应覆盖行为和边界条件，避免为数字指标编写无意义断言。
 
-## 五层金字塔
+## 五层测试
 
 ### L1 静态检查
 
-TypeScript strict（禁 `any`）+ ESLint + Prettier。每次改动的第一道反馈。
+TypeScript strict 和 ESLint 提供最快反馈。代码格式遵循 Prettier 输出。
 
 ### L2 单元与组件测试
 
-- 运行器：jest-expo（单一运行器，不引入 Vitest 双栈）。
-- 组件测试：React Native Testing Library，测试命名描述行为（如 `adds text block when user commits non-empty input`）。
-- `src/core`（文档模型、拼接布局数学、撤销栈、预设计算）必须是无 React/RN 依赖的纯 TS，测试不需要 mock 原生层。
+- jest-expo 是唯一测试运行器。
+- React Native Testing Library 用于组件交互测试。
+- `src/core` 的文档模型、布局计算、撤销栈和预设逻辑不依赖原生环境。
+- 服务层通过明确接口隔离文件、相册和编码能力，测试正常路径、失败处理和资源释放。
 
-### L3 Skia 无头渲染回归（golden 测试）
+### L3 Skia 无头渲染回归
 
-- 原理：React Native Skia 支持在 Node 上通过 CanvasKit-WASM 无头渲染（`makeOffscreenSurface`）。设备与 Node 共用同一个"文档 → Skia 元素树"函数，任意文档状态可在无设备环境渲染为 PNG，并通过仓库内的 RGBA diff 与 golden 快照逐像素比对。
-- 工作流：改动渲染相关代码后，渲染受影响的文档夹具 → 输出 PNG 与 diff 图 → **必须实际查看图片**确认符合预期 → 更新 golden 并在提交说明中记录理由。禁止未经查看批量更新 golden。
-- 确定性纪律：当前 golden 不含文字；将来新增文字 golden 时只能使用随包固定字体（不依赖系统字体）。无头代码必须显式 `dispose()` surface 与 image（CanvasKit 有已知内存泄漏）。
-- 已知边界：CanvasKit-WASM 与设备原生 Skia 存在细微抗锯齿差异，golden 只保证自洽；跨端一致性由 L4 的导出比对抽查。
+React Native Skia 通过 CanvasKit-WASM 在 Node 中创建离屏 surface。设备预览和无头测试共用场景构建逻辑，测试将渲染结果与仓库中的 PNG golden 做 RGBA 像素比较。
 
-### L4 端到端（Maestro，iOS 模拟器）
+修改渲染逻辑后：
 
-- 运行容器：包含 `expo-dev-client` 的 PlogKit Debug App（development build），由 Metro 提供开发期 JS bundle；不使用 Expo Go。
-- 本地 config plugin 会禁用 dev menu 自动弹出、一次性 onboarding 和悬浮按钮，确保 `clearState` 不会在 flow 中引入遮挡业务 UI 的开发工具层。
-- flow 存放于 `e2e/flows/`，与 `docs/specs/` 场景一一对应命名（如 `f01-add-text.yaml`）。
-- 种子数据：用 `xcrun simctl addmedia <udid> <图片>` 向模拟器相册注入已知测试照片。
-- 应用状态断言（零测试专用代码）：
-  - 自动保存的 `projects/current/document.json` 就是状态观测点，通过 `xcrun simctl get_app_container <udid> <bundleId> data` 定位沙盒后直接读取断言。
-  - 导出产物从沙盒/相册取出，与 L3 无头渲染同一文档的结果做像素比对，闭合"设备渲染 ↔ CI 渲染"一致性环。
-- 全部可交互控件必须携带 `testID` 与合理 `accessibilityLabel`（同时即真实无障碍适配），这是 Maestro 稳定定位的前提。
-- 真机：不做自动化（见 ADR 0012）。用 Device Hub 远程操控做人工冒烟，`devicectl` 负责装包/启动/截图等编排。
+1. 运行 `pnpm test:render` 生成比较结果。
+2. 如果测试失败，检查输出的实际图片和 diff 图。
+3. 只有确认变化符合预期后，才使用 `pnpm test:render -u` 更新 golden。
 
-### L5 CI（GitHub Actions）
+Golden 必须使用随包字体，不能依赖系统字体。无头渲染代码必须显式释放 Skia surface 和 image。CanvasKit 与设备原生 Skia 可能存在抗锯齿差异，因此 golden 用于检测无头渲染链路自身的回归，不替代设备验收。
 
-| 触发           | Runner | 内容                                                              |
-| -------------- | ------ | ----------------------------------------------------------------- |
-| 每次 push / PR | ubuntu | L1 + L2 + L3（CanvasKit 在 Linux Node 正常运行）                  |
-| PR             | ubuntu | Android arm64 `assembleDebug` development-client 原生集成编译检查 |
-| nightly / 手动 | macOS  | 模拟器 Maestro E2E                                                |
+### L4 端到端测试
 
-PR 必须绿灯方可合并（ADR 0016）。
+Maestro 在 iOS 模拟器上驱动 PlogKit development build，JS bundle 由 Metro 提供。E2E 不使用 Expo Go。
 
-## 命令约定
+- `e2e/flows/f01-*.yaml` 至 `f07-*.yaml` 对应 `docs/specs/` 中的功能场景；`f00-settings.yaml` 覆盖全局设置。
+- `e2e/subflows/` 存放复用步骤，`e2e/fixtures/` 存放确定性测试照片。
+- CI 使用 `xcrun simctl addmedia` 注入照片。
+- flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。
+- `clearState` 会重置应用数据。dev menu 的自动界面由项目 config plugin 禁用，避免干扰业务元素定位。
 
-脚手架建立后固化到 `package.json`，保持下表与实际一致：
+当可见界面不足以证明持久化或导出结果时，应通过 `xcrun simctl get_app_container` 读取 App 沙盒或导出文件，不应向生产代码添加测试后门。新增这类断言时，把脚本和断言纳入 `e2e/` 或 CI，确保本地与自动化环境使用同一实现。
 
-| 命令               | 作用                                                  |
-| ------------------ | ----------------------------------------------------- |
-| `pnpm check`       | 类型检查 + lint                                       |
-| `pnpm test`        | L2 单元与组件测试                                     |
-| `pnpm test:render` | L3 golden 测试（`-u` 更新 golden，须先人工查看 diff） |
-| `pnpm e2e`         | L4 Maestro（需模拟器、development build 和 Metro）    |
-| `pnpm verify`      | L1+L2+L3 聚合，提交前必跑                             |
+### L5 CI
+
+| 触发        | Runner | 内容                                                         |
+| ----------- | ------ | ------------------------------------------------------------ |
+| push / PR   | Ubuntu | `pnpm verify`，覆盖 L1、L2 和 L3                             |
+| PR          | Ubuntu | Android arm64 Debug development build 原生集成编译           |
+| 定时 / 手动 | macOS  | iOS 模拟器 development build 和完整 Maestro acceptance suite |
+
+PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md)。
+
+## 命令
+
+| 命令               | 作用                                               |
+| ------------------ | -------------------------------------------------- |
+| `pnpm check`       | 类型检查和 lint                                    |
+| `pnpm test`        | L2 单元与组件测试                                  |
+| `pnpm test:render` | L3 golden 测试                                     |
+| `pnpm e2e`         | L4 Maestro，需要模拟器、development build 和 Metro |
+| `pnpm verify`      | 聚合 L1、L2 和 L3，提交前运行                      |
 
 ## 开发循环
 
-对任何功能或 bug 修复，建议遵循以下流程：
-
-1. 先更新 `docs/specs/` 中对应场景（需求变化先改 spec）。
-2. 为新行为编写失败测试（core 用单元测试，交互用组件测试，渲染用 golden 夹具，主干流程补 Maestro flow）。
-3. 实现到全部通过：`pnpm verify`。
-4. 涉及渲染改动时，查看 golden diff 图并在提交说明中记录理由。
-5. 提交 PR，CI 绿灯后合并。
+1. 行为变化先更新 `docs/specs/` 中对应场景。
+2. 为新行为添加失败测试。纯逻辑使用单元测试，交互使用组件测试，渲染变化使用 golden，关键用户流程使用 Maestro。
+3. 实现后运行 `pnpm verify`。
+4. 涉及渲染变化时，查看图片和 diff 后再更新 golden。
+5. 需要设备验收时运行 `pnpm e2e`，然后提交 PR。
