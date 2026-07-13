@@ -4,25 +4,35 @@
 
 [简体中文](README.zh-Hans.md)
 
-PlogKit is a lightweight mobile app for plog creators. It does not try to replace the system Photos app or heavy photo editors. The system Photos app remains responsible for photo adjustment and color tuning; PlogKit fulfills the essential needs of plog creation: adding text, backgrounds, stitching multiple photos, and exporting with presets optimized for multiple social platforms.
+PlogKit is a lightweight mobile app for plog creators. It fills the gap between editing photos and publishing a plog, helping creators finish the last step faster. Photo adjustment and color tuning stay in the system Photos app; PlogKit focuses on a lightweight, direct finishing workflow.
 
 ## Status
 
-MVP implementation complete on the simulator track. The document-driven editor, local media pipeline, Skia preview/export, autosave, and bilingual UI have been verified on iOS and Android simulators. Store signing and physical-device release validation remain outside the current development scope.
+PlogKit is in pre-release development. The current version runs in iOS and Android simulator development builds. Production signing, physical-device release validation, and store distribution are not configured yet.
 
-## Product Positioning
+## Features
 
-PlogKit is a system Photos app companion, not a full photo editor. It is a small, fast, local-first toolkit — no accounts, no network calls — that helps users complete the final step of plog creation after they have already selected and adjusted photos in the system Photos app.
-
-## MVP Scope
+The current version includes:
 
 - Add text to images, with clean limited styles and long-text (CJK-first) layout support.
 - Background colors.
 - Stitch multiple images vertically or in grid layouts.
-- Export with presets optimized for multiple social platforms.
+- Export JPEG or PNG with original, social, and compact presets.
 - Undo and redo, auto-saved editing session, and continue editing after export.
 
-Deliberately out of scope: beauty/retouch, filters, AI editing, video, cloud sync, accounts, and template marketplaces. See `docs/product/` for the full boundary list.
+## Roadmap
+
+Planned additions:
+
+- More platform-specific export presets.
+- A collage-style freeform canvas.
+- Share Extension.
+- HDR and wide-gamut preservation.
+- Live Photo support.
+
+Their implementation order will follow design and technical validation.
+
+Deliberately out of scope: beauty/retouch, filters, AI editing, general video editing, cloud sync, accounts, and template marketplaces. See `docs/product/` for the full boundary list.
 
 ## Tech Stack
 
@@ -32,13 +42,13 @@ React Native (Expo, New Architecture) + Skia + TypeScript. The editor is documen
 
 Authoritative project documentation lives in [`docs/`](docs/) and is written in Chinese (see ADR 0014):
 
-- [`docs/product/`](docs/product/) — positioning, MVP scope, naming.
-- [`docs/adr/`](docs/adr/) — architecture decision records with a decision ledger.
-- [`docs/specs/`](docs/specs/) — BDD acceptance specs (Given/When/Then) per feature.
-- [`docs/guides/`](docs/guides/) — testing strategy and development environment.
+- [`docs/product/`](docs/product/): positioning, MVP scope, naming.
+- [`docs/adr/`](docs/adr/): architecture decision records with a decision ledger.
+- [`docs/specs/`](docs/specs/): BDD acceptance specs (Given/When/Then) per feature.
+- [`docs/guides/`](docs/guides/): design system, testing strategy, and development environment.
 
 Agents working on this repository must follow [`AGENTS.md`](AGENTS.md).
 
 ## License
 
-[GPL-3.0-only](LICENSE). Bundled fonts and assets use permissive licenses (OFL, MIT/Apache-2.0/CC-BY) that permit commercial closed-source embedding.
+[GPL-3.0-only](LICENSE). Third-party fonts and assets must follow the permissive licensing policy in [ADR 0015](docs/adr/0015-license-gpl3-cla.md).

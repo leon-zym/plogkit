@@ -26,7 +26,8 @@ jobs:
       - run: pnpm verify
 
   android-build-check:
-    # One ABI is sufficient for the native-integration compile gate; release builds cover all ABIs.
+    # One ABI is sufficient for the development-client native-integration compile gate.
+    # Store-ready release packaging is a separate workflow that is not configured yet.
     name: Android compile check
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

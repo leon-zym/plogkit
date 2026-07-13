@@ -29,6 +29,17 @@
     "plugins": [
       "expo-router",
       [
+        "expo-dev-client",
+        {
+          "launchMode": "most-recent",
+          "defaultLaunchURL": "http://localhost:8081",
+          "android": {
+            "defaultLaunchURL": "http://10.0.2.2:8081"
+          }
+        }
+      ],
+      "./plugins/with-dev-menu-preferences",
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow PlogKit to import the photos you choose.",

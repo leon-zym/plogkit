@@ -27,7 +27,7 @@
 - WHEN 自动保存调度完成
 - THEN 沙盒 `projects/current/document.json` 反映最新文档状态
 
-（注：该文件同时是 E2E 测试断言应用状态的观测点，见 [ADR 0011](../adr/0011-testing-strategy.md)。）
+（注：当可见界面不足以证明持久化结果时，该文件可作为 E2E 状态断言的观测点，见 [ADR 0011](../adr/0011-testing-strategy.md)。）
 
 ### 需求 2：恢复
 

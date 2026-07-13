@@ -67,7 +67,7 @@ jobs:
           xcrun simctl addmedia "$SIMULATOR_UDID" e2e/fixtures/portrait.jpg e2e/fixtures/landscape.jpg
       - name: Start Metro
         run: |
-          pnpm expo start --localhost > "$RUNNER_TEMP/metro.log" 2>&1 &
+          pnpm expo start --dev-client --localhost > "$RUNNER_TEMP/metro.log" 2>&1 &
           echo "METRO_PID=$!" >> "$GITHUB_ENV"
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8081/status | grep -q running; then
