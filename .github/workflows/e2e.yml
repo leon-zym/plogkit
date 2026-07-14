@@ -96,7 +96,7 @@ jobs:
         with:
           api-level: 36
           arch: x86_64
-          profile: pixel_9
+          profile: pixel_7_pro
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
