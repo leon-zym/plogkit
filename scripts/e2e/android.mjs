@@ -130,7 +130,16 @@ export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDevi
   const logFd = openSync(emulatorLog, "w");
   const emulatorProcess = spawn(
     emulator,
-    ["-avd", avdName, "-wipe-data", "-no-snapshot", "-no-boot-anim", "-camera-back", "none"],
+    [
+      "-avd",
+      avdName,
+      "-wipe-data",
+      "-no-snapshot",
+      "-no-boot-anim",
+      "-no-window",
+      "-camera-back",
+      "none",
+    ],
     { detached: false, stdio: ["ignore", logFd, logFd] },
   );
   emulatorProcess.once("error", (error) => {
