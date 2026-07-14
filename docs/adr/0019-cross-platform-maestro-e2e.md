@@ -14,7 +14,7 @@ PlogKit 已能在 iOS 和 Android development build 中运行。现有 Android C
 - 自动化 E2E 继续统一使用 Maestro，不引入第二套 E2E 框架。
 - 完整验收套件同时运行在 iOS Simulator 和 Android Emulator，作为 nightly 与手动触发的 GitHub Actions 任务；两个平台使用独立 job 并行执行。
 - `e2e/flows/` 中的业务主流程保持跨平台共享。系统 UI 存在差异时，在 `e2e/subflows/` 中使用 Maestro 的 `platform` 条件调用平台专用子流程，不复制整条业务流程。
-- 两端均测试 development build。每条 flow 清理应用状态后，由 `expo-dev-client` 编译进原生配置的 `defaultLaunchURL` 自动连接 Metro：iOS 使用 `localhost:8081`，Android Emulator 使用 `10.0.2.2:8081`，不依赖开发启动器的历史连接状态或界面操作。
+- 两端均测试 development build。每条 flow 清理应用状态后连接 Metro：Android Emulator 使用编译进原生配置的 `defaultLaunchURL`（`10.0.2.2:8081`）；iOS 启动时向 development client 显式传入 `localhost:8081`，规避 SDK 57 冷启动 fallback 与 launcher 导航之间的竞态。两端均不依赖开发启动器的历史连接状态或界面操作。
 - iOS 使用 `simctl addmedia` 注入照片；Android 使用 `adb push` 和 MediaStore 扫描广播注入照片。设备状态或导出产物断言分别使用 `simctl` 与 `adb` 的平台能力。
 - 本地完整验收使用擦除后的专用模拟设备和 clean development build。双端共用一个 Metro，依次完成冷启动预热后并行运行完整业务 flow；原生构建保持顺序执行，避免同一台开发机上的资源争用。
 - 本地与 GitHub Actions 复用同一套构建、安装、照片注入、Metro 和 Maestro 执行逻辑；CI 只负责 runner、KVM 和测试产物上传等平台能力。

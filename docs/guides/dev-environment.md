@@ -107,7 +107,7 @@ pnpm ios
 pnpm android
 ```
 
-Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直接使用 `localhost`。这两个地址通过 `app.json` 中 `expo-dev-client` 的平台级 `defaultLaunchURL` 编译进 development build；即使 Maestro 清除 App 数据，启动器仍会自动连接对应地址，连接失败时才回到 launcher。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
+Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直接使用 `localhost`。这两个地址通过 `app.json` 中 `expo-dev-client` 的平台级 `defaultLaunchURL` 编译进 development build。E2E 清除 App 数据后，Android 使用该默认地址，iOS 则在启动时显式传入同一地址，避免 SDK 57 的冷启动 fallback 竞态。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
 
 ## 验证
 

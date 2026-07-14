@@ -1,0 +1,16 @@
+appId: com.leonzym.plogkit
+---
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - launchApp:
+          clearState: true
+          arguments:
+            --initialUrl: http://localhost:8081
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - launchApp:
+          clearState: true
