@@ -15,7 +15,6 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       E2E_BUILD_WORKERS: "2"
       MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
       MAESTRO_CLI_NO_ANALYTICS: "true"
@@ -41,22 +40,25 @@ jobs:
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
       - name: Build iOS development app
         run: node scripts/e2e/run.mjs ios --phase build
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       - name: Run iOS Maestro flows
         run: node scripts/e2e/run.mjs ios --phase test
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ios-maestro-artifacts
           if-no-files-found: ignore
-          path: ${{ env.E2E_ARTIFACTS_DIR }}
+          path: ${{ runner.temp }}/plogkit-e2e
 
   android-maestro:
     name: Android Maestro acceptance suite
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       E2E_BUILD_WORKERS: "2"
       MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
       MAESTRO_CLI_NO_ANALYTICS: "true"
@@ -82,6 +84,8 @@ jobs:
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
       - name: Build Android development app
         run: node scripts/e2e/run.mjs android --phase build
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       - name: Enable KVM group permissions
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -97,10 +101,12 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: node scripts/e2e/run.mjs android --phase test --device "$ANDROID_SERIAL"
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: android-maestro-artifacts
           if-no-files-found: ignore
-          path: ${{ env.E2E_ARTIFACTS_DIR }}
+          path: ${{ runner.temp }}/plogkit-e2e
