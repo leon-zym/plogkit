@@ -1,21 +1,18 @@
 appId: com.leonzym.plogkit
 ---
-- launchApp:
-    clearState: true
+- runFlow: launch-app.yaml
 - assertVisible:
     id: choose-photos
 - tapOn:
     id: choose-photos
-- extendedWaitUntil:
-    visible: Done
-    timeout: 10000
-- tapOn:
-    id: PXGGridLayout-Info
-    index: 0
-- tapOn:
-    id: PXGGridLayout-Info
-    index: 1
-- tapOn: Done
+- runFlow:
+    when:
+      platform: iOS
+    file: select-two-photos-ios.yaml
+- runFlow:
+    when:
+      platform: Android
+    file: select-two-photos-android.yaml
 - extendedWaitUntil:
     visible:
       id: editor-screen

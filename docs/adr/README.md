@@ -31,6 +31,7 @@
 | [0016](0016-git-workflow.md)                 | Git 工作流：Conventional Commits + PR 门禁                     | 已接受 |
 | [0017](0017-share-extension-deferred.md)     | Share Extension 延后至 v1.1，预留外部图片入口                  | 已接受 |
 | [0018](0018-mvp-srgb-color-strategy.md)      | MVP 色彩策略：Skia 离屏导出统一为 sRGB                         | 已接受 |
+| [0019](0019-cross-platform-maestro-e2e.md)   | Maestro E2E 扩展到 iOS 与 Android 模拟设备                     | 已接受 |
 
 ## 决策台账
 
@@ -43,7 +44,7 @@
 | D03  | Share Extension 进 v1.1，预留外部图片入口                          | 0017                   |
 | D04  | Expo SDK 56 + CNG + dev client + pnpm                              | 0002                   |
 | D05  | UI 中英双语，i18n 从第一天建立                                     | 0014                   |
-| D06  | E2E：Maestro 模拟器主力 + Device Hub 真机手动冒烟                  | 0012                   |
+| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                     | 0012、0019             |
 | D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                         | 0015                   |
 | D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                       | 0013                   |
 | D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文           | 0014                   |
