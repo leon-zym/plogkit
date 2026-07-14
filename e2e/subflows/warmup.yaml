@@ -1,0 +1,8 @@
+appId: com.leonzym.plogkit
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: home-screen
+    timeout: 120000

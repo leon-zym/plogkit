@@ -232,7 +232,7 @@ export function warmUpApp(options) {
   return runMaestro({
     ...options,
     kind: "warmup",
-    target: "e2e/subflows/launch-app.yaml",
+    target: "e2e/subflows/warmup.yaml",
   });
 }
 
