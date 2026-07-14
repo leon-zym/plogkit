@@ -30,14 +30,13 @@ name: Add and style a text element
     id: text-preset-headline
 - swipe:
     start: 50%, 90%
-    end: 50%, 63%
+    end: 50%, 50%
     duration: 500
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
       id: text-alignment-center
     direction: DOWN
-    centerElement: true
     visibilityPercentage: 60
 - tapOn:
     id: text-alignment-center
