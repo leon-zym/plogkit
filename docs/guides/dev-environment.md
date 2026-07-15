@@ -146,7 +146,7 @@ node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence
 
 `--phase test` 仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
 
-runner 固定使用 `PlogKit E2E` iOS Simulator 和 `PlogKit_E2E` Android AVD，不会修改日常开发设备。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。Android AVD 使用 API 36 `default` system image；缺少时，错误信息会列出所需 SDK package。
+runner 固定使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD，不会修改日常开发设备；Android system image 的 ABI 仍按宿主架构选择。缺少所需 runtime、device type 或 system image 时，runner 会明确失败。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。
 
 完整运行会顺序构建两端、并行准备设备、串行预热，再并行执行两端业务 flow。runner 在成功、失败或中断时只停止本轮拥有的 Metro 和设备实例，不删除专用设备。
 

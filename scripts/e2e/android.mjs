@@ -76,13 +76,13 @@ function ensureAvd(home, emulator, imageArch) {
       "--package",
       systemImage,
       "--device",
-      "pixel_9",
+      "pixel_7_pro",
     ],
     { allowFailure: true, input: "no\n" },
   );
   if (result === null) {
     throw new Error(
-      `Unable to create ${avdName}. Run avdmanager with package ${systemImage} and device pixel_9.`,
+      `Unable to create ${avdName}. Run avdmanager with package ${systemImage} and device pixel_7_pro.`,
     );
   }
   log("android", `Created dedicated AVD ${avdName}.`);

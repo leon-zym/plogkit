@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { capture, log, run } from "./runtime.mjs";
 
 const deviceName = "PlogKit E2E";
+const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-26-5";
+const deviceTypeName = "iPhone 17 Pro";
 const appPath = "ios/build/Build/Products/Debug-iphonesimulator/PlogKit.app";
 
 export function validateIosHost() {
@@ -12,27 +14,23 @@ export function validateIosHost() {
   }
 }
 
-function latestRuntime() {
+function requiredRuntime() {
   const runtimes = JSON.parse(capture("xcrun", ["simctl", "list", "runtimes", "-j"]));
-  return (
-    runtimes.runtimes
-      .filter((runtime) => runtime.isAvailable && runtime.name.startsWith("iOS "))
-      .at(-1)?.identifier ?? null
+  return runtimes.runtimes.find(
+    (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
   );
 }
 
-function preferredDeviceType() {
+function requiredDeviceType() {
   const result = JSON.parse(capture("xcrun", ["simctl", "list", "devicetypes", "-j"]));
-  return ["iPhone 17 Pro", "iPhone 16 Pro"]
-    .map((name) => result.devicetypes.find((device) => device.name === name)?.identifier)
-    .find(Boolean);
+  return result.devicetypes.find((device) => device.name === deviceTypeName);
 }
 
-function findDevice() {
+function findDevice(deviceTypeIdentifier) {
   const result = JSON.parse(capture("xcrun", ["simctl", "list", "devices", "available", "-j"]));
-  return Object.values(result.devices)
-    .flat()
-    .find((device) => device.name === deviceName);
+  return result.devices[runtimeIdentifier]?.find(
+    (device) => device.name === deviceName && device.deviceTypeIdentifier === deviceTypeIdentifier,
+  );
 }
 
 function findDeviceById(deviceId) {
@@ -43,14 +41,20 @@ function findDeviceById(deviceId) {
 }
 
 function ensureDedicatedDevice() {
-  const existing = findDevice();
-  if (existing) return existing;
-  const runtime = latestRuntime();
-  const deviceType = preferredDeviceType();
+  const runtime = requiredRuntime();
+  const deviceType = requiredDeviceType();
   if (!runtime || !deviceType) {
-    throw new Error("No supported iOS runtime or iPhone 17 Pro/16 Pro device type is installed.");
+    throw new Error("iOS 26.5 and the iPhone 17 Pro device type are required for iOS E2E.");
   }
-  const udid = capture("xcrun", ["simctl", "create", deviceName, deviceType, runtime]);
+  const existing = findDevice(deviceType.identifier);
+  if (existing) return existing;
+  const udid = capture("xcrun", [
+    "simctl",
+    "create",
+    deviceName,
+    deviceType.identifier,
+    runtime.identifier,
+  ]);
   log("ios", `Created dedicated simulator ${udid}.`);
   return { name: deviceName, state: "Shutdown", udid };
 }
