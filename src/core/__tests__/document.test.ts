@@ -62,6 +62,12 @@ describe("document model", () => {
     expect(doc.stitch.order).toEqual([image.id]);
   });
 
+  it("initializes the document with an explicit metadata policy", () => {
+    const doc = createDocument([image], { metadataPolicy: "retain-basic" });
+
+    expect(doc.exportSettings.metadataPolicy).toBe("retain-basic");
+  });
+
   it("parses a serialized current document without loss", () => {
     const doc = createDocument([image]);
 

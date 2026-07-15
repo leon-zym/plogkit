@@ -361,7 +361,14 @@ export function cloneDocument(document: PlogDocument): PlogDocument {
   return parseDocumentJson(JSON.stringify(document));
 }
 
-export function createDocument(sourceImages: readonly SourceImage[] = []): PlogDocument {
+export interface CreateDocumentOptions {
+  readonly metadataPolicy?: MetadataPolicy;
+}
+
+export function createDocument(
+  sourceImages: readonly SourceImage[] = [],
+  { metadataPolicy = "strip" }: CreateDocumentOptions = {},
+): PlogDocument {
   return parseDocument({
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
     sourceImages,
@@ -378,7 +385,7 @@ export function createDocument(sourceImages: readonly SourceImage[] = []): PlogD
     exportSettings: {
       presetId: "original",
       format: "jpeg",
-      metadataPolicy: "strip",
+      metadataPolicy,
     },
   });
 }
