@@ -49,14 +49,14 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 
 ### L5 CI
 
-| 触发      | Runner                   | 内容                                                      |
-| --------- | ------------------------ | --------------------------------------------------------- |
-| push / PR | Ubuntu                   | `pnpm verify`，覆盖 L1、L2 和 L3                          |
-| PR        | Ubuntu                   | Android arm64 Debug 原生集成编译                          |
-| 定时      | macOS + Ubuntu（并行）   | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
-| 手动      | macOS / Ubuntu（按选择） | 完整双端套件，或指定平台和 flow 的诊断运行                |
+| 触发                     | Runner                   | 内容                                                      |
+| ------------------------ | ------------------------ | --------------------------------------------------------- |
+| push 到 `main` / 任意 PR | Ubuntu                   | `pnpm verify`，覆盖 L1、L2 和 L3                          |
+| ready / 正式 PR 的新提交 | macOS + Ubuntu（并行）   | iOS Simulator Debug 与 Android arm64 Debug 原生集成编译   |
+| 每周一 02:30（北京时间） | macOS + Ubuntu（并行）   | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
+| 手动                     | macOS / Ubuntu（按选择） | 完整双端套件，或指定平台和 flow 的诊断运行                |
 
-PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md)。
+Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端编译检查，此后正式 PR 的每次新提交重新运行全部三项检查。`main` ruleset 要求 PR 和这三项检查全部通过后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
 ## 命令
 
@@ -70,7 +70,7 @@ PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-work
 | `pnpm e2e:android` | 重置专用 Android Emulator 并运行完整 L4 |
 | `pnpm verify`      | 聚合 L1、L2 和 L3，提交前运行           |
 
-E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)；GitHub 已结束的失败运行优先使用 **Re-run failed jobs**。Nightly 和里程碑验收仍运行完整双端套件。
+E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)；GitHub 已结束的失败运行优先使用 **Re-run failed jobs**。每周定时任务和里程碑验收仍运行完整双端套件。定时任务在同一分支上只保留最新运行；手动任务彼此独立，不会因使用同一分支而互相取消。
 
 ## 验证时机
 
