@@ -1,5 +1,4 @@
 import { createEmptyDocument, DOCUMENT_SCHEMA_VERSION } from "@/core/document";
-import { setBackgroundColor } from "@/core/operations";
 
 import {
   createSessionRepository,
@@ -58,7 +57,11 @@ describe("current session repository", () => {
   it("atomically saves and restores the current document", async () => {
     const files = new MemoryFiles();
     const repository = createSessionRepository({ files, paths });
-    const document = setBackgroundColor(createEmptyDocument(), "#112233");
+    const initial = createEmptyDocument();
+    const document = {
+      ...initial,
+      canvas: { ...initial.canvas, backgroundColor: "#112233" },
+    };
 
     await repository.save(document);
     const restored = await repository.restore();

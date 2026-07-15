@@ -1,34 +1,127 @@
 import { createStore } from "zustand/vanilla";
 
 import {
+  cloneDocument,
+  DocumentParseError,
   isExactImageOrder,
+  parseDocument,
   type CanvasRatio,
   type ExportSettings,
   type Point,
   type PlogDocument,
   type StitchMode,
+  type TextAlignment,
   type TextElement,
 } from "../document";
-import {
-  canRedo,
-  canUndo,
-  commitHistory,
-  createHistory,
-  redoHistory,
-  undoHistory,
-  type DocumentHistory,
-} from "../history";
-import {
-  addTextElement,
-  removeTextElement,
-  setBackgroundColor,
-  setCanvasRatio,
-  reorderImages,
-  setStitchMode,
-  setStitchSpacing,
-  setExportSettings,
-  updateTextElement,
-} from "../operations";
+
+const HISTORY_LIMIT = 40;
+
+interface DocumentHistory {
+  readonly past: readonly PlogDocument[];
+  readonly current: PlogDocument;
+  readonly future: readonly PlogDocument[];
+}
+
+function createHistory(initial: PlogDocument): DocumentHistory {
+  return { past: [], current: cloneDocument(initial), future: [] };
+}
+
+function canUndo(history: DocumentHistory): boolean {
+  return history.past.length > 0;
+}
+
+function canRedo(history: DocumentHistory): boolean {
+  return history.future.length > 0;
+}
+
+function commitHistory(history: DocumentHistory, next: PlogDocument): DocumentHistory {
+  return {
+    past: [...history.past, cloneDocument(history.current)].slice(-HISTORY_LIMIT),
+    current: cloneDocument(next),
+    future: [],
+  };
+}
+
+function undoHistory(history: DocumentHistory): DocumentHistory {
+  const previous = history.past.at(-1);
+  if (previous === undefined) return history;
+  return {
+    past: history.past.slice(0, -1),
+    current: cloneDocument(previous),
+    future: [cloneDocument(history.current), ...history.future],
+  };
+}
+
+function redoHistory(history: DocumentHistory): DocumentHistory {
+  const next = history.future[0];
+  if (next === undefined) return history;
+  return {
+    past: [...history.past, cloneDocument(history.current)].slice(-HISTORY_LIMIT),
+    current: cloneDocument(next),
+    future: history.future.slice(1),
+  };
+}
+
+type TextElementUpdate = Partial<{
+  content: string;
+  position: Point;
+  width: number;
+  fontId: string;
+  fontSize: number;
+  color: string;
+  alignment: TextAlignment;
+  lineHeight: number;
+  backgroundColor: string | null;
+}>;
+
+function addTextElement(document: PlogDocument, element: TextElement): PlogDocument {
+  return parseDocument({ ...document, textElements: [...document.textElements, element] });
+}
+
+function updateTextElement(
+  document: PlogDocument,
+  id: string,
+  update: TextElementUpdate,
+): PlogDocument {
+  if (update.content === "") return removeTextElement(document, id);
+  return parseDocument({
+    ...document,
+    textElements: document.textElements.map((element) =>
+      element.id === id ? { ...element, ...update } : element,
+    ),
+  });
+}
+
+function removeTextElement(document: PlogDocument, id: string): PlogDocument {
+  return parseDocument({
+    ...document,
+    textElements: document.textElements.filter((element) => element.id !== id),
+  });
+}
+
+function setBackgroundColor(document: PlogDocument, backgroundColor: string): PlogDocument {
+  return parseDocument({ ...document, canvas: { ...document.canvas, backgroundColor } });
+}
+
+function setCanvasRatio(document: PlogDocument, ratio: CanvasRatio): PlogDocument {
+  return parseDocument({ ...document, canvas: { ...document.canvas, ratio } });
+}
+
+function setStitchMode(document: PlogDocument, mode: StitchMode): PlogDocument {
+  return parseDocument({ ...document, stitch: { ...document.stitch, mode } });
+}
+
+function setStitchSpacing(document: PlogDocument, spacing: number): PlogDocument {
+  return parseDocument({ ...document, stitch: { ...document.stitch, spacing } });
+}
+
+function reorderImages(document: PlogDocument, order: readonly string[]): PlogDocument {
+  return parseDocument({ ...document, stitch: { ...document.stitch, order } });
+}
+
+function setExportSettings(document: PlogDocument, exportSettings: ExportSettings): PlogDocument {
+  return parseDocument({ ...document, exportSettings });
+}
 
 export type TextDraft = Pick<
   TextElement,
@@ -390,6 +483,9 @@ export function createEditCommitModule({
       } catch (error: unknown) {
         if (error instanceof EditIntentRejection) {
           return { status: "rejected", code: error.code };
+        }
+        if (error instanceof DocumentParseError) {
+          return { status: "rejected", code: "invalid-value" };
         }
         throw error;
       }

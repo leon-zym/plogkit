@@ -470,4 +470,21 @@ describe("edit commit module", () => {
     expect(result).toEqual({ status: "rejected", code: "invalid-order" });
     expect(editing.read()).toBe(before);
   });
+
+  it("rejects invalid intent values reported by document validation", () => {
+    const editing = createEditCommitModule({
+      initialDocument: createDocument(images),
+      createTextId: () => "text-1",
+    });
+    editing.dispatch({ type: "commit", intent: editIntents.text.add(textDraft) });
+    const before = editing.read();
+
+    const result = editing.dispatch({
+      type: "commit",
+      intent: editIntents.text.move("text-1", { x: Number.NaN, y: 20 }),
+    });
+
+    expect(result).toEqual({ status: "rejected", code: "invalid-value" });
+    expect(editing.read()).toBe(before);
+  });
 });
