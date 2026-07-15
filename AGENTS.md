@@ -89,6 +89,8 @@ editing, AI generation, and cloud features.
 
 ## Hard Boundaries
 
+- Keep documents concise and within their defined roles; do not add redundant,
+  conflicting, temporary, or unprofessional content.
 - Never add: filters, beauty/retouch, AI generation, cloud sync, accounts,
   telemetry, watermarks, or any network calls. The app is local-first.
 - Treat the "out of scope" lists in `docs/product/` as hard limits; do not
