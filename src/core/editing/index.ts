@@ -316,11 +316,6 @@ class EditIntentRejection extends Error {
   }
 }
 
-interface AppliedIntent {
-  readonly document: PlogDocument;
-  readonly effects: EditEffects;
-}
-
 let textSequence = 0;
 
 function defaultCreateTextId(): string {
@@ -328,13 +323,18 @@ function defaultCreateTextId(): string {
   return `text-${Date.now()}-${textSequence}`;
 }
 
+function requireTextElement(document: PlogDocument, id: string): void {
+  if (!document.textElements.some((element) => element.id === id)) {
+    throw new EditIntentRejection("entity-not-found");
+  }
+}
+
 function applyIntent(
   document: PlogDocument,
   intent: EditIntent,
   createTextId: () => string,
-): AppliedIntent {
+): PlogDocument {
   let nextDocument: PlogDocument;
-  let effects: EditEffects = { created: [], removed: [] };
   switch (intent.type) {
     case "canvas.change-background":
       if (intent.color.length === 0) throw new EditIntentRejection("invalid-value");
@@ -376,43 +376,30 @@ function applyIntent(
         width: 840,
         fontId: "system-sans",
       });
-      effects = { created: [{ kind: "text", id }], removed: [] };
       break;
     }
     case "text.replace-draft": {
-      if (!document.textElements.some((element) => element.id === intent.id)) {
-        throw new EditIntentRejection("entity-not-found");
-      }
+      requireTextElement(document, intent.id);
       nextDocument = updateTextElement(document, intent.id, intent.draft);
-      if (intent.draft.content.length === 0) {
-        effects = { created: [], removed: [{ kind: "text", id: intent.id }] };
-      }
       break;
     }
     case "text.apply-style": {
-      if (!document.textElements.some((element) => element.id === intent.id)) {
-        throw new EditIntentRejection("entity-not-found");
-      }
+      requireTextElement(document, intent.id);
       nextDocument = updateTextElement(document, intent.id, intent.style);
       break;
     }
     case "text.move": {
-      if (!document.textElements.some((element) => element.id === intent.id)) {
-        throw new EditIntentRejection("entity-not-found");
-      }
+      requireTextElement(document, intent.id);
       nextDocument = updateTextElement(document, intent.id, { position: intent.position });
       break;
     }
     case "text.remove": {
-      if (!document.textElements.some((element) => element.id === intent.id)) {
-        throw new EditIntentRejection("entity-not-found");
-      }
+      requireTextElement(document, intent.id);
       nextDocument = removeTextElement(document, intent.id);
-      effects = { created: [], removed: [{ kind: "text", id: intent.id }] };
       break;
     }
   }
-  return { document: nextDocument, effects };
+  return nextDocument;
 }
 
 export function createEditCommitModule({
@@ -431,20 +418,24 @@ export function createEditCommitModule({
   }));
   let isDispatching = false;
 
-  const publishHistory = (
-    nextHistory: DocumentHistory,
-    effects: EditEffects = diffEntityEffects(history.current, nextHistory.current),
-  ): EditResult => {
+  const publishHistory = (nextHistory: DocumentHistory): EditResult => {
+    const effects = diffEntityEffects(history.current, nextHistory.current);
     history = nextHistory;
     revision += 1;
-    store.setState({
-      document: history.current,
-      previewDocument: history.current,
-      canUndo: canUndo(history),
-      canRedo: canRedo(history),
-      revision,
-    });
+    let notificationError: unknown;
+    try {
+      store.setState({
+        document: history.current,
+        previewDocument: history.current,
+        canUndo: canUndo(history),
+        canRedo: canRedo(history),
+        revision,
+      });
+    } catch (error: unknown) {
+      notificationError = error;
+    }
     onEditCommit(history.current);
+    if (notificationError !== undefined) throw notificationError;
     return {
       status: "changed",
       revision,
@@ -477,9 +468,9 @@ export function createEditCommitModule({
         return publishHistory(redoHistory(history));
       }
 
-      let applied: AppliedIntent;
+      let nextDocument: PlogDocument;
       try {
-        applied = applyIntent(history.current, message.intent, createTextId);
+        nextDocument = applyIntent(history.current, message.intent, createTextId);
       } catch (error: unknown) {
         if (error instanceof EditIntentRejection) {
           return { status: "rejected", code: error.code };
@@ -489,7 +480,6 @@ export function createEditCommitModule({
         }
         throw error;
       }
-      const nextDocument = applied.document;
       if (message.type === "preview") {
         store.setState({ previewDocument: nextDocument });
         return { status: "previewed" };
@@ -498,7 +488,7 @@ export function createEditCommitModule({
         store.setState({ previewDocument: history.current });
         return { status: "unchanged" };
       }
-      return publishHistory(commitHistory(history, nextDocument), applied.effects);
+      return publishHistory(commitHistory(history, nextDocument));
     } finally {
       isDispatching = false;
     }

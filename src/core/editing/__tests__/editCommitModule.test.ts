@@ -88,6 +88,40 @@ describe("edit commit module", () => {
     expect(autosaved).not.toHaveBeenCalled();
   });
 
+  it("replaces the active preview instead of composing previews", () => {
+    const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
+    editing.dispatch({
+      type: "preview",
+      intent: editIntents.stitch.changeSpacing(18),
+    });
+
+    editing.dispatch({
+      type: "preview",
+      intent: editIntents.canvas.changeBackground("#112233"),
+    });
+
+    expect(editing.read().previewDocument).toMatchObject({
+      canvas: { backgroundColor: "#112233" },
+      stitch: { spacing: 0 },
+    });
+  });
+
+  it("clears the active preview after a semantic no-op commit", () => {
+    const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
+    editing.dispatch({
+      type: "preview",
+      intent: editIntents.stitch.changeSpacing(18),
+    });
+
+    const result = editing.dispatch({
+      type: "commit",
+      intent: editIntents.canvas.changeBackground("#FFFFFF"),
+    });
+
+    expect(result).toEqual({ status: "unchanged" });
+    expect(editing.read().previewDocument).toBe(editing.read().document);
+  });
+
   it("rejects an invalid intent without changing any editing state", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
@@ -414,7 +448,11 @@ describe("edit commit module", () => {
   });
 
   it("rejects reentrant dispatch from a subscriber as a programmer error", () => {
-    const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
+    const autosaved = jest.fn();
+    const editing = createEditCommitModule({
+      initialDocument: createEmptyDocument(),
+      onEditCommit: autosaved,
+    });
     editing.subscribe(() => {
       editing.dispatch({ type: "undo" });
     });
@@ -425,6 +463,7 @@ describe("edit commit module", () => {
         intent: editIntents.canvas.changeBackground("#112233"),
       }),
     ).toThrow("edit dispatch must not be reentrant");
+    expect(autosaved).toHaveBeenCalledWith(editing.read().document);
   });
 
   it("keeps only the latest forty edit commits in undo history", () => {
