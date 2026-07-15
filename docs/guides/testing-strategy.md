@@ -49,11 +49,12 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 
 ### L5 CI
 
-| 触发        | Runner                 | 内容                                                      |
-| ----------- | ---------------------- | --------------------------------------------------------- |
-| push / PR   | Ubuntu                 | `pnpm verify`，覆盖 L1、L2 和 L3                          |
-| PR          | Ubuntu                 | Android arm64 Debug 原生集成编译                          |
-| 定时 / 手动 | macOS + Ubuntu（并行） | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
+| 触发      | Runner                   | 内容                                                      |
+| --------- | ------------------------ | --------------------------------------------------------- |
+| push / PR | Ubuntu                   | `pnpm verify`，覆盖 L1、L2 和 L3                          |
+| PR        | Ubuntu                   | Android arm64 Debug 原生集成编译                          |
+| 定时      | macOS + Ubuntu（并行）   | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
+| 手动      | macOS / Ubuntu（按选择） | 完整双端套件，或指定平台和 flow 的诊断运行                |
 
 PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md)。
 
@@ -69,7 +70,7 @@ PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-work
 | `pnpm e2e:android` | 重置专用 Android Emulator 并运行完整 L4 |
 | `pnpm verify`      | 聚合 L1、L2 和 L3，提交前运行           |
 
-定位单条 E2E 失败时，先保留现有原生构建并运行 `node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence`（平台和 flow 按实际失败项替换）。GitHub 手动 E2E 可选择单个平台并填写同一 flow basename；已结束的失败运行优先使用 **Re-run failed jobs**。这些入口用于诊断，nightly 和里程碑验收仍运行完整双端套件。
+E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)；GitHub 已结束的失败运行优先使用 **Re-run failed jobs**。Nightly 和里程碑验收仍运行完整双端套件。
 
 ## 验证时机
 
