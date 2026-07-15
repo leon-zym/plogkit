@@ -11,6 +11,7 @@ name: Switch to grid and reorder imported photos
     element:
       text: Move photo later 1
     direction: DOWN
+- assertVisible: "^0$"
 - swipe:
     from:
       id: stitch-spacing
