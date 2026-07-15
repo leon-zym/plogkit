@@ -1,0 +1,17 @@
+appId: com.leonzym.plogkit
+---
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - launchApp:
+          clearState: true
+          arguments:
+            # TODO: Re-test after upgrading Expo Dev Launcher and remove this workaround if defaultLaunchURL cold starts reliably.
+            --initialUrl: http://localhost:8081
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - launchApp:
+          clearState: true

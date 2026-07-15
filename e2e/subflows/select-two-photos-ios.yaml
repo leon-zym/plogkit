@@ -1,0 +1,12 @@
+appId: com.leonzym.plogkit
+---
+- extendedWaitUntil:
+    visible: Done
+    timeout: 10000
+- tapOn:
+    id: PXGGridLayout-Info
+    index: 0
+- tapOn:
+    id: PXGGridLayout-Info
+    index: 1
+- tapOn: Done

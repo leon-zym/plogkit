@@ -1,0 +1,13 @@
+appId: com.leonzym.plogkit
+---
+- extendedWaitUntil:
+    visible: Recent
+    timeout: 10000
+- tapOn:
+    id: com.android.providers.media.module:id/icon_thumbnail
+    index: 0
+- tapOn:
+    id: com.android.providers.media.module:id/icon_thumbnail
+    index: 1
+- tapOn:
+    id: com.android.providers.media.module:id/button_add

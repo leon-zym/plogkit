@@ -35,16 +35,19 @@ editing, AI generation, and cloud features.
 - `src/services/` — photo import (sandbox copy + downsampled preview),
   persistence/autosave, export pipeline (render stage / encode stage split).
 - `app/` — Expo Router routes.
-- `e2e/flows/` — Maestro YAML flows, named after specs (e.g. `f01-add-text.yaml`).
+- `e2e/flows/` — cross-platform Maestro YAML flows, named after specs (e.g. `f01-add-text.yaml`).
+- `e2e/subflows/` — shared steps and narrowly scoped iOS/Android system-UI adapters.
 
 ## Commands
 
 - Install: `pnpm install`
-- Dev (iOS simulator): `pnpm ios`
+- Metro for an installed development build: `pnpm start`
+- Build and run: `pnpm ios` or `pnpm android`
 - Type check + lint: `pnpm check`
 - Unit/component tests: `pnpm test`
 - Rendering goldens: `pnpm test:render` (update with `-u` only after inspecting diffs)
-- E2E (booted simulator): `pnpm e2e`
+- E2E (dedicated iOS + Android devices): `pnpm e2e`
+- E2E (single platform): `pnpm e2e:ios` or `pnpm e2e:android`
 - Full verification: `pnpm verify`
 
 ## Workflow
@@ -56,6 +59,8 @@ editing, AI generation, and cloud features.
 - Git: Conventional Commits in English (`feat:`, `fix:`, `docs:`, `test:`,
   `refactor:`, `chore:`). After scaffold, all changes go through branch + PR
   with green CI (ADR 0016). Run `pnpm verify` before committing.
+- Run full dual-platform E2E before a PR that changes native configuration,
+  system UI integration, persistence, export, or a critical user flow.
 
 ## Code Style
 
@@ -68,17 +73,24 @@ editing, AI generation, and cloud features.
 ## Testing Rules (details: docs/guides/testing-strategy.md)
 
 - Five layers: static checks → jest-expo unit/component → headless Skia
-  goldens → Maestro E2E on iOS simulator → GitHub Actions.
+  goldens → Maestro E2E on iOS and Android simulated devices → GitHub Actions.
 - BDD as methodology, no Cucumber/Gherkin tooling. Test names describe behavior.
 - Golden updates require visually inspecting rendered output/diff images first;
   never bulk-update goldens blindly. Goldens use bundled fonts only. Always
   `dispose()` Skia surfaces/images in headless code.
+- Keep Maestro business flows cross-platform. Isolate system UI differences in
+  platform subflows; do not duplicate complete flows.
+- When E2E fails without a diagnosed cause, rerun the failing flow unchanged;
+  never add retries, sleeps, or longer timeouts merely to suppress flakiness.
 - E2E state assertions read the app sandbox (autosaved `document.json`,
-  exported files) via `xcrun simctl get_app_container`; seed photos with
-  `xcrun simctl addmedia`. Do not add test-only backdoors into app code.
+  exported files) via `simctl` or `adb`; seed photos with `simctl addmedia` on
+  iOS and `adb` plus MediaStore scanning on Android. Do not add test-only
+  backdoors into app code.
 
 ## Hard Boundaries
 
+- Keep documents concise and within their defined roles; do not add redundant,
+  conflicting, temporary, or unprofessional content.
 - Never add: filters, beauty/retouch, AI generation, cloud sync, accounts,
   telemetry, watermarks, or any network calls. The app is local-first.
 - Treat the "out of scope" lists in `docs/product/` as hard limits; do not

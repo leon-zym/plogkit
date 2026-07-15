@@ -1,8 +1,7 @@
 appId: com.leonzym.plogkit
 name: Global metadata default stays local and independent
 ---
-- launchApp:
-    stopApp: true
+- runFlow: ../subflows/launch-app.yaml
 - assertVisible:
     id: home-screen
 - tapOn:

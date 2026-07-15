@@ -1,20 +1,37 @@
-name: iOS simulator E2E
+name: Mobile simulator E2E
 
 on:
   schedule:
-    - cron: "30 18 * * *"
+    # Monday 02:30 Asia/Shanghai (Sunday 18:30 UTC).
+    - cron: "30 18 * * 0"
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      flow:
+        description: Optional flow basename, for example f06-session-persistence
+        required: false
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  maestro:
-    name: Maestro acceptance suite
+  ios-maestro:
+    name: iOS Maestro acceptance suite
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-26
     timeout-minutes: 60
     env:
+      E2E_BUILD_WORKERS: "2"
       MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
       MAESTRO_CLI_NO_ANALYTICS: "true"
       MAESTRO_DISABLE_UPDATE_CHECK: "true"
@@ -37,61 +54,78 @@ jobs:
           export MAESTRO_VERSION=2.6.1
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Create and boot simulator
-        run: |
-          xcodebuild -version
-          RUNTIME_ID=$(xcrun simctl list runtimes -j | jq -r '.runtimes[] | select(.isAvailable == true and (.name | startswith("iOS "))) | .identifier' | tail -1)
-          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | jq -r '[.devicetypes[] | select(.name == "iPhone 17 Pro" or .name == "iPhone 16 Pro")][0].identifier')
-          UDID=$(xcrun simctl create "PlogKit CI" "$DEVICE_TYPE" "$RUNTIME_ID")
-          echo "SIMULATOR_UDID=$UDID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
-      - name: Generate iOS project
-        run: pnpm exec expo prebuild --clean --platform ios
-      - name: Build simulator app
-        run: |
-          xcodebuild \
-            -workspace ios/PlogKit.xcworkspace \
-            -scheme PlogKit \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath ios/build \
-            -jobs 2 \
-            ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-      - name: Install app and seed photos
-        run: |
-          xcrun simctl install "$SIMULATOR_UDID" ios/build/Build/Products/Debug-iphonesimulator/PlogKit.app
-          xcrun simctl addmedia "$SIMULATOR_UDID" e2e/fixtures/portrait.jpg e2e/fixtures/landscape.jpg
-      - name: Start Metro
-        run: |
-          pnpm expo start --dev-client --localhost > "$RUNNER_TEMP/metro.log" 2>&1 &
-          echo "METRO_PID=$!" >> "$GITHUB_ENV"
-          for _ in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8081/status | grep -q running; then
-              exit 0
-            fi
-            sleep 1
-          done
-          exit 1
-      - name: Run Maestro flows
-        run: maestro --device "$SIMULATOR_UDID" test e2e/flows/
+      - name: Build iOS development app
+        run: node scripts/e2e/run.mjs ios --phase build
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+      - name: Run iOS Maestro flows
+        run: node scripts/e2e/run.mjs ios --phase test
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ios-maestro-artifacts
           if-no-files-found: ignore
-          path: |
-            ${{ runner.temp }}/metro.log
-            ~/.maestro/tests
-      - name: Clean up simulator and Metro
-        if: always()
+          path: ${{ runner.temp }}/plogkit-e2e
+
+  android-maestro:
+    name: Android Maestro acceptance suite
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      E2E_BUILD_WORKERS: "2"
+      MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
+      MAESTRO_CLI_NO_ANALYTICS: "true"
+      MAESTRO_DISABLE_UPDATE_CHECK: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: pnpm install --frozen-lockfile
+      - name: Install Maestro CLI
         run: |
-          if [[ -n "${METRO_PID:-}" ]]; then kill "$METRO_PID" || true; fi
-          if [[ -n "${SIMULATOR_UDID:-}" ]]; then
-            xcrun simctl shutdown "$SIMULATOR_UDID" || true
-            xcrun simctl delete "$SIMULATOR_UDID" || true
-          fi
+          export MAESTRO_VERSION=2.6.1
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Build Android development app
+        run: node scripts/e2e/run.mjs android --phase build
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run emulator and Maestro flows
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7_pro
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: node scripts/e2e/run.mjs android --phase test --device "$ANDROID_SERIAL"
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          E2E_FLOW: ${{ inputs.flow }}
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-maestro-artifacts
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/plogkit-e2e

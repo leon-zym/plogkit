@@ -8,7 +8,7 @@
 
 - Node.js 22 和 pnpm 11，与 CI 使用的主版本一致。
 - Git。
-- Maestro，仅在本地运行 iOS 端到端测试时需要。
+- Maestro，仅在本地运行 iOS 或 Android 端到端测试时需要。
 
 安装项目依赖：
 
@@ -107,7 +107,7 @@ pnpm ios
 pnpm android
 ```
 
-Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro。iOS 模拟器直接使用 `localhost`。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
+Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直接使用 `localhost`。这两个地址通过 `app.json` 中 `expo-dev-client` 的平台级 `defaultLaunchURL` 编译进 development build。E2E 清除 App 数据后，Android 使用该默认地址，iOS 则在启动时显式传入同一地址，避免 SDK 57 的冷启动 fallback 竞态。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
 
 ## 验证
 
@@ -119,19 +119,45 @@ pnpm verify
 
 该命令执行类型检查、lint、Jest 单元与组件测试，以及 headless Skia golden 测试。
 
-iOS E2E 需要已启动的模拟器、已安装的 development build、仓库测试照片和正在运行的 Metro。完成平台构建后，向当前模拟器注入测试照片并运行：
+本地 E2E 的公开命令由统一 runner 完成 clean prebuild、原生构建、设备准备、fixture 注入、Metro 管理和 Maestro 执行。macOS 上运行双端完整套件：
 
 ```bash
-xcrun simctl addmedia booted e2e/fixtures/portrait.jpg e2e/fixtures/landscape.jpg
 pnpm e2e
 ```
 
-如果 Metro 尚未运行，先在另一个终端执行 `pnpm start`。
+也可以只运行一个平台：
 
-GitHub Actions 还会在 PR 中执行 Android Debug 原生集成编译，并按计划或手动运行 iOS 模拟器 E2E。详细约定见[测试策略](testing-strategy.md)。
+```bash
+pnpm e2e:ios
+pnpm e2e:android
+```
+
+上述三个命令都会执行 clean prebuild 和对应平台的原生构建，不复用旧 development build。仅修改不影响原生二进制的 JavaScript、TypeScript、运行时资源或 Maestro flow，且现有构建仍对应当前原生依赖和 Expo 配置时，可以跳过构建并重跑单个平台完整套件：
+
+```bash
+node scripts/e2e/run.mjs ios --phase test
+```
+
+定位已知失败时可进一步只运行一条 flow：
+
+```bash
+node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence
+```
+
+`--phase test` 仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
+
+runner 固定使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD，不会修改日常开发设备；Android system image 的 ABI 仍按宿主架构选择。缺少所需 runtime、device type 或 system image 时，runner 会明确失败。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。
+
+完整运行会顺序构建两端、并行准备设备、串行预热，再并行执行两端业务 flow。runner 在成功、失败或中断时只停止本轮拥有的 Metro 和设备实例，不删除专用设备。
+
+E2E Metro 仅监听本机 IPv4。8081 已被占用时 runner 会立即失败，且不会复用或终止未知进程。日常真机开发仍使用支持 LAN 的 `pnpm start`。
+
+一次双端 clean E2E 通常需要 15–25 分钟；首次下载或解析原生依赖可能更久。它适合手动验收、定时测试以及原生配置、系统 UI 或关键用户流程变更后的验证，不适合作为每次保存或提交的即时反馈。
+
+GitHub Actions 为 draft PR 的每次提交运行 `pnpm verify`；PR 转为 ready 后并行执行 iOS Simulator Debug 和 Android arm64 Debug 原生集成编译，正式 PR 的后续提交会重新运行三项检查。每周一北京时间 02:30 的定时任务并行运行双端完整 E2E；手动任务可选择平台和 flow，且同一分支上的多次手动任务不会互相取消。测试层级和适用场景见[测试策略](testing-strategy.md)，E2E 编排决策见 [ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)，CI 生命周期和 `main` 门禁见 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
 ## 发布构建边界
 
 Development build 只用于开发和测试，不能作为商店发布包。仓库当前没有配置生产签名、App Store Archive、Android App Bundle 或 EAS Build production profile。建立发布流程时应单独配置 Release 构建、签名、版本号和商店提交步骤。
 
-参考：[Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/)、[本地 App 开发](https://docs.expo.dev/guides/local-app-development/)、[Android Emulator](https://docs.expo.dev/workflow/android-studio-emulator/)、[Android NDK 与 CMake](https://developer.android.com/studio/projects/install-ndk)。
+参考：[Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/)、[Expo DevClient](https://docs.expo.dev/versions/v57.0.0/sdk/dev-client/)、[Expo CLI](https://docs.expo.dev/more/expo-cli/)、[本地 App 开发](https://docs.expo.dev/guides/local-app-development/)、[Android Emulator 网络地址](https://developer.android.com/studio/run/emulator-networking-address)、[Node.js DNS](https://nodejs.org/api/dns.html)、[Android NDK 与 CMake](https://developer.android.com/studio/projects/install-ndk)。
