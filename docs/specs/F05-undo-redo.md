@@ -1,7 +1,7 @@
 # F05 撤销与重做
 
 - 状态：已实现
-- 关联：[ADR 0004](../adr/0004-state-management-undo.md)
+- 关联：[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0021](../adr/0021-edit-commit-module.md)
 
 ## 概述
 
@@ -41,6 +41,13 @@
 - GIVEN 用户按住间距滑杆连续拖动（产生大量中间值）
 - WHEN 用户松开滑杆后点击一次撤销
 - THEN 间距恢复到本次拖动开始前的值（整个拖动是一个撤销步）
+
+#### Scenario: 语义无变化不产生编辑提交
+
+- GIVEN 文档当前已经使用目标设置值
+- WHEN 用户再次提交相同的设置值
+- THEN 文档不产生新的撤销步
+- AND 不触发自动保存
 
 ### 需求 3：边界行为
 

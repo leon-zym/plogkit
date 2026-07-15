@@ -33,6 +33,7 @@
 | [0018](0018-mvp-srgb-color-strategy.md)       | MVP 色彩策略：Skia 离屏导出统一为 sRGB                         | 已接受 |
 | [0019](0019-cross-platform-maestro-e2e.md)    | Maestro E2E 扩展到 iOS 与 Android 模拟设备                     | 已接受 |
 | [0020](0020-ci-lifecycle-and-main-ruleset.md) | CI 生命周期与 main 分支门禁                                    | 已接受 |
+| [0021](0021-edit-commit-module.md)            | 以类型化编辑意图深化编辑提交模块                               | 已接受 |
 
 ## 决策台账
 
@@ -52,3 +53,4 @@
 | D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限、P3 spike 等）    | 0004、0007、0010、0011 |
 | D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                     | 0016                   |
 | D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁      | 0016、0020             |
+| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启     | 0003、0004、0021       |
