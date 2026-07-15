@@ -237,5 +237,6 @@ export function warmUpApp(options) {
 }
 
 export function runMaestroSuite(options) {
-  return runMaestro({ ...options, kind: "flows", target: "e2e/flows/" });
+  const target = options.flow ? `e2e/flows/${options.flow}.yaml` : "e2e/flows/";
+  return runMaestro({ ...options, kind: "flows", target });
 }

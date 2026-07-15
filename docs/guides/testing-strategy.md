@@ -69,6 +69,8 @@ PR 必须通过所需检查后才能合并，见 [ADR 0016](../adr/0016-git-work
 | `pnpm e2e:android` | 重置专用 Android Emulator 并运行完整 L4 |
 | `pnpm verify`      | 聚合 L1、L2 和 L3，提交前运行           |
 
+定位单条 E2E 失败时，先保留现有原生构建并运行 `node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence`（平台和 flow 按实际失败项替换）。GitHub 手动 E2E 可选择单个平台并填写同一 flow basename；已结束的失败运行优先使用 **Re-run failed jobs**。这些入口用于诊断，nightly 和里程碑验收仍运行完整双端套件。
+
 ## 验证时机
 
 行为变化先更新对应 spec；架构决策变化先新增 ADR。验证强度随风险递增，不把完整 E2E 绑定到每次提交。

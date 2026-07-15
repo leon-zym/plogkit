@@ -4,6 +4,20 @@ on:
   schedule:
     - cron: "30 18 * * *"
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      flow:
+        description: Optional flow basename, for example f06-session-persistence
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,6 +26,7 @@ concurrency:
 jobs:
   ios-maestro:
     name: iOS Maestro acceptance suite
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -46,6 +61,7 @@ jobs:
         run: node scripts/e2e/run.mjs ios --phase test
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -56,6 +72,7 @@ jobs:
 
   android-maestro:
     name: Android Maestro acceptance suite
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -103,6 +120,7 @@ jobs:
           script: node scripts/e2e/run.mjs android --phase test --device "$ANDROID_SERIAL"
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

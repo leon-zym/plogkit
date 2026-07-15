@@ -132,6 +132,8 @@ pnpm e2e:ios
 pnpm e2e:android
 ```
 
+故障定位可复用已有原生构建，只重跑单个平台和 flow，例如 `node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence`。该命令仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。
+
 runner 固定使用 `PlogKit E2E` iOS Simulator 和 `PlogKit_E2E` Android AVD，不会修改日常开发设备。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。Android AVD 使用 API 36 `default` system image；缺少时，错误信息会列出所需 SDK package。
 
 完整运行会顺序构建两端、并行准备设备、串行预热，再并行执行两端业务 flow。runner 在成功、失败或中断时只停止本轮拥有的 Metro 和设备实例，不删除专用设备。

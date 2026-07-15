@@ -37,6 +37,7 @@ function parseArguments(argv) {
   const target = argv[0] ?? "all";
   let phase = "all";
   let deviceId = null;
+  let flow = process.env.E2E_FLOW || null;
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--phase") {
@@ -49,6 +50,11 @@ function parseArguments(argv) {
       index += 1;
     } else if (argument.startsWith("--device=")) {
       deviceId = argument.slice("--device=".length);
+    } else if (argument === "--flow") {
+      flow = argv[index + 1];
+      index += 1;
+    } else if (argument.startsWith("--flow=")) {
+      flow = argument.slice("--flow=".length);
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
@@ -62,8 +68,13 @@ function parseArguments(argv) {
   if (target === "all" && deviceId) {
     throw new Error("--device requires a single platform target.");
   }
+  if (flow === "all" || flow === "") flow = null;
+  if (flow && !/^[a-z0-9-]+(?:\.yaml)?$/.test(flow)) {
+    throw new Error("--flow must be a flow basename such as f06-session-persistence.");
+  }
   return {
     deviceId,
+    flow: flow ? flow.replace(/\.yaml$/, "") : null,
     phase,
     platforms: target === "all" ? ["ios", "android"] : [target],
     target,
@@ -79,10 +90,13 @@ function buildWorkers() {
   return value;
 }
 
-function validate({ phase, platforms }) {
+function validate({ flow, phase, platforms }) {
   if (platforms.includes("ios")) validateIosHost();
   for (const fixture of fixtures) {
     if (!existsSync(fixture)) throw new Error(`Missing E2E fixture: ${fixture}`);
+  }
+  if (flow && !existsSync(resolve(root, `e2e/flows/${flow}.yaml`))) {
+    throw new Error(`Unknown E2E flow: ${flow}`);
   }
   if (phase === "test") {
     for (const platform of platforms) {
@@ -126,7 +140,7 @@ async function installAndSeed(device, cleanup) {
   else await installAndSeedAndroid(options);
 }
 
-async function test(platforms, { artifactRoot, cleanup, deviceId }) {
+async function test(platforms, { artifactRoot, cleanup, deviceId, flow }) {
   await assertMetroPortAvailable();
   log("setup", `Preparing ${platforms.join(" + ")} test devices.`);
   const devices = await Promise.all(
@@ -140,7 +154,7 @@ async function test(platforms, { artifactRoot, cleanup, deviceId }) {
   }
 
   const results = await Promise.allSettled(
-    devices.map((device) => runMaestroSuite({ artifactRoot, cleanup, device, root })),
+    devices.map((device) => runMaestroSuite({ artifactRoot, cleanup, device, flow, root })),
   );
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length > 0) {
@@ -168,6 +182,7 @@ try {
       artifactRoot,
       cleanup,
       deviceId: options.deviceId,
+      flow: options.flow,
     });
   }
 } catch (error) {
