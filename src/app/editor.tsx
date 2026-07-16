@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,18 +14,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import type { ExportSettings, Point } from "@/core/document";
 import {
-  addTextElement,
-  removeTextElement,
-  reorderImages,
-  setBackgroundColor,
-  setCanvasRatio,
-  setExportSettings,
-  setStitchMode,
-  setStitchSpacing,
-  updateTextElement,
-} from "@/core/operations";
-import type { ExportSettings, Point, TextElement } from "@/core/document";
+  editIntents,
+  type EditCommitModule,
+  type EditIntent,
+  type EditResult,
+} from "@/core/editing";
 import { BackgroundPanel } from "@/features/editor/components/BackgroundPanel";
 import { EditorHeader } from "@/features/editor/components/EditorHeader";
 import { EditorToolbar, type EditorTool } from "@/features/editor/components/EditorToolbar";
@@ -38,10 +33,7 @@ import {
   type TextStyleDraft,
 } from "@/features/editor/components/TextPanel";
 import { editorRuntime } from "@/features/editor/runtime";
-import {
-  useEditorDocumentStore,
-  type EditorDocumentStore,
-} from "@/features/editor/state/documentStore";
+import { useEditCommit } from "@/features/editor/state/editCommit";
 import { DocumentCanvas } from "@/features/editor/components/DocumentCanvas";
 import { exportDocument } from "@/services/export";
 import { colors, spacing, typography } from "@/ui/theme";
@@ -56,39 +48,18 @@ function LoadingEditor() {
   );
 }
 
-function textDraftMatches(element: TextElement, draft: TextDraft): boolean {
-  return (
-    element.content === draft.content &&
-    element.fontSize === draft.fontSize &&
-    element.color === draft.color &&
-    element.alignment === draft.alignment &&
-    element.lineHeight === draft.lineHeight &&
-    element.backgroundColor === draft.backgroundColor
-  );
-}
-
-function textStyleMatches(element: TextElement, style: TextStyleDraft): boolean {
-  return (
-    element.fontSize === style.fontSize &&
-    element.color === style.color &&
-    element.alignment === style.alignment &&
-    element.lineHeight === style.lineHeight &&
-    element.backgroundColor === style.backgroundColor
-  );
-}
-
 export default function EditorScreen() {
   const router = useRouter();
-  const [store, setStore] = useState<EditorDocumentStore | null>(() => editorRuntime.getStore());
+  const [editing, setEditing] = useState<EditCommitModule | null>(() => editorRuntime.getEditing());
 
   useEffect(() => {
-    if (store !== null) return;
+    if (editing !== null) return;
     let active = true;
     void editorRuntime.restore().then((result) => {
       if (!active) return;
-      const restoredStore = editorRuntime.getStore();
-      if (result.status === "restored" && restoredStore !== null) {
-        setStore(restoredStore);
+      const restoredEditing = editorRuntime.getEditing();
+      if (result.status === "restored" && restoredEditing !== null) {
+        setEditing(restoredEditing);
       } else {
         router.replace("/" as Href);
       }
@@ -96,55 +67,36 @@ export default function EditorScreen() {
     return () => {
       active = false;
     };
-  }, [router, store]);
+  }, [editing, router]);
 
-  return store === null ? <LoadingEditor /> : <ConnectedEditor store={store} />;
+  return editing === null ? <LoadingEditor /> : <ConnectedEditor editing={editing} />;
 }
 
-function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
+type ActiveEditorTool = EditorTool | "export";
+
+function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const document = useEditorDocumentStore(store, (state) => state.document);
-  const canUndo = useEditorDocumentStore(store, (state) => state.canUndo);
-  const canRedo = useEditorDocumentStore(store, (state) => state.canRedo);
-  const selectedTextId = useEditorDocumentStore(store, (state) => state.selectedTextId);
-  const activeStoreTool = useEditorDocumentStore(store, (state) => state.activeTool);
-  const commit = useEditorDocumentStore(store, (state) => state.commit);
-  const undo = useEditorDocumentStore(store, (state) => state.undo);
-  const redo = useEditorDocumentStore(store, (state) => state.redo);
-  const setSelectedTextId = useEditorDocumentStore(store, (state) => state.setSelectedTextId);
-  const setActiveTool = useEditorDocumentStore(store, (state) => state.setActiveTool);
+  const { document, previewDocument, canUndo, canRedo } = useEditCommit(editing);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<ActiveEditorTool>("background");
 
   const [stageWidth, setStageWidth] = useState(0);
-  const [spacingPreview, setSpacingPreview] = useState<number | null>(null);
-  const [textPreview, setTextPreview] = useState<TextDraft | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ kind: "idle" });
   const [importErrorCount] = useState(() => editorRuntime.takeImportErrorCount());
-  const [textIdPrefix] = useState(() => Date.now().toString(36));
   const canvasScrollRef = useRef<ScrollView>(null);
   const canvasScrollY = useRef(0);
   const canvasScrollYBeforeKeyboard = useRef<number | null>(null);
   const panelScrollRef = useRef<ScrollView>(null);
-  const nextTextSequence = useRef(0);
 
   const canvasWidth = Math.max(0, stageWidth - spacing.s8);
-  const previewDocument = useMemo(() => {
-    const spacingDocument =
-      spacingPreview === null ? document : setStitchSpacing(document, spacingPreview);
-    if (textPreview === null || selectedTextId === null) return spacingDocument;
-    if (!spacingDocument.textElements.some(({ id }) => id === selectedTextId)) {
-      return spacingDocument;
-    }
-    return updateTextElement(spacingDocument, selectedTextId, textPreview);
-  }, [document, selectedTextId, spacingPreview, textPreview]);
   const selectedText =
     document.textElements.find((element) => element.id === selectedTextId) ?? null;
-  const activeTool: EditorTool =
-    activeStoreTool === "stitch" || activeStoreTool === "text" ? activeStoreTool : "background";
+  const toolbarTool: EditorTool = activeTool === "export" ? "background" : activeTool;
 
   useEffect(() => {
     panelScrollRef.current?.scrollTo({ animated: false, y: 0 });
-  }, [activeStoreTool, selectedTextId]);
+  }, [activeTool, selectedTextId]);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -170,56 +122,77 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
     setStageWidth(event.nativeEvent.layout.width);
   };
 
+  const consumeEffects = useCallback((result: EditResult) => {
+    if (result.status !== "changed") return;
+    setSelectedTextId((current) =>
+      current !== null &&
+      result.effects.removed.some(({ kind, id }) => kind === "text" && id === current)
+        ? null
+        : current,
+    );
+  }, []);
+
+  const commitIntent = useCallback(
+    (intent: EditIntent): EditResult => {
+      const result = editing.dispatch({ type: "commit", intent });
+      consumeEffects(result);
+      return result;
+    },
+    [consumeEffects, editing],
+  );
+
   const selectText = (id: string | null) => {
-    setTextPreview(null);
+    editing.dispatch({ type: "cancel-preview" });
     setSelectedTextId(id);
     setActiveTool("text");
   };
 
   const submitText = (draft: TextDraft) => {
     if (selectedText !== null) {
-      const next = updateTextElement(document, selectedText.id, draft);
-      if (!textDraftMatches(selectedText, draft)) commit(next);
-      setTextPreview(null);
-      if (draft.content.length === 0) setSelectedTextId(null);
+      commitIntent(editIntents.text.replaceDraft(selectedText.id, draft));
       return;
     }
-    nextTextSequence.current += 1;
-    const id = `text-${textIdPrefix}-${nextTextSequence.current}`;
-    const text: TextElement = {
-      id,
-      ...draft,
-      position: { x: 80, y: 80 },
-      width: 840,
-      fontId: "system-sans",
-    };
-    commit(addTextElement(document, text));
-    setTextPreview(null);
-    setSelectedTextId(id);
-    canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
+    const result = commitIntent(editIntents.text.add(draft));
+    if (result.status === "changed") {
+      const createdText = result.effects.created.find(({ kind }) => kind === "text");
+      if (createdText !== undefined) setSelectedTextId(createdText.id);
+      canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });
+    }
   };
 
   const commitSelectedTextStyle = (style: TextStyleDraft) => {
-    if (selectedText === null || textStyleMatches(selectedText, style)) return;
-    commit(updateTextElement(document, selectedText.id, style));
+    if (selectedText === null) return;
+    commitIntent(editIntents.text.applyStyle(selectedText.id, style));
   };
 
   const deleteSelectedText = () => {
     if (selectedText === null) return;
-    commit(removeTextElement(document, selectedText.id));
-    setTextPreview(null);
-    setSelectedTextId(null);
+    commitIntent(editIntents.text.remove(selectedText.id));
   };
 
   const moveText = (id: string, position: Point) => {
-    commit(updateTextElement(document, id, { position }));
+    commitIntent(editIntents.text.move(id, position));
     selectText(id);
   };
 
   const updateExportSettings = (settings: ExportSettings) => {
-    commit(setExportSettings(document, settings));
+    commitIntent(editIntents.export.changeSettings(settings));
     setExportStatus({ kind: "idle" });
   };
+
+  const previewSelectedText = useCallback(
+    (draft: TextDraft | null) => {
+      if (draft === null || selectedTextId === null) {
+        editing.dispatch({ type: "cancel-preview" });
+        return;
+      }
+      editing.dispatch({
+        type: "preview",
+        intent: editIntents.text.replaceDraft(selectedTextId, draft),
+      });
+    },
+    [editing, selectedTextId],
+  );
 
   const runExport = async () => {
     setExportStatus({ kind: "exporting" });
@@ -250,7 +223,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
   };
 
   const renderPanel = () => {
-    if (activeStoreTool === "export") {
+    if (activeTool === "export") {
       return (
         <ExportPanel
           onExport={() => void runExport()}
@@ -265,15 +238,17 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
         <StitchPanel
           images={document.sourceImages}
           mode={document.stitch.mode}
-          onModeChange={(mode) => commit(setStitchMode(document, mode))}
-          onOrderChange={(order) => commit(reorderImages(document, order))}
-          onSpacingCommit={(value) => {
-            commit(setStitchSpacing(document, value));
-            setSpacingPreview(null);
-          }}
-          onSpacingPreview={setSpacingPreview}
+          onModeChange={(mode) => commitIntent(editIntents.stitch.changeMode(mode))}
+          onOrderChange={(order) => commitIntent(editIntents.stitch.reorderImages(order))}
+          onSpacingCommit={(value) => commitIntent(editIntents.stitch.changeSpacing(value))}
+          onSpacingPreview={(value) =>
+            editing.dispatch({
+              type: "preview",
+              intent: editIntents.stitch.changeSpacing(value),
+            })
+          }
           order={document.stitch.order}
-          spacingValue={spacingPreview ?? document.stitch.spacing}
+          spacingValue={previewDocument.stitch.spacing}
         />
       );
     }
@@ -282,7 +257,7 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
         <TextPanel
           elements={document.textElements}
           onDelete={selectedText === null ? null : deleteSelectedText}
-          onPreview={setTextPreview}
+          onPreview={previewSelectedText}
           onSelect={selectText}
           onStyleCommit={commitSelectedTextStyle}
           onSubmit={(draft) => {
@@ -297,9 +272,9 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
       <BackgroundPanel
         backgroundColor={document.canvas.backgroundColor}
         onBackgroundColorChange={(backgroundColor) =>
-          commit(setBackgroundColor(document, backgroundColor))
+          commitIntent(editIntents.canvas.changeBackground(backgroundColor))
         }
-        onRatioChange={(ratio) => commit(setCanvasRatio(document, ratio))}
+        onRatioChange={(ratio) => commitIntent(editIntents.canvas.changeRatio(ratio))}
         ratio={document.canvas.ratio}
       />
     );
@@ -319,12 +294,10 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
           onBack={() => void goBack()}
           onExport={() => setActiveTool("export")}
           onRedo={() => {
-            setTextPreview(null);
-            redo();
+            consumeEffects(editing.dispatch({ type: "redo" }));
           }}
           onUndo={() => {
-            setTextPreview(null);
-            undo();
+            consumeEffects(editing.dispatch({ type: "undo" }));
           }}
         />
         {importErrorCount > 0 ? (
@@ -370,9 +343,9 @@ function ConnectedEditor({ store }: { readonly store: EditorDocumentStore }) {
           </ScrollView>
         </View>
         <EditorToolbar
-          activeTool={activeTool}
+          activeTool={toolbarTool}
           onToolChange={(tool) => {
-            setTextPreview(null);
+            editing.dispatch({ type: "cancel-preview" });
             setActiveTool(tool);
             if (tool === "text" && selectedTextId === null) {
               canvasScrollRef.current?.scrollTo({ animated: true, y: 0 });

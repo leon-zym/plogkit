@@ -13,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { TextAlignment, TextElement } from "@/core/document";
+import type { TextDraft, TextStyleDraft } from "@/core/editing";
 import { ActionButton } from "@/ui/ActionButton";
 import { ColorSwatch } from "@/ui/ColorSwatch";
 import { OptionRow } from "@/ui/OptionRow";
@@ -20,12 +21,7 @@ import { colors, radii, spacing, typography } from "@/ui/theme";
 
 import { PanelShell, panelStyles } from "./PanelShell";
 
-export type TextDraft = Pick<
-  TextElement,
-  "content" | "fontSize" | "color" | "alignment" | "lineHeight" | "backgroundColor"
->;
-
-export type TextStyleDraft = Omit<TextDraft, "content">;
+export type { TextDraft, TextStyleDraft } from "@/core/editing";
 
 const DEFAULT_DRAFT: TextDraft = {
   content: "",

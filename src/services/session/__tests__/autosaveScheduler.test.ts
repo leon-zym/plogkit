@@ -1,7 +1,10 @@
-import { createEmptyDocument } from "@/core/document";
-import { setBackgroundColor } from "@/core/operations";
+import { createEmptyDocument, type PlogDocument } from "@/core/document";
 
 import { createAutosaveScheduler } from "../autosaveScheduler";
+
+function withBackground(document: PlogDocument, backgroundColor: string): PlogDocument {
+  return { ...document, canvas: { ...document.canvas, backgroundColor } };
+}
 
 describe("autosave scheduler", () => {
   beforeEach(() => jest.useFakeTimers());
@@ -12,8 +15,8 @@ describe("autosave scheduler", () => {
     const scheduler = createAutosaveScheduler(save, { delayMs: 100 });
     const initial = createEmptyDocument();
 
-    scheduler.schedule(setBackgroundColor(initial, "#111111"));
-    scheduler.schedule(setBackgroundColor(initial, "#222222"));
+    scheduler.schedule(withBackground(initial, "#111111"));
+    scheduler.schedule(withBackground(initial, "#222222"));
     jest.advanceTimersByTime(100);
     await scheduler.flush();
 
@@ -41,10 +44,10 @@ describe("autosave scheduler", () => {
     const scheduler = createAutosaveScheduler(save, { delayMs: 10 });
     const initial = createEmptyDocument();
 
-    scheduler.schedule(setBackgroundColor(initial, "#111111"));
+    scheduler.schedule(withBackground(initial, "#111111"));
     jest.advanceTimersByTime(10);
     await Promise.resolve();
-    scheduler.schedule(setBackgroundColor(initial, "#222222"));
+    scheduler.schedule(withBackground(initial, "#222222"));
     jest.advanceTimersByTime(10);
     await Promise.resolve();
 

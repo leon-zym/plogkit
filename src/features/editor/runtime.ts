@@ -1,9 +1,6 @@
 import { createDocument, type PlogDocument } from "@/core/document";
+import { createEditCommitModule, type EditCommitModule } from "@/core/editing";
 import { File } from "expo-file-system";
-import {
-  createEditorDocumentStore,
-  type EditorDocumentStore,
-} from "@/features/editor/state/documentStore";
 import { createExpoImageImportFileAdapter } from "@/services/image-import/expoImageFiles";
 import { createExpoImagePickerSource } from "@/services/image-import/expoImagePickerSource";
 import { importImages, type ImageImportResult } from "@/services/image-import/importImages";
@@ -23,7 +20,6 @@ import {
   type RestoreSessionResult,
 } from "@/services/session/sessionRepository";
 import { settingsRuntime } from "@/services/settings/expoSettingsRuntime";
-import { setExportSettings } from "@/core/operations";
 
 const paths = createExpoSessionPaths();
 const repository = createSessionRepository({
@@ -32,13 +28,13 @@ const repository = createSessionRepository({
 });
 
 class EditorRuntime {
-  private store: EditorDocumentStore | null = null;
+  private editing: EditCommitModule | null = null;
   private autosave: AutosaveScheduler | null = null;
   private restorePromise: Promise<RestoreSessionResult> | null = null;
   private importErrors = 0;
 
-  getStore(): EditorDocumentStore | null {
-    return this.store;
+  getEditing(): EditCommitModule | null {
+    return this.editing;
   }
 
   getSessionPaths() {
@@ -51,19 +47,19 @@ class EditorRuntime {
     return count;
   }
 
-  private start(document: PlogDocument): EditorDocumentStore {
+  private start(document: PlogDocument): EditCommitModule {
     const autosave = createAutosaveScheduler((nextDocument) => repository.save(nextDocument));
     this.autosave = autosave;
-    this.store = createEditorDocumentStore({
+    this.editing = createEditCommitModule({
       initialDocument: document,
-      onDocumentCommit: (nextDocument) => autosave.schedule(nextDocument),
+      onEditCommit: (nextDocument) => autosave.schedule(nextDocument),
     });
-    return this.store;
+    return this.editing;
   }
 
   async restore(): Promise<RestoreSessionResult> {
-    if (this.store !== null) {
-      return { status: "restored", document: this.store.getState().document };
+    if (this.editing !== null) {
+      return { status: "restored", document: this.editing.read().document };
     }
     this.restorePromise ??= repository.restore();
     const result = await this.restorePromise;
@@ -83,11 +79,12 @@ class EditorRuntime {
 
     await this.autosave?.dispose();
     const settings = await settingsRuntime.load();
-    const initialDocument = createDocument(result.imported.map(({ image }) => image));
-    const document = setExportSettings(initialDocument, {
-      ...initialDocument.exportSettings,
-      metadataPolicy: settings.defaultMetadataPolicy,
-    });
+    const document = createDocument(
+      result.imported.map(({ image }) => image),
+      {
+        metadataPolicy: settings.defaultMetadataPolicy,
+      },
+    );
     await repository.save(document);
     this.start(document);
     this.importErrors = result.errors.length;
