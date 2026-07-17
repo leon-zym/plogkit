@@ -42,7 +42,13 @@
 - THEN 应用进入 Editor 并展示草稿内容
 - AND 预览缺失或损坏时自动重建，可选拍摄信息缺失时仍可编辑
 
-#### Scenario: 进程终止后继续编辑
+#### Scenario: 进程终止后恢复当前会话
+
+- GIVEN 当前编辑会话的最新编辑已持久化，应用被系统或用户强制终止
+- WHEN 用户重新启动应用并选择“继续编辑”
+- THEN 应用进入 Editor，画布内容与终止前一致
+
+#### Scenario: 从草稿库继续终止前的草稿
 
 - 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 当前草稿的最新编辑已持久化，应用被系统或用户强制终止
