@@ -111,7 +111,8 @@ editing, AI generation, and cloud features.
   schema changes likewise bump `catalogSchemaVersion`.
 - Export invariants: render from the document model (never screenshot the
   preview); respect per-preset caps (≤ 64MP total, ≤ 16384px long edge);
-  strip EXIF/GPS by default; SDR output only in MVP (ADR 0007–0009).
+  strip EXIF/GPS by default; the current export baseline is SDR-only until a
+  later ADR explicitly changes it (ADR 0007–0009, 0018).
 
 ## Environment Notes
 

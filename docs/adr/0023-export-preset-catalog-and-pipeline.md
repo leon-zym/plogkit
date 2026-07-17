@@ -18,7 +18,7 @@
 
 切换导出预设时始终清除原预设的 `formatOverride`，直接使用新预设的 `defaultFormat`；格式覆盖不跨预设继承。metadata policy 作为用户隐私选择原则上保留，但若新预设的默认格式不支持当前 policy，则在同一次编辑提交中安全降级为 `strip`。之后切换到重新支持 metadata 的格式时不自动恢复旧选择，避免隐式增加输出 metadata。预设切换与这些归一化共同形成一次原子编辑提交，不由 UI caller 编排。
 
-导出预设可以面向通用场景或特定目标平台，统一表达 HDR 保留策略、Live Photo 保留策略、短边与长边尺寸上限，以及是否执行面向上传的预压缩；不为面向平台的预设建立独立领域类型或 module。MVP catalog 仍只产生 SDR 静态图片；这些字段用于让未来能力沿既有 catalog 与导出 seam 扩展，而不是提前实现 ADR 0009 延后的 HDR 或 Live Photo 导出。
+导出预设可以面向通用场景或特定目标平台，统一表达 HDR 保留策略、Live Photo 保留策略、短边与长边尺寸上限，以及是否执行面向上传的预压缩；不为面向平台的预设建立独立领域类型或 module。当前 catalog 仍只产生 SDR 静态图片；这些字段用于让未来能力沿既有 catalog 与导出 seam 扩展，而不是提前实现 ADR 0009 延后的 HDR 或 Live Photo 导出。
 
 导出预设 catalog 的运行时表示是经过完整校验的 immutable `ExportPresetCatalogSnapshot`。当前版本只从 bundled declaration 同步建立一个 snapshot，不引入 class、依赖注入、loader interface 或 adapter。export policy module 对 caller 只提供三个能力：`listPresetOptions()` 从当前 snapshot 向 UI 投影 ID、呈现 key 与可选格式；`parseExportSettings(input)` 只结构化校验 opaque `ExportPresetId`、format override 与 metadata policy，不要求当前 snapshot 包含该 ID；`resolveExportPolicy(settings, sourceFacts, capabilities)` 从同一 snapshot 为导出规划产生完整且已校验的尺寸、动态范围、动态照片、格式、质量、预压缩、metadata 与后处理策略。raw catalog 声明属于 implementation，不再导出 `EXPORT_PRESETS` 或 `getExportPreset()` 让 caller 自行解释；`ExportPresetId` 是经结构校验产生的 opaque branded string，不是 `document.ts` 手写或从 bundled declaration 推导的 literal union。
 
@@ -28,7 +28,7 @@
 
 `ExportPresetId` 表示预设稳定的用户语义，`presetRevision` 表示该预设当前策略修订。同一目标与含义下调整参数保留 ID 并提升 revision；改变目标平台或用户语义时创建新 ID，绝不复用旧 ID。产品发布前本次重构直接建立新 baseline，不实现占位 ID 兼容或迁移；产品发布后，删除或重命名已发布 ID 时再明确设计迁移或退役策略，不提前保留 hidden preset。
 
-未来若确有磁盘、网络或用户文件来源，各来源 loader 只负责将输入校验并转换为同一种 snapshot，再在 bootstrap 或更新点原子替换；已经开始的导出持有一次解析完成的 `ResolvedExportPolicy`，不受中途更新影响。当前仍遵守产品无网络调用的硬边界，不实现这些 loader。该 snapshot 形状可作为未来花字等 catalog 的设计模式，但现在不抽取 generic catalog、通用 loader 或共享 adapter；第二个真实 catalog 出现后，才根据实际重复提取 manifest envelope、snapshot replacement 或完整性校验等基础设施，各领域 resolver 保持独立。
+未来若确有 bundled declaration 以外的设备本地磁盘或用户文件来源，各来源 loader 只负责将输入校验并转换为同一种 snapshot，再在 bootstrap 或更新点原子替换；已经开始的导出持有一次解析完成的 `ResolvedExportPolicy`，不受中途更新影响。当前不实现这些 loader；输入来源保持在 snapshot 边界之外，新增来源不改变 resolver interface。该 snapshot 形状可作为未来花字等 catalog 的设计模式，但现在不抽取 generic catalog、通用 loader 或共享 adapter；第二个真实 catalog 出现后，才根据实际重复提取 manifest envelope、snapshot replacement 或完整性校验等基础设施，各领域 resolver 保持独立。
 
 导出的稳定 external seam 位于 `ExportPipeline` 与其 backend，而不是 render 与 encoder 之间的中立 pixel interface。`ExportPipeline.run()` 接收统一文档中的导出设置与草稿资产，在每次运行开始时使用当前 immutable catalog snapshot、源素材事实与 backend capabilities 调用 policy resolver，并在该次运行内持有一份 immutable `ResolvedExportPolicy`。UI 可以调用同一 resolver 预检，但 pipeline 对真实导出结果负责，不信任预检时的结果仍然有效。backend 只接收 resolved policy；pipeline 还负责 orchestration、destination、typed result 与诊断上下文。backend 内部仍保持 render 与 encode 两项清晰职责，但二者共享 backend-private 的 owned 中间产物，并由 backend 保证释放、色彩、格式和编码不变量。当前 Skia backend 可以直接使用 `SkImage` 完成 SDR 静态图渲染与编码，不为制造 seam 将 64MP 图像回读成额外 RGBA buffer。
 

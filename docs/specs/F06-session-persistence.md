@@ -16,7 +16,8 @@
 
 ## 非目标
 
-- 草稿列表的命名、排序、缩略图、删除交互，云备份与跨设备同步。
+- 当前版本不包含草稿列表的命名、排序、缩略图、删除交互，云备份与跨设备同步。
+- 与 Issue #9 关联的草稿库导航场景是已确认的后续能力，不属于当前版本验收；Issue #14/#15 只建立其依赖的 aggregate 与 session seam。
 
 ## 需求与场景
 
@@ -60,7 +61,7 @@
 
 #### Scenario: 草稿切换原子化
 
-- 状态：已确认（待 [Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 当前草稿有一个活跃会话
 - WHEN 用户打开另一个草稿
 - THEN 应用先保存当前最新修改，确认目标草稿可用后再显示它

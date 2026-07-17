@@ -11,6 +11,7 @@
   - `部分修订`：未被点名调整的结论继续有效；原 ADR 的状态与索引链接到后续 ADR，后续 ADR 以“修订”列出 predecessor 并承载当前结论。
   - `已取代`：原决策不再作为现行规则；原 ADR 的状态与索引链接到 successor，successor 以“取代”列出 predecessor。
 - 决策演进时新增 ADR，不改写 predecessor 的背景、决策或影响；只更新其状态元数据、前后继链接与索引，保持历史可追溯。
+- ADR 标题与正文保留决策发生时的阶段语境，包括历史上的 MVP 表述；当前产品阶段与仍生效的规则以产品范围、决策台账及后续 ADR 为准。
 - 本目录以中文为权威版本（见 ADR 0014）。
 
 ## 索引
@@ -46,21 +47,21 @@
 
 决策编号（D 编号）与 ADR 的对应关系：
 
-| 台账 | 内容                                                                                 | 对应 ADR               |
-| ---- | ------------------------------------------------------------------------------------ | ---------------------- |
-| D01  | iOS 先行，跨端纪律 + CI 编译检查                                                     | 0002                   |
-| D02  | 导出预设数据驱动；元数据默认剥离；MVP 导出 SDR 静态图、Live Photo 取静帧             | 0008、0009、0023       |
-| D03  | Share Extension 进 v1.1，预留外部图片入口                                            | 0017                   |
-| D04  | Expo SDK 57 + CNG + dev client + pnpm                                                | 0002                   |
-| D05  | UI 中英双语，i18n 从第一天建立                                                       | 0014                   |
-| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                                       | 0012、0019             |
-| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                                           | 0015                   |
-| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                                         | 0013                   |
-| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                             | 0014                   |
-| D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限等）；MVP SDR/sRGB，广色域后续重评估 | 0004、0007、0011、0018 |
-| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                       | 0016                   |
-| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                        | 0016、0020             |
-| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                       | 0003、0004、0021       |
-| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开                      | 0003、0006、0021、0022 |
-| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos             | 0007、0008、0011、0023 |
-| D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                           | 0003、0005、0011、0024 |
+| 台账 | 内容                                                                                  | 对应 ADR               |
+| ---- | ------------------------------------------------------------------------------------- | ---------------------- |
+| D01  | iOS 先行，跨端纪律 + CI 编译检查                                                      | 0002                   |
+| D02  | 导出预设数据驱动；元数据默认剥离；当前导出 SDR 静态图、Live Photo 取静帧              | 0008、0009、0023       |
+| D03  | Share Extension 进 v1.1，预留外部图片入口                                             | 0017                   |
+| D04  | Expo SDK 57 + CNG + dev client + pnpm                                                 | 0002                   |
+| D05  | UI 中英双语，i18n 从第一天建立                                                        | 0014                   |
+| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                                        | 0012、0019             |
+| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                                            | 0015                   |
+| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                                          | 0013                   |
+| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                              | 0014                   |
+| D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限等）；当前 SDR/sRGB，广色域后续重评估 | 0004、0007、0011、0018 |
+| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                        | 0016                   |
+| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                         | 0016、0020             |
+| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                        | 0003、0004、0021       |
+| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开                       | 0003、0006、0021、0022 |
+| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos              | 0007、0008、0011、0023 |
+| D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                            | 0003、0005、0011、0024 |
