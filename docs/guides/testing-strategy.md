@@ -1,6 +1,6 @@
 # 测试策略
 
-决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md) 和 [ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -45,7 +45,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 - `clearState` 会重置应用数据。dev menu 的自动界面由项目 config plugin 禁用，避免干扰业务元素定位。
 - 本地与 CI 共用同一编排脚本。双端本地测试串行 warmup，再并行运行两个 Maestro 业务 suite；CI 的平台 job 在不同 runner 上并行。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
-当可见界面不足以证明持久化或导出结果时，通过 `simctl` 或 `adb` 读取 App 沙盒和公开产物。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
+当可见界面不足以证明持久化结果时，通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
 ### L5 CI
 

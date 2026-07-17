@@ -1,6 +1,6 @@
-# MVP 界面设计方向
+# 界面设计方向
 
-本文记录 MVP 的界面视觉与交互基线。它服务于实现一致性，不改变 `docs/product/` 与
+本文记录当前产品的界面视觉与交互基线。它服务于实现一致性，不改变 `docs/product/` 与
 `docs/specs/` 的功能边界。
 
 ## 方向锁定
@@ -15,7 +15,7 @@
 
 - [Apple Photos](https://support.apple.com/guide/iphone/edit-photos-and-videos-iphb08064d57/ios)：照片占据主区域，完成/取消等会话动作放在顶部，具体编辑工具和精确调节放在底部。PlogKit 采用同样的内容主导和上下分区，但不复制滤镜与调色能力。
 - [Adobe Express](https://www.adobe.com/express/feature/image/editor)：从图片直接进入编辑，再按当前任务逐步暴露工具。PlogKit 采用渐进式工具入口，但不引入模板、素材库、动画和 AI。
-- [Canva](https://www.canva.com/features/)：比例、拼接与文字入口易发现。PlogKit 保留这种任务命名的直白性，但拒绝自由画布、庞大工具目录和账号/云工作流。
+- [Canva](https://www.canva.com/features/)：比例、拼接与文字入口易发现。PlogKit 保留这种任务命名的直白性；当前任务流不使用自由画布，后续拼贴风自由画布仍须保持轻量，并继续拒绝庞大工具目录和账号/云工作流。
 
 ## 1. 视觉主题与氛围
 
@@ -47,7 +47,7 @@
 
 ## 3. 排印规则
 
-品牌关键词为“安静、触感、直接”。拒绝将 Inter、DM Sans、Space Grotesk 作为无意识的展示字体。MVP 的应用 UI 有意使用平台系统字体：iOS 使用 SF Pro/PingFang SC，Android 使用 Roboto/Noto Sans CJK fallback，以保证中文、动态字号、输入法和跨端可读性。照片内文字由文档中的逻辑字体 ID 映射，和 UI 字体分离。
+品牌关键词为“安静、触感、直接”。拒绝将 Inter、DM Sans、Space Grotesk 作为无意识的展示字体。当前应用 UI 有意使用平台系统字体：iOS 使用 SF Pro/PingFang SC，Android 使用 Roboto/Noto Sans CJK fallback，以保证中文、动态字号、输入法和跨端可读性。照片内文字由文档中的逻辑字体 ID 映射，和 UI 字体分离。
 
 | 层级    | 字号 | 字重 |                   行高 | 用途                 |
 | ------- | ---: | ---: | ---------------------: | -------------------- |
@@ -103,7 +103,7 @@
 
 ## 8. 响应式与无障碍
 
-- MVP 手机宽度范围按 320 到 430pt 验证，iPad 暂不支持；横屏不作为主流程。
+- 当前手机宽度范围按 320 到 430pt 验证，iPad 暂不支持；横屏不作为主流程。
 - 所有触控目标至少 44×44pt，系统动态字号开启后工具标签允许两行，不能尾部省略关键动作。
 - 使用 Safe Area；键盘出现时文本输入与确认按钮保持可达。
 - 所有交互元素具备 `testID`、本地化 `accessibilityLabel`、角色、选中/禁用状态。

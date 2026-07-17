@@ -42,7 +42,7 @@ React Native (Expo, New Architecture) + Skia + TypeScript. The editor is documen
 
 Authoritative project documentation lives in [`docs/`](docs/) and is written in Chinese (see ADR 0014):
 
-- [`docs/product/`](docs/product/): positioning, MVP scope, naming.
+- [`docs/product/`](docs/product/): positioning, current product scope, naming.
 - [`docs/adr/`](docs/adr/): architecture decision records with a decision ledger.
 - [`docs/specs/`](docs/specs/): BDD acceptance specs (Given/When/Then) per feature.
 - [`docs/guides/`](docs/guides/): design system, testing strategy, and development environment.

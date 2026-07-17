@@ -1,7 +1,8 @@
 # F01 为图片加字
 
 - 状态：已实现
-- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0005](../adr/0005-text-editing-model.md)
+- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0005](../adr/0005-text-editing-model.md)、[ADR 0024](../adr/0024-text-block-layout-geometry.md)
+- 实施跟踪：[Issue #13](https://github.com/leon-zym/plogkit/issues/13)
 
 ## 概述
 
@@ -73,7 +74,31 @@
 - THEN 文本块停留在新位置
 - AND 松手时文档模型记录一次位置提交（拖动过程不逐帧入档）
 
+#### Scenario: 实际排版几何与命中一致
+
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
+- GIVEN 画布上有中文换行、显式换行或右对齐的可见文本块
+- WHEN 用户点击其可见字形附近并拖动
+- THEN 对应文本块被选中并随手势移动
+- AND 选中框贴合实际可见文字，不覆盖整段无字的换行宽度
+
+#### Scenario: 小文本兼顾触达与准确选中框
+
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
+- GIVEN 画布上有一个可见范围小于 44×44pt 的文本块
+- WHEN 用户点击围绕该文本的最小 44×44pt 触达区域
+- THEN 该文本块可以被选中
+- AND 选中框仍只贴合实际可见文字，不随触达区域扩大
+
+#### Scenario: 重叠文本按可见层级命中
+
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
+- GIVEN 两个文本块的 touch bounds 重叠
+- WHEN 用户点击重叠区域
+- THEN 视觉上位于上层的文本块被选中
+- AND 选中或移动不改变文本块之间的可见层级
+
 ## 已解决与后续观察
 
-- MVP 预置样式为正文、标题、注释三档；字号与行高仍可单独调整。
+- 当前预置样式为正文、标题、注释三档；字号与行高仍可单独调整。
 - 含 emoji 文本的行高表现继续作为上游兼容性观察项（ADR 0005），不扩展为装饰性字效系统。

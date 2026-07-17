@@ -1,7 +1,7 @@
 # ADR 0019：Maestro E2E 扩展到 iOS 与 Android 模拟设备
 
-- 状态：已接受（2026-07-13）
-- 调整：ADR 0011、0012 中仅在 iOS 模拟器运行自动化 E2E 的平台范围
+- 状态：部分修订（2026-07-13 接受；见 [ADR 0020](0020-ci-lifecycle-and-main-ruleset.md)）
+- 修订：ADR 0002 中 Android 待验证的状态，以及 ADR 0011、0012 中仅在 iOS 模拟器运行自动化 E2E 的平台范围
 
 ## 背景
 
