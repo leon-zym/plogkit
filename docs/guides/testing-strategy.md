@@ -1,6 +1,6 @@
 # 测试策略
 
-决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md) 和 [ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
