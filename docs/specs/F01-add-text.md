@@ -1,7 +1,8 @@
 # F01 为图片加字
 
-- 状态：部分实现（文本布局架构重构待实施）
+- 状态：已实现
 - 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0005](../adr/0005-text-editing-model.md)、[ADR 0024](../adr/0024-text-block-layout-geometry.md)
+- 实施跟踪：[Issue #13](https://github.com/leon-zym/plogkit/issues/13)
 
 ## 概述
 
@@ -75,6 +76,7 @@
 
 #### Scenario: 实际排版几何与命中一致
 
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
 - GIVEN 画布上有中文换行、显式换行或右对齐的可见文本块
 - WHEN 用户点击其可见字形附近并拖动
 - THEN 对应文本块被选中并随手势移动
@@ -82,6 +84,7 @@
 
 #### Scenario: 小文本兼顾触达与准确选中框
 
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
 - GIVEN 画布上有一个可见范围小于 44×44pt 的文本块
 - WHEN 用户点击围绕该文本的最小 44×44pt 触达区域
 - THEN 该文本块可以被选中
@@ -89,6 +92,7 @@
 
 #### Scenario: 重叠文本按可见层级命中
 
+- 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
 - GIVEN 两个文本块的 touch bounds 重叠
 - WHEN 用户点击重叠区域
 - THEN `textElements` 中靠后的文本块被选中

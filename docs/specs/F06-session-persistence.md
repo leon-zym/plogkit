@@ -1,7 +1,8 @@
 # F06 会话自动保存与恢复
 
-- 状态：部分实现（Draft Aggregate/Current Editing Session 架构重构待实施）
+- 状态：已实现
 - 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
+- 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
 
@@ -23,6 +24,7 @@
 
 #### Scenario: 提交即持久化
 
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 用户完成一次编辑提交（如添加文本）
 - WHEN 自动保存调度完成
 - THEN 当前 `DraftId` 的持久化统一文档反映最新文档状态
@@ -33,19 +35,32 @@
 
 #### Scenario: 打开有效草稿
 
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 一个持久化内容完整的草稿
 - WHEN 用户打开该草稿
 - THEN 应用进入 Editor 并展示草稿内容
 - AND 预览缺失或损坏时自动重建，可选拍摄信息缺失时仍可编辑
 
+#### Scenario: 进程终止后继续编辑
+
+- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- GIVEN 当前草稿的最新编辑已持久化，应用被系统或用户强制终止
+- WHEN 用户重新启动应用
+- THEN 应用先展示草稿库，且该草稿仍可被发现，不自动进入 Editor
+- WHEN 用户打开该草稿，或使用“继续上次编辑”快捷入口
+- THEN 应用进入 Editor，画布内容与终止前一致
+- AND 新的当前编辑会话不保留上个进程的 undo/redo history
+
 #### Scenario: 损坏的持久事实拒绝打开
 
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 草稿的原图或编辑内容损坏，无法安全恢复
 - WHEN 用户打开该草稿
 - THEN 应用提示该草稿无法安全打开，不以残缺状态进入 Editor
 
 #### Scenario: 草稿切换原子化
 
+- 状态：已确认（待 [Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 当前草稿有一个活跃会话
 - WHEN 用户打开另一个草稿
 - THEN 应用先保存当前最新修改，确认目标草稿可用后再显示它
@@ -59,6 +74,7 @@
 
 #### Scenario: 返回草稿库保留同进程 history
 
+- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 用户正在编辑一个草稿
 - WHEN 用户返回草稿库后再次打开同一 `DraftId`
 - THEN 返回时只 flush 而不结束当前编辑会话
@@ -66,6 +82,7 @@
 
 #### Scenario: 主动离开时 flush 失败
 
+- 状态：已确认（待 [Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 当前草稿有 dirty 修改
 - WHEN 用户主动离开 Editor 且 flush 失败
 - THEN 阻止导航并保留未保存修改，允许用户重试

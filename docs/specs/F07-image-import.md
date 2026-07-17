@@ -1,7 +1,8 @@
 # F07 图片导入与资产管理
 
-- 状态：部分实现（Imported Asset lifecycle 架构重构待实施）
+- 状态：已实现
 - 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
+- 实施跟踪：[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
 
@@ -25,13 +26,22 @@
 
 #### Scenario: 多选导入
 
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
 - GIVEN 用户在首页点击选图
-- WHEN 用户在系统选择器中选中 3 张照片并确认
-- THEN 至少一张图片导入成功后创建草稿，并在 Editor 中展示所有成功图片
-- AND 单张图片失败不丢弃同一批次中已经成功的图片
+- WHEN 用户在系统选择器中选中 3 张有效且本地可读取的照片并确认
+- THEN 应用创建草稿，并在 Editor 中展示全部 3 张图片
+
+#### Scenario: 部分失败保留同批次成功图片
+
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
+- GIVEN 用户选择的 3 张图片中有 1 张在导入时失败
+- WHEN 另外 2 张图片导入成功
+- THEN 应用创建只包含 2 张成功图片的草稿并进入 Editor
+- AND 应用明确提示失败项，不丢弃同批次中已经成功的图片
 
 #### Scenario: 取消或全部失败不创建草稿
 
+- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
 - GIVEN 用户开始从外部图片候选创建草稿
 - WHEN 用户取消，或所有候选均导入失败
 - THEN 应用不创建或展示一个残缺草稿
@@ -60,6 +70,7 @@
 
 #### Scenario: 替换图片可以在当前会话撤销
 
+- 状态：已确认（待 [Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
 - GIVEN 当前编辑会话中的文档包含一张图片
 - WHEN 用户替换该图片后执行撤销
 - THEN 原图片重新出现在文档与预览中
