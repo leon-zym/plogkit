@@ -1,7 +1,7 @@
 # ADR 0022：以草稿 aggregate 深化持久化与当前编辑会话
 
 - 状态：已接受（2026-07-16）
-- 调整：ADR 0003、0006
+- 修订：ADR 0003、0006
 - 关联：ADR 0004、0021、[F06](../specs/F06-session-persistence.md)、[F07](../specs/F07-image-import.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

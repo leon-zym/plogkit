@@ -1,6 +1,6 @@
 # ADR 0011：测试策略：五层金字塔与 BDD 方法论
 
-- 状态：已接受（2026-07-02）
+- 状态：部分修订（2026-07-02 接受；见 [ADR 0019](0019-cross-platform-maestro-e2e.md)、[ADR 0020](0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0023](0023-export-preset-catalog-and-pipeline.md)）
 - 关联：ADR 0003、0012、0013；详见 [guides/testing-strategy.md](../guides/testing-strategy.md)
 
 ## 背景

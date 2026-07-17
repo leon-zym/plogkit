@@ -1,6 +1,6 @@
 # ADR 0012：E2E 工具：Maestro 模拟器主力 + Device Hub 真机手动冒烟
 
-- 状态：已接受（2026-07-02）
+- 状态：部分修订（2026-07-02 接受；见 [ADR 0019](0019-cross-platform-maestro-e2e.md)）
 - 关联：ADR 0011
 
 ## 背景
