@@ -1,7 +1,7 @@
 # F07 图片导入与资产管理
 
-- 状态：已实现
-- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)
+- 状态：部分实现（Imported Asset lifecycle 架构重构待实施）
+- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
 
 ## 概述
 
@@ -27,8 +27,14 @@
 
 - GIVEN 用户在首页点击选图
 - WHEN 用户在系统选择器中选中 3 张照片并确认
-- THEN 编辑会话创建，3 张图片的原图与预览副本存在于沙盒资产目录
-- AND 文档模型引用的是沙盒资产路径而非系统相册引用
+- THEN 至少一张图片导入成功后创建草稿，并在 Editor 中展示所有成功图片
+- AND 单张图片失败不丢弃同一批次中已经成功的图片
+
+#### Scenario: 取消或全部失败不创建草稿
+
+- GIVEN 用户开始从外部图片候选创建草稿
+- WHEN 用户取消，或所有候选均导入失败
+- THEN 应用不创建或展示一个残缺草稿
 
 #### Scenario: 预览使用降采样副本
 
@@ -52,6 +58,12 @@
 - THEN 界面显示下载进行中，下载完成后继续导入流程
 - AND 下载超时或失败时给出明确提示，已成功的图片不受影响
 
+#### Scenario: 替换图片可以在当前会话撤销
+
+- GIVEN 当前编辑会话中的文档包含一张图片
+- WHEN 用户替换该图片后执行撤销
+- THEN 原图片重新出现在文档与预览中
+
 ### 需求 3：来源解耦
 
 #### Scenario: 原图删除不影响再编辑
@@ -63,4 +75,4 @@
 ## 已解决与后续问题
 
 - 多选上限与 F03 统一为 9 张。
-- MVP 只维护 `projects/current` 当前会话；完整草稿/项目生命周期引入后，再一并定义跨项目资产清理策略。
+- 草稿资产的身份、不可变原图、会话内 undo 保留与安全压缩由 ADR 0022 定义，不在本 feature spec 重复内部顺序。
