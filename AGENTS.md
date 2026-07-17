@@ -33,7 +33,8 @@ editing, AI generation, and cloud features.
   Node headless (CanvasKit); keep it free of device-only APIs.
 - `src/features/` — editor UI, panels, gestures (commit to document on gesture end).
 - `src/services/` — draft persistence and imported-asset ownership,
-  current-session autosave, and export pipeline (render stage / encode stage split).
+  current-session autosave, and export orchestration. Export backends own render
+  and encode responsibilities behind the pipeline seam.
 - `app/` — Expo Router routes.
 - `e2e/flows/` — cross-platform Maestro YAML flows, named after specs (e.g. `f01-add-text.yaml`).
 - `e2e/subflows/` — shared steps and narrowly scoped iOS/Android system-UI adapters.
@@ -82,10 +83,11 @@ editing, AI generation, and cloud features.
   platform subflows; do not duplicate complete flows.
 - When E2E fails without a diagnosed cause, rerun the failing flow unchanged;
   never add retries, sleeps, or longer timeouts merely to suppress flakiness.
-- E2E state assertions read the app sandbox (autosaved draft state and exported
-  files) via `simctl` or `adb`; seed photos with `simctl addmedia` on iOS and
-  `adb` plus MediaStore scanning on Android. Do not add test-only backdoors into
-  app code.
+- E2E state assertions read autosaved draft state from the app sandbox via
+  `simctl` or `adb`. Export E2E asserts a new system Photos/MediaStore resource;
+  pixel, format, dimensions, and metadata belong to backend contract/headless
+  tests. Seed photos with `simctl addmedia` on iOS and `adb` plus MediaStore
+  scanning on Android. Do not add test-only backdoors into app code.
 
 ## Hard Boundaries
 
@@ -105,8 +107,8 @@ editing, AI generation, and cloud features.
   (ADR 0015). App code itself is GPL-3.0-only.
 - Released document schema changes require a `schemaVersion` bump plus a
   migration. A pre-release baseline reset may omit migration only when an ADR
-  explicitly authorizes discarding all unpublished data. Preset declaration
-  schema changes likewise bump `presetSchemaVersion`.
+  explicitly authorizes discarding all unpublished data. Catalog declaration
+  schema changes likewise bump `catalogSchemaVersion`.
 - Export invariants: render from the document model (never screenshot the
   preview); respect per-preset caps (≤ 64MP total, ≤ 16384px long edge);
   strip EXIF/GPS by default; SDR output only in MVP (ADR 0007–0009).

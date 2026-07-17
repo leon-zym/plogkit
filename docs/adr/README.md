@@ -35,24 +35,26 @@
 | [0020](0020-ci-lifecycle-and-main-ruleset.md)           | CI 生命周期与 main 分支门禁                                    | 已接受 |
 | [0021](0021-edit-commit-module.md)                      | 以类型化编辑意图深化编辑提交模块                               | 已接受 |
 | [0022](0022-draft-aggregate-current-editing-session.md) | 以草稿 aggregate 深化持久化与当前编辑会话                      | 已接受 |
+| [0023](0023-export-preset-catalog-and-pipeline.md)      | 深化导出预设 catalog 与导出管线                                | 已接受 |
 
 ## 决策台账
 
 决策编号（D 编号）与 ADR 的对应关系：
 
-| 台账 | 内容                                                               | 对应 ADR               |
-| ---- | ------------------------------------------------------------------ | ---------------------- |
-| D01  | iOS 先行，跨端纪律 + CI 编译检查                                   | 0002                   |
-| D02  | 导出预设数据驱动、平台参数后续定义；EXIF 开关；SDR/Live Photo 静帧 | 0008、0009             |
-| D03  | Share Extension 进 v1.1，预留外部图片入口                          | 0017                   |
-| D04  | Expo SDK 56 + CNG + dev client + pnpm                              | 0002                   |
-| D05  | UI 中英双语，i18n 从第一天建立                                     | 0014                   |
-| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                     | 0012、0019             |
-| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                         | 0015                   |
-| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                       | 0013                   |
-| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文           | 0014                   |
-| D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限、P3 spike 等）    | 0004、0007、0010、0011 |
-| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                     | 0016                   |
-| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁      | 0016、0020             |
-| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启     | 0003、0004、0021       |
-| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开    | 0003、0006、0021、0022 |
+| 台账 | 内容                                                                     | 对应 ADR               |
+| ---- | ------------------------------------------------------------------------ | ---------------------- |
+| D01  | iOS 先行，跨端纪律 + CI 编译检查                                         | 0002                   |
+| D02  | 导出预设数据驱动、平台参数后续定义；EXIF 开关；SDR/Live Photo 静帧       | 0008、0009             |
+| D03  | Share Extension 进 v1.1，预留外部图片入口                                | 0017                   |
+| D04  | Expo SDK 56 + CNG + dev client + pnpm                                    | 0002                   |
+| D05  | UI 中英双语，i18n 从第一天建立                                           | 0014                   |
+| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                           | 0012、0019             |
+| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                               | 0015                   |
+| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                             | 0013                   |
+| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                 | 0014                   |
+| D10  | 技术默认包（Zustand、Expo Router、Jest、导出上限、P3 spike 等）          | 0004、0007、0010、0011 |
+| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                           | 0016                   |
+| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁            | 0016、0020             |
+| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启           | 0003、0004、0021       |
+| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开          | 0003、0006、0021、0022 |
+| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos | 0007、0008、0011、0023 |
