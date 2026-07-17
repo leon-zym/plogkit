@@ -95,8 +95,8 @@
 - 状态：已确认（待 [Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
 - GIVEN 两个文本块的 touch bounds 重叠
 - WHEN 用户点击重叠区域
-- THEN `textElements` 中靠后的文本块被选中
-- AND 选中或移动不改变文本顺序
+- THEN 视觉上位于上层的文本块被选中
+- AND 选中或移动不改变文本块之间的可见层级
 
 ## 已解决与后续观察
 
