@@ -12,6 +12,7 @@ import EditorScreen from "../editor";
 
 const mockReplace = jest.fn();
 const mockDispatch = jest.fn();
+const mockRouter = { replace: mockReplace };
 let mockBeforeRemove:
   | ((event: {
       preventDefault: () => void;
@@ -21,7 +22,7 @@ let mockBeforeRemove:
 
 jest.mock("expo-router", () => ({
   Stack: { Screen: () => null },
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => mockRouter,
   useNavigation: () => ({
     addListener: (_type: string, listener: typeof mockBeforeRemove) => {
       mockBeforeRemove = listener;
@@ -58,7 +59,6 @@ jest.mock("@/features/editor/components/EditorToolbar", () => ({
 jest.mock("@/features/editor/components/ExportPanel", () => ({
   ExportPanel: () => null,
 }));
-
 jest.mock("@/features/editor/components/StitchPanel", () => ({
   StitchPanel: () => null,
 }));
@@ -110,11 +110,12 @@ function createPreparedEditor() {
           })
         : null,
   });
-  return { editing, assets };
+  return { status: "prepared" as const, editing, assets };
 }
 
 describe("Editor session leave", () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     mockBeforeRemove = undefined;
   });
 
@@ -170,5 +171,48 @@ describe("Editor session leave", () => {
 
     expect(runtime.flush).toHaveBeenCalledTimes(2);
     expect(mockDispatch).toHaveBeenCalledWith(action);
+  });
+});
+
+describe("Editor preparation failure", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBeforeRemove = undefined;
+  });
+
+  it("keeps a preview failure in a retryable Editor state until the user goes back", async () => {
+    runtime.prepareEditor.mockResolvedValue({
+      status: "preview-failed",
+      reason: "preview-unavailable",
+      message: "decode failed",
+    });
+    const view = await render(<EditorScreen />);
+
+    await waitFor(() => expect(view.getByTestId("editor-prepare-error")).toBeTruthy());
+    expect(view.getByTestId("editor-prepare-error-message")).toHaveTextContent(
+      "We couldn't prepare the photo previews. Your draft is unchanged.",
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-editor-preparation"));
+    });
+    await waitFor(() => expect(runtime.prepareEditor).toHaveBeenCalledTimes(2));
+
+    fireEvent.press(view.getByTestId("leave-editor-preparation"));
+    expect(mockReplace).toHaveBeenCalledWith("/");
+  });
+
+  it("shows the same retryable state when preparation throws unexpectedly", async () => {
+    runtime.prepareEditor.mockRejectedValue(new Error("unexpected decode error"));
+
+    const view = await render(<EditorScreen />);
+
+    await waitFor(() => expect(view.getByTestId("editor-prepare-error")).toBeTruthy());
+    expect(view.getByTestId("retry-editor-preparation")).toHaveProp(
+      "accessibilityLabel",
+      "Try again",
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 });
