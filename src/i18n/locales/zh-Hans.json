@@ -7,6 +7,7 @@
     "delete": "删除",
     "decrease": "减少",
     "increase": "增加",
+    "retry": "重试",
     "notAvailable": "不可用"
   },
   "home": {
@@ -36,6 +37,7 @@
     "saving": "正在保存",
     "saved": "已保存",
     "saveFailed": "无法保存最新修改，请检查设备存储后重试返回。",
+    "preparationFailed": "无法准备照片预览，当前草稿未受影响。",
     "tools": {
       "background": "背景",
       "stitch": "拼接",

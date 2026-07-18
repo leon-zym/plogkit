@@ -44,15 +44,35 @@ export type RestoreDraftResult =
     };
 
 export interface PreparedEditor {
+  readonly status: "prepared";
   readonly editing: EditCommitModule;
   readonly assets: AssetCatalogSnapshot;
 }
+
+export type PrepareEditorResult =
+  | PreparedEditor
+  | { readonly status: "no-draft" }
+  | {
+      readonly status: "preview-failed";
+      readonly reason: DraftRecoveryFailure | "preview-unavailable";
+      readonly message?: string;
+    }
+  | {
+      readonly status: "unavailable";
+      readonly reason:
+        | DraftRecoveryFailure
+        | "locator-corrupt"
+        | "session-busy"
+        | "flush-failed"
+        | "busy"
+        | "session-inactive";
+    };
 
 export class EditorRuntime {
   private readonly dependencies: EditorRuntimeDependencies;
   private handle: CurrentEditingSessionHandle | null = null;
   private restorePromise: Promise<RestoreDraftResult> | null = null;
-  private preparePromise: Promise<PreparedEditor | null> | null = null;
+  private preparePromise: Promise<PrepareEditorResult> | null = null;
   private importErrors = 0;
 
   constructor(dependencies: EditorRuntimeDependencies) {
@@ -100,22 +120,29 @@ export class EditorRuntime {
     }
   }
 
-  prepareEditor(): Promise<PreparedEditor | null> {
+  prepareEditor(): Promise<PrepareEditorResult> {
     if (this.preparePromise !== null) return this.preparePromise;
     this.preparePromise = (async () => {
       try {
         const restored = await this.restore();
-        const handle = this.handle;
-        if (restored.status !== "restored" || handle === null) return null;
-        const previews = await handle.preparePreviews();
-        if (previews.status !== "prepared") {
-          throw new Error(
-            previews.status === "preview-failed"
-              ? (previews.message ?? previews.reason)
-              : previews.status,
-          );
+        if (restored.status === "none") return { status: "no-draft" };
+        if (restored.status === "recovery-failed") {
+          return { status: "unavailable", reason: restored.reason };
         }
-        return { editing: handle.editing, assets: handle.assets };
+        const handle = this.handle;
+        if (handle === null) return { status: "unavailable", reason: "session-inactive" };
+        const previews = await handle.preparePreviews();
+        if (previews.status === "preview-failed") {
+          return {
+            status: "preview-failed",
+            reason: previews.reason,
+            ...(previews.message === undefined ? {} : { message: previews.message }),
+          };
+        }
+        if (previews.status !== "prepared") {
+          return { status: "unavailable", reason: previews.status };
+        }
+        return { status: "prepared", editing: handle.editing, assets: handle.assets };
       } finally {
         this.preparePromise = null;
       }
@@ -127,6 +154,10 @@ export class EditorRuntime {
     const candidates = await this.dependencies.selectCandidates();
     if (candidates.length === 0) return { status: "not-created", errors: [] };
     const metadataPolicy = await this.dependencies.loadMetadataPolicy();
+    const flushed = await this.dependencies.session.flush();
+    if (flushed.status === "flush-failed") {
+      throw new Error(flushed.message ?? flushed.reason);
+    }
     const result = await this.dependencies.storage.library.create(candidates, { metadataPolicy });
     if (result.status !== "created") return result;
     const opened = await this.dependencies.session.open(result.draftId);
