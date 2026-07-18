@@ -1,6 +1,10 @@
 import { Directory, File, Paths } from "expo-file-system";
 
-import { createExportStaging, type ExportStagingFileAdapter } from "./staging";
+import {
+  createExportStaging,
+  type ExportStagingFileAdapter,
+  type InitializableExportStaging,
+} from "./staging";
 import type { ExportStaging } from "./types";
 
 function createExpoExportStagingFiles(): ExportStagingFileAdapter {
@@ -32,7 +36,20 @@ function createExpoExportStagingFiles(): ExportStagingFileAdapter {
   };
 }
 
-export function createExpoExportStaging(): ExportStaging {
-  const root = new Directory(Paths.cache, "plogkit-export-staging");
-  return createExportStaging({ files: createExpoExportStagingFiles(), rootUri: root.uri });
+let staging: InitializableExportStaging | null = null;
+
+function getInitializableExpoExportStaging(): InitializableExportStaging {
+  staging ??= createExportStaging({
+    files: createExpoExportStagingFiles(),
+    rootUri: new Directory(Paths.cache, "plogkit-export-staging").uri,
+  });
+  return staging;
+}
+
+export function initializeExpoExportStaging(): Promise<void> {
+  return getInitializableExpoExportStaging().initialize();
+}
+
+export function getExpoExportStaging(): ExportStaging {
+  return getInitializableExpoExportStaging();
 }

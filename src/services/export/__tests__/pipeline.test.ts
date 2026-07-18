@@ -251,6 +251,35 @@ describe("ExportPipeline.run", () => {
     expect(files.size).toBe(0);
   });
 
+  it("sweeps crash orphans during app startup before any export operation", async () => {
+    const directories = new Set([
+      "cache:///export-staging",
+      "cache:///export-staging/orphan",
+    ]);
+    const adapter: ExportStagingFileAdapter = {
+      ensureDirectory: async (uri) => {
+        directories.add(uri);
+      },
+      createDirectory: async (uri) => {
+        directories.add(uri);
+      },
+      listDirectories: async (uri) =>
+        [...directories].filter((candidate) => candidate.startsWith(`${uri}/`)),
+      writeBytes: async () => undefined,
+      removeDirectory: async (uri) => {
+        directories.delete(uri);
+      },
+    };
+    const staging = createExportStaging({
+      files: adapter,
+      rootUri: "cache:///export-staging",
+    });
+
+    await staging.initialize();
+
+    expect([...directories]).toEqual(["cache:///export-staging"]);
+  });
+
   it.each([
     ["asset-unavailable", "assets"],
     ["render-failed", "render"],

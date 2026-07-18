@@ -20,6 +20,10 @@ export interface CreateExportStagingOptions {
   readonly createOperationId?: () => string;
 }
 
+export interface InitializableExportStaging extends ExportStaging {
+  readonly initialize: () => Promise<void>;
+}
+
 let operationSequence = 0;
 
 function nextOperationId(): string {
@@ -43,7 +47,7 @@ export function createExportStaging({
   files,
   rootUri,
   createOperationId = nextOperationId,
-}: CreateExportStagingOptions): ExportStaging {
+}: CreateExportStagingOptions): InitializableExportStaging {
   const root = rootUri.replace(/\/$/, "");
   const initialization = (async (): Promise<ExportStagingError | null> => {
     try {
@@ -62,9 +66,13 @@ export function createExportStaging({
     }
   })();
 
-  const createOperation = async (): Promise<ExportOperation> => {
+  const initialize = async (): Promise<void> => {
     const initializationError = await initialization;
     if (initializationError !== null) throw initializationError;
+  };
+
+  const createOperation = async (): Promise<ExportOperation> => {
+    await initialize();
     const id = pathSafeIdentity(createOperationId());
     const directoryUri = child(root, id);
     try {
@@ -107,5 +115,5 @@ export function createExportStaging({
     return Object.freeze({ id, directoryUri, prepareStaticImage, cleanup });
   };
 
-  return Object.freeze({ createOperation });
+  return Object.freeze({ initialize, createOperation });
 }

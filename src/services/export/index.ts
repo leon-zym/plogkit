@@ -3,7 +3,7 @@ import { File } from "expo-file-system";
 import type { PlogDocument } from "../../core/document";
 import type { AssetCatalogSnapshot } from "../drafts/draftLibrary";
 import { ExpoPhotosDestination } from "./expoDestination";
-import { createExpoExportStaging } from "./expoStaging";
+import { getExpoExportStaging } from "./expoStaging";
 import {
   createExportPipeline,
   type ExportResult,
@@ -42,7 +42,7 @@ const backend = createSkiaExportBackend({
 const pipeline = createExportPipeline({
   backend,
   destination: new ExpoPhotosDestination(),
-  staging: createExpoExportStaging(),
+  staging: getExpoExportStaging(),
 });
 
 export function exportDocument(
