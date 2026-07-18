@@ -26,14 +26,14 @@
 
 #### Scenario: 多选导入
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
+- 状态：已实现
 - GIVEN 用户在首页点击选图
 - WHEN 用户在系统选择器中选中 3 张有效且本地可读取的照片并确认
 - THEN 应用创建草稿，并在 Editor 中展示全部 3 张图片
 
 #### Scenario: 部分失败保留同批次成功图片
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
+- 状态：已实现
 - GIVEN 用户选择的 3 张图片中有 1 张在导入时失败
 - WHEN 另外 2 张图片导入成功
 - THEN 应用创建只包含 2 张成功图片的草稿并进入 Editor
@@ -41,7 +41,7 @@
 
 #### Scenario: 取消或全部失败不创建草稿
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)）
+- 状态：已实现
 - GIVEN 用户开始从外部图片候选创建草稿
 - WHEN 用户取消，或所有候选均导入失败
 - THEN 应用不创建或展示一个残缺草稿

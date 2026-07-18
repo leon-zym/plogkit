@@ -1,6 +1,9 @@
 import * as ImagePicker from "expo-image-picker";
 
-import type { ImageSelectionSource, PickedImage, PickedImageKind } from "./importImages";
+import type {
+  ImportCandidate,
+  ImportCandidateKind,
+} from "../drafts/draftLibrary";
 
 export const IMAGE_PICKER_OPTIONS = {
   mediaTypes: ["images", "livePhotos"],
@@ -15,13 +18,13 @@ export const IMAGE_PICKER_OPTIONS = {
     ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
 } satisfies ImagePicker.ImagePickerOptions;
 
-function pickedKind(type: ImagePicker.ImagePickerAsset["type"]): PickedImageKind {
+function pickedKind(type: ImagePicker.ImagePickerAsset["type"]): ImportCandidateKind {
   if (type === "livePhoto") return "livePhoto";
   if (type === "image" || type === null || type === undefined) return "image";
   return "unsupported";
 }
 
-function toPickedImage(asset: ImagePicker.ImagePickerAsset): PickedImage {
+function toPickedImage(asset: ImagePicker.ImagePickerAsset): ImportCandidate {
   const exif: unknown = asset.exif;
   return {
     uri: asset.uri,
@@ -32,6 +35,10 @@ function toPickedImage(asset: ImagePicker.ImagePickerAsset): PickedImage {
     exif,
     pairedVideoUri: asset.pairedVideoAsset?.uri,
   };
+}
+
+export interface ImageSelectionSource {
+  readonly select: () => Promise<readonly ImportCandidate[]>;
 }
 
 export function createExpoImagePickerSource(): ImageSelectionSource {

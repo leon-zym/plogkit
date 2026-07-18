@@ -1,7 +1,7 @@
 import { ImageFormat, Skia, type SkImage, type SkSurface } from "@shopify/react-native-skia";
 
 import { getDeviceTextLayoutEnvironment } from "../../render/deviceTextLayout";
-import { documentToRenderScene } from "../../render/scene";
+import { documentToRenderScene, resolveSceneImageUri } from "../../render/scene";
 import { drawSceneBackground, drawSceneImage, drawTextLayout } from "../../render/skiaDraw";
 import { createTextLayoutSnapshot } from "../../render/textLayout";
 import type { ExportPlan } from "./plan";
@@ -36,8 +36,12 @@ class SkiaRenderedPixels implements RenderedPixels {
 }
 
 export class SkiaExportRenderStage implements ExportRenderStage {
-  async render(document: Parameters<ExportRenderStage["render"]>[0], plan: ExportPlan) {
-    const scene = documentToRenderScene(document, "original");
+  async render(
+    document: Parameters<ExportRenderStage["render"]>[0],
+    plan: ExportPlan,
+    assets: Parameters<ExportRenderStage["render"]>[2],
+  ) {
+    const scene = documentToRenderScene(document);
     const textLayoutResult = createTextLayoutSnapshot(
       getDeviceTextLayoutEnvironment(),
       scene.texts,
@@ -65,7 +69,7 @@ export class SkiaExportRenderStage implements ExportRenderStage {
       drawSceneBackground(Skia, canvas, scene);
 
       for (const node of scene.images) {
-        const data = await Skia.Data.fromURI(node.uri);
+        const data = await Skia.Data.fromURI(resolveSceneImageUri(assets, node, "original"));
         let image: SkImage | null = null;
         try {
           image = Skia.Image.MakeImageFromEncoded(data);

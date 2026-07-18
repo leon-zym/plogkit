@@ -1,6 +1,7 @@
 import {
   isExactImageOrder,
   MAX_SOURCE_IMAGES,
+  type ImportedAssetId,
   type SourceImage,
   type StitchSettings,
 } from "./document";
@@ -16,7 +17,7 @@ export interface Rect extends Size {
 }
 
 export interface LayoutItem {
-  readonly imageId: string;
+  readonly imageId: ImportedAssetId;
   readonly frame: Rect;
   readonly content: Rect;
 }
@@ -61,7 +62,7 @@ export function containRect(source: Size, bounds: Rect): Rect {
 
 function resolveImages(
   images: readonly SourceImage[],
-  order: readonly string[],
+  order: readonly ImportedAssetId[],
 ): readonly SourceImage[] {
   if (images.length > MAX_SOURCE_IMAGES) {
     throw new Error(`stitch layout supports at most ${MAX_SOURCE_IMAGES} images`);

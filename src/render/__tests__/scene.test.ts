@@ -1,18 +1,19 @@
-import { createDocument, type PlogDocument, type SourceImage } from "../../core/document";
+import {
+  createDocument,
+  importedAssetId,
+  type PlogDocument,
+  type SourceImage,
+} from "../../core/document";
 import { documentToRenderScene, getNaturalSceneSize, LOGICAL_CANVAS_WIDTH } from "../scene";
 
 const images: readonly SourceImage[] = [
   {
-    id: "wide",
-    originalUri: "file:///wide-original.jpg",
-    previewUri: "file:///wide-preview.jpg",
+    id: importedAssetId("wide"),
     width: 4000,
     height: 3000,
   },
   {
-    id: "tall",
-    originalUri: "file:///tall-original.jpg",
-    previewUri: "file:///tall-preview.jpg",
+    id: importedAssetId("tall"),
     width: 2000,
     height: 4000,
   },
@@ -25,7 +26,7 @@ function updateDocument(
 }
 
 describe("document render scene", () => {
-  it("uses a 1000-unit logical canvas and preview images for device rendering", () => {
+  it("keeps asset locations out of the shared 1000-unit logical scene", () => {
     const scene = documentToRenderScene(createDocument([images[0]!]));
 
     expect(scene).toMatchObject({
@@ -35,9 +36,9 @@ describe("document render scene", () => {
     });
     expect(scene.images[0]).toMatchObject({
       imageId: "wide",
-      uri: "file:///wide-preview.jpg",
       destination: { x: 0, y: 0, width: 1000, height: 750 },
     });
+    expect(JSON.stringify(scene)).not.toContain("Uri");
   });
 
   it.each([
@@ -64,22 +65,24 @@ describe("document render scene", () => {
 
   it("reuses core vertical layout and preserves image order and spacing", () => {
     const document = updateDocument({
-      stitch: { mode: "vertical", spacing: 20, order: ["tall", "wide"] },
+      stitch: {
+        mode: "vertical",
+        spacing: 20,
+        order: [importedAssetId("tall"), importedAssetId("wide")],
+      },
     });
-    const scene = documentToRenderScene(document, "original");
+    const scene = documentToRenderScene(document);
 
     expect(scene.height).toBe(2770);
     expect(
-      scene.images.map(({ imageId, uri, destination }) => ({ imageId, uri, destination })),
+      scene.images.map(({ imageId, destination }) => ({ imageId, destination })),
     ).toEqual([
       {
         imageId: "tall",
-        uri: "file:///tall-original.jpg",
         destination: { x: 0, y: 0, width: 1000, height: 2000 },
       },
       {
         imageId: "wide",
-        uri: "file:///wide-original.jpg",
         destination: { x: 0, y: 2020, width: 1000, height: 750 },
       },
     ]);
@@ -87,7 +90,11 @@ describe("document render scene", () => {
 
   it("uses equal two-column cells and contains each grid image", () => {
     const document = updateDocument({
-      stitch: { mode: "grid", spacing: 20, order: ["wide", "tall"] },
+      stitch: {
+        mode: "grid",
+        spacing: 20,
+        order: [importedAssetId("wide"), importedAssetId("tall")],
+      },
     });
     const scene = documentToRenderScene(document);
 

@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
-import type { SourceImage, StitchMode } from "@/core/document";
+import type { ImportedAssetId, SourceImage, StitchMode } from "@/core/document";
 import { OptionRow } from "@/ui/OptionRow";
 import { colors, radii, spacing, typography } from "@/ui/theme";
 
@@ -10,13 +10,13 @@ import { SpacingSlider } from "./SpacingSlider";
 
 export interface StitchPanelProps {
   readonly images: readonly SourceImage[];
-  readonly order: readonly string[];
+  readonly order: readonly ImportedAssetId[];
   readonly mode: StitchMode;
   readonly spacingValue: number;
   readonly onModeChange: (mode: StitchMode) => void;
   readonly onSpacingPreview: (value: number) => void;
   readonly onSpacingCommit: (value: number) => void;
-  readonly onOrderChange: (order: readonly string[]) => void;
+  readonly onOrderChange: (order: readonly ImportedAssetId[]) => void;
 }
 
 export function StitchPanel({

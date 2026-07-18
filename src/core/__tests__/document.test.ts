@@ -3,6 +3,7 @@ import {
   createEmptyDocument,
   DOCUMENT_SCHEMA_VERSION,
   DocumentParseError,
+  importedAssetId,
   migrateDocument,
   parseDocument,
   parseDocumentJson,
@@ -10,9 +11,7 @@ import {
 } from "../document";
 
 const image: SourceImage = {
-  id: "image-1",
-  originalUri: "file:///projects/current/assets/image-1.jpg",
-  previewUri: "file:///projects/current/previews/image-1.jpg",
+  id: importedAssetId("image-1"),
   width: 4032,
   height: 3024,
 };
@@ -59,6 +58,23 @@ describe("document model", () => {
 
     expect(doc.sourceImages).toEqual([image]);
     expect(doc.stitch.order).toEqual([image.id]);
+  });
+
+  it("keeps only asset identity and intrinsic image facts in the document baseline", () => {
+    const serialized = JSON.parse(JSON.stringify(createDocument([image]))) as unknown;
+
+    expect(serialized).toMatchObject({
+      schemaVersion: 2,
+      sourceImages: [{ id: "image-1", width: 4032, height: 3024 }],
+    });
+    expect(JSON.stringify(serialized)).not.toContain("Uri");
+  });
+
+  it("treats asset identity as opaque rather than as a storage filename", () => {
+    const opaque = { ...image, id: importedAssetId("provider:item/../42") };
+
+    expect(parseDocument(JSON.parse(JSON.stringify(createDocument([opaque])))).sourceImages[0]?.id)
+      .toBe("provider:item/../42");
   });
 
   it("initializes the document with an explicit metadata policy", () => {
@@ -116,8 +132,20 @@ describe("document model", () => {
     );
   });
 
-  it("reports an unsupported old schema version explicitly", () => {
-    const old = { ...createEmptyDocument(), schemaVersion: 0 };
+  it("does not read or migrate the unpublished schema v1 baseline", () => {
+    const old = {
+      ...createEmptyDocument(),
+      schemaVersion: 1,
+      sourceImages: [
+        {
+          id: "legacy-image",
+          originalUri: "file:///projects/current/assets/legacy.jpg",
+          previewUri: "file:///projects/current/previews/legacy.jpg",
+          width: 100,
+          height: 100,
+        },
+      ],
+    };
 
     expect(() => migrateDocument(old)).toThrow(
       expect.objectContaining({
@@ -129,7 +157,7 @@ describe("document model", () => {
   const validNineImageDocument = createDocument(
     Array.from({ length: 9 }, (_, index) => ({
       ...image,
-      id: `image-${index + 1}`,
+      id: importedAssetId(`image-${index + 1}`),
     })),
   );
 

@@ -25,7 +25,7 @@
 
 #### Scenario: 提交即持久化
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- 状态：已实现
 - GIVEN 用户完成一次编辑提交（如添加文本）
 - WHEN 自动保存调度完成
 - THEN 当前 `DraftId` 的持久化统一文档反映最新文档状态
@@ -36,7 +36,7 @@
 
 #### Scenario: 打开有效草稿
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- 状态：已实现
 - GIVEN 一个持久化内容完整的草稿
 - WHEN 用户打开该草稿
 - THEN 应用进入 Editor 并展示草稿内容
@@ -60,7 +60,7 @@
 
 #### Scenario: 损坏的持久事实拒绝打开
 
-- 状态：已确认（待 [Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- 状态：已实现
 - GIVEN 草稿的原图或编辑内容损坏，无法安全恢复
 - WHEN 用户打开该草稿
 - THEN 应用提示该草稿无法安全打开，不以残缺状态进入 Editor

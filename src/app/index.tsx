@@ -4,14 +4,14 @@ import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { editorRuntime } from "@/features/editor/runtime";
-import type { RestoreSessionResult } from "@/services/session/sessionRepository";
+import { editorRuntime } from "@/features/editor/expoEditorRuntime";
+import type { RestoreDraftResult } from "@/features/editor/runtime";
 import { ActionButton } from "@/ui/ActionButton";
 import { colors, radii, shadows, spacing, typography } from "@/ui/theme";
 
 type HomeStatus =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly restore: RestoreSessionResult }
+  | { readonly kind: "ready"; readonly restore: RestoreDraftResult }
   | { readonly kind: "importing" }
   | { readonly kind: "error"; readonly messageKey: string };
 
@@ -39,11 +39,11 @@ export default function HomeScreen() {
     setStatus({ kind: "importing" });
     try {
       const result = await editorRuntime.choosePhotos();
-      if (result.imported.length > 0) {
+      if (result.status === "created") {
         router.push("/editor" as Href);
         return;
       }
-      if (result.errors.length > 0) {
+      if (result.status === "create-failed" || result.errors.length > 0) {
         setStatus({ kind: "error", messageKey: "home.importFailed" });
       } else {
         setStatus({ kind: "ready", restore: { status: "none" } });

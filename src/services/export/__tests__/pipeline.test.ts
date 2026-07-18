@@ -1,4 +1,4 @@
-import { createDocument } from "../../../core/document";
+import { createDocument, importedAssetId } from "../../../core/document";
 import { SKIA_EXPORT_CAPABILITIES } from "../capabilities";
 import { runExportPipeline } from "../pipeline";
 import type {
@@ -21,9 +21,7 @@ describe("two-stage export orchestration", () => {
   it("renders, encodes, writes, and saves in order, then disposes rendered pixels", async () => {
     const document = createDocument([
       {
-        id: "one",
-        originalUri: "file:///original.jpg",
-        previewUri: "file:///preview.jpg",
+        id: importedAssetId("one"),
         width: 4000,
         height: 3000,
       },
@@ -39,6 +37,7 @@ describe("two-stage export orchestration", () => {
 
     const result = await runExportPipeline(
       document,
+      { resolve: () => ({ uri: "file:///original.jpg" }) },
       {},
       {
         capabilities: SKIA_EXPORT_CAPABILITIES,
@@ -77,6 +76,7 @@ describe("two-stage export orchestration", () => {
     await expect(
       runExportPipeline(
         document,
+        { resolve: () => null },
         {},
         {
           capabilities: SKIA_EXPORT_CAPABILITIES,

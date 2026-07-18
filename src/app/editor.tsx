@@ -24,7 +24,6 @@ import {
 } from "@/core/exportPolicy";
 import {
   editIntents,
-  type EditCommitModule,
   type EditIntent,
   type EditResult,
 } from "@/core/editing";
@@ -39,7 +38,8 @@ import {
   type TextDraft,
   type TextStyleDraft,
 } from "@/features/editor/components/TextPanel";
-import { editorRuntime } from "@/features/editor/runtime";
+import { editorRuntime } from "@/features/editor/expoEditorRuntime";
+import type { PreparedEditor } from "@/features/editor/runtime";
 import { useEditCommit } from "@/features/editor/state/editCommit";
 import { useTextLayoutSnapshot } from "@/features/editor/useTextLayoutSnapshot";
 import { DocumentCanvas } from "@/features/editor/components/DocumentCanvas";
@@ -84,36 +84,40 @@ function preflightExportPolicy(document: PlogDocument): ExportPolicyPreflight {
 
 export default function EditorScreen() {
   const router = useRouter();
-  const [editing, setEditing] = useState<EditCommitModule | null>(() => editorRuntime.getEditing());
+  const [prepared, setPrepared] = useState<PreparedEditor | null>(null);
 
   useEffect(() => {
-    if (editing !== null) return;
     let active = true;
-    void editorRuntime.restore().then((result) => {
-      if (!active) return;
-      const restoredEditing = editorRuntime.getEditing();
-      if (result.status === "restored" && restoredEditing !== null) {
-        setEditing(restoredEditing);
-      } else {
-        router.replace("/" as Href);
-      }
-    });
+    void editorRuntime
+      .prepareEditor()
+      .then((next) => {
+        if (!active) return;
+        if (next === null) router.replace("/" as Href);
+        else setPrepared(next);
+      })
+      .catch(() => {
+        if (active) router.replace("/" as Href);
+      });
     return () => {
       active = false;
     };
-  }, [editing, router]);
+  }, [router]);
 
-  return editing === null ? <LoadingEditor /> : <ConnectedEditor editing={editing} />;
+  return prepared === null ? (
+    <LoadingEditor />
+  ) : (
+    <ConnectedEditor assets={prepared.assets} editing={prepared.editing} />
+  );
 }
 
 type ActiveEditorTool = EditorTool | "export";
 
-function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
+function ConnectedEditor({ assets, editing }: PreparedEditor) {
   const { t } = useTranslation();
   const router = useRouter();
   const { document, previewDocument, canUndo, canRedo } = useEditCommit(editing);
   const previewScene = useMemo(
-    () => documentToRenderScene(previewDocument, "preview"),
+    () => documentToRenderScene(previewDocument),
     [previewDocument],
   );
   const textLayoutEnvironment = useMemo(() => getDeviceTextLayoutEnvironment(), []);
@@ -255,7 +259,7 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
         document.exportSettings.metadataPolicy === "retain-basic" && firstImage !== undefined
           ? await editorRuntime.readBasicMetadata(firstImage.id)
           : undefined;
-      const result = await exportDocument(document, { basicMetadata });
+      const result = await exportDocument(document, assets, { basicMetadata });
       setExportStatus({
         kind: "success",
         width: result.plan.width,
@@ -385,6 +389,7 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
                   accessibilityLabel={t("editor.photoCount", {
                     count: document.sourceImages.length,
                   })}
+                  assets={assets}
                   scene={previewScene}
                   textLayout={textLayout.snapshot}
                   width={canvasWidth}

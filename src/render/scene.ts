@@ -1,13 +1,24 @@
-import type { CanvasRatio, PlogDocument, TextAlignment } from "../core/document";
+import type {
+  CanvasRatio,
+  ImportedAssetId,
+  PlogDocument,
+  TextAlignment,
+} from "../core/document";
 import { containRect, layoutStitch, type Rect, type Size } from "../core/layout";
 
 export const LOGICAL_CANVAS_WIDTH = 1000;
 
-export type SceneImageSource = "preview" | "original";
+export type SceneImageUsage = "preview" | "original";
+
+export interface SceneImageAssetResolver {
+  readonly resolve: (
+    assetId: ImportedAssetId,
+    usage: SceneImageUsage,
+  ) => { readonly uri: string } | null;
+}
 
 export interface SceneImage {
-  readonly imageId: string;
-  readonly uri: string;
+  readonly imageId: ImportedAssetId;
   readonly sourceSize: Size;
   readonly destination: Rect;
 }
@@ -58,7 +69,6 @@ function transformRect(rect: Rect, scale: number, offsetX: number, offsetY: numb
 /** Converts the serializable document into the shared, platform-free render scene. */
 export function documentToRenderScene(
   document: PlogDocument,
-  imageSource: SceneImageSource = "preview",
 ): RenderScene {
   const layout = layoutStitch(document.sourceImages, document.stitch, LOGICAL_CANVAS_WIDTH);
   const height = canvasHeight(document.canvas.ratio, layout.height);
@@ -76,7 +86,6 @@ export function documentToRenderScene(
     }
     return {
       imageId: item.imageId,
-      uri: imageSource === "preview" ? source.previewUri : source.originalUri,
       sourceSize: { width: source.width, height: source.height },
       destination: transformRect(item.content, contentScale, contentBounds.x, contentBounds.y),
     };
@@ -101,6 +110,18 @@ export function documentToRenderScene(
       backgroundColor: text.backgroundColor,
     })),
   };
+}
+
+export function resolveSceneImageUri(
+  assets: SceneImageAssetResolver,
+  image: SceneImage,
+  usage: SceneImageUsage,
+): string {
+  const descriptor = assets.resolve(image.imageId, usage);
+  if (descriptor === null) {
+    throw new Error(`${usage} asset ${image.imageId} is not available in this Draft`);
+  }
+  return descriptor.uri;
 }
 
 /** Resolves the source-driven size used before applying a data-driven export preset. */

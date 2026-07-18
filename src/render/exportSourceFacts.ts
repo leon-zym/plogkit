@@ -3,7 +3,7 @@ import type { ExportSourceFacts } from "../core/exportPolicy";
 import { documentToRenderScene, getNaturalSceneSize } from "./scene";
 
 export function documentToExportSourceFacts(document: PlogDocument): ExportSourceFacts {
-  const scene = documentToRenderScene(document, "original");
+  const scene = documentToRenderScene(document);
   const naturalSize = getNaturalSceneSize(scene);
   return {
     naturalWidth: naturalSize.width,

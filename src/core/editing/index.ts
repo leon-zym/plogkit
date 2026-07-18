@@ -6,6 +6,7 @@ import {
   isExactImageOrder,
   parseDocument,
   type CanvasRatio,
+  type ImportedAssetId,
   type Point,
   type PlogDocument,
   type StitchMode,
@@ -123,7 +124,7 @@ function setStitchSpacing(document: PlogDocument, spacing: number): PlogDocument
   return parseDocument({ ...document, stitch: { ...document.stitch, spacing } });
 }
 
-function reorderImages(document: PlogDocument, order: readonly string[]): PlogDocument {
+function reorderImages(document: PlogDocument, order: readonly ImportedAssetId[]): PlogDocument {
   return parseDocument({ ...document, stitch: { ...document.stitch, order } });
 }
 
@@ -157,7 +158,7 @@ export type EditIntent =
     }
   | {
       readonly type: "stitch.reorder-images";
-      readonly imageIds: readonly string[];
+      readonly imageIds: readonly ImportedAssetId[];
     }
   | { readonly type: "export.change-preset"; readonly presetId: ExportPresetId }
   | { readonly type: "export.change-format"; readonly format: ExportFormat }
@@ -260,7 +261,7 @@ export const editIntents = {
       type: "stitch.change-spacing",
       spacing,
     }),
-    reorderImages: (imageIds: readonly string[]): EditIntent => ({
+    reorderImages: (imageIds: readonly ImportedAssetId[]): EditIntent => ({
       type: "stitch.reorder-images",
       imageIds,
     }),
