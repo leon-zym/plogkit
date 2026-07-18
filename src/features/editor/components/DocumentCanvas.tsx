@@ -3,18 +3,17 @@ import {
   Group,
   Image,
   Line,
-  Paragraph,
+  Picture,
   Rect,
   Skia,
   type SkImage,
-  type SkParagraph,
+  type SkPicture,
 } from "@shopify/react-native-skia";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 
-import type { PlogDocument } from "@/core/document";
-import { documentToRenderScene, type SceneImage, type SceneText } from "@/render/scene";
-import { makeSceneParagraph } from "@/render/skiaDraw";
+import type { RenderScene, SceneImage } from "@/render/scene";
+import type { TextLayout, TextLayoutSnapshot } from "@/render/textLayout";
 
 interface ImageLoadState {
   readonly uri: string;
@@ -102,20 +101,28 @@ function SceneImageNode({ node }: { readonly node: SceneImage }) {
   );
 }
 
-interface ParagraphState {
-  readonly text: SceneText;
-  readonly paragraph: SkParagraph;
+interface PictureState {
+  readonly layout: TextLayout;
+  readonly picture: SkPicture;
 }
 
-function useDisposableParagraph(text: SceneText): SkParagraph | null {
-  const [state, setState] = useState<ParagraphState | null>(null);
+function useDisposableTextPicture(layout: TextLayout, scene: RenderScene): SkPicture | null {
+  const [state, setState] = useState<PictureState | null>(null);
   useEffect(() => {
     let cancelled = false;
     let disposed = false;
-    const nextParagraph = makeSceneParagraph(Skia, text);
+    const recorder = Skia.PictureRecorder();
+    let nextPicture: SkPicture;
+    try {
+      const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, scene.width, scene.height));
+      layout.paragraph.paint(canvas, layout.placement.x, layout.placement.y);
+      nextPicture = recorder.finishRecordingAsPicture();
+    } finally {
+      recorder.dispose();
+    }
     const dispose = () => {
       if (!disposed) {
-        nextParagraph.dispose();
+        nextPicture.dispose();
         disposed = true;
       }
     };
@@ -123,24 +130,31 @@ function useDisposableParagraph(text: SceneText): SkParagraph | null {
       if (cancelled) {
         dispose();
       } else {
-        setState({ text, paragraph: nextParagraph });
+        setState({ layout, picture: nextPicture });
       }
     });
     return () => {
       cancelled = true;
       dispose();
     };
-  }, [text]);
-  return state?.text === text ? state.paragraph : null;
+  }, [layout, scene.height, scene.width]);
+  return state?.layout === layout ? state.picture : null;
 }
 
-function SceneTextNode({ text }: { readonly text: SceneText }) {
-  const paragraph = useDisposableParagraph(text);
-  return <Paragraph paragraph={paragraph} x={text.x} y={text.y} width={text.width} />;
+function SceneTextNode({
+  layout,
+  scene,
+}: {
+  readonly layout: TextLayout;
+  readonly scene: RenderScene;
+}) {
+  const picture = useDisposableTextPicture(layout, scene);
+  return picture === null ? null : <Picture picture={picture} />;
 }
 
 export interface DocumentCanvasProps {
-  readonly document: PlogDocument;
+  readonly scene: RenderScene;
+  readonly textLayout: TextLayoutSnapshot | null;
   readonly width: number;
   readonly accessibilityLabel: string;
   readonly testID?: string;
@@ -149,13 +163,13 @@ export interface DocumentCanvasProps {
 
 /** Device preview. It intentionally consumes previewUri while export consumes originalUri. */
 export function DocumentCanvas({
-  document,
+  scene,
+  textLayout,
   width,
   accessibilityLabel,
   testID = "document-canvas",
   style,
 }: DocumentCanvasProps) {
-  const scene = useMemo(() => documentToRenderScene(document, "preview"), [document]);
   const scale = width / scene.width;
 
   if (!Number.isFinite(width) || width <= 0) {
@@ -174,8 +188,8 @@ export function DocumentCanvas({
         {scene.images.map((image) => (
           <SceneImageNode key={image.imageId} node={image} />
         ))}
-        {scene.texts.map((text) => (
-          <SceneTextNode key={text.id} text={text} />
+        {textLayout?.layouts.map((layout) => (
+          <SceneTextNode key={layout.id} layout={layout} scene={scene} />
         ))}
       </Group>
     </Canvas>
