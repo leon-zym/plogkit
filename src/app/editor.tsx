@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Stack, useNavigation, useRouter, type Href } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -152,7 +153,9 @@ export default function EditorScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ gestureEnabled: false }} />
+      <Stack.Screen
+        options={{ gestureEnabled: false, headerBackButtonMenuEnabled: false }}
+      />
       {preparation.status === "loading" ? (
         <LoadingEditor />
       ) : preparation.status === "failed" ? (
@@ -191,7 +194,8 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
   const [importErrorCount] = useState(() => editorRuntime.takeImportErrorCount());
   const [saveFailed, setSaveFailed] = useState(false);
   const leavePending = useRef(false);
-  const leaveAllowed = useRef(false);
+  const [leaveAllowed, setLeaveAllowed] = useState(false);
+  const pendingLeave = useRef<(() => void) | null>(null);
   const canvasScrollRef = useRef<ScrollView>(null);
   const canvasScrollY = useRef(0);
   const canvasScrollYBeforeKeyboard = useRef<number | null>(null);
@@ -343,8 +347,8 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
     try {
       const result = await editorRuntime.flush();
       if (result.status === "flushed") {
-        leaveAllowed.current = true;
-        navigate();
+        pendingLeave.current = navigate;
+        setLeaveAllowed(true);
       } else {
         setSaveFailed(true);
       }
@@ -355,15 +359,16 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
     }
   }, []);
 
-  useEffect(
-    () =>
-      navigation.addListener("beforeRemove", (event) => {
-        if (leaveAllowed.current) return;
-        event.preventDefault();
-        void attemptLeave(() => navigation.dispatch(event.data.action));
-      }),
-    [attemptLeave, navigation],
-  );
+  usePreventRemove(!leaveAllowed, ({ data }) => {
+    void attemptLeave(() => navigation.dispatch(data.action));
+  });
+
+  useEffect(() => {
+    if (!leaveAllowed) return;
+    const navigate = pendingLeave.current;
+    pendingLeave.current = null;
+    navigate?.();
+  }, [leaveAllowed]);
 
   const goBack = () => attemptLeave(() => router.replace("/" as Href));
 

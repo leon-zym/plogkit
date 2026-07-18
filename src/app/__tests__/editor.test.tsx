@@ -13,23 +13,27 @@ import EditorScreen from "../editor";
 const mockReplace = jest.fn();
 const mockDispatch = jest.fn();
 const mockRouter = { replace: mockReplace };
-let mockBeforeRemove:
-  | ((event: {
-      preventDefault: () => void;
-      data: { action: { type: string } };
-    }) => void)
+let mockPreventRemove = false;
+let mockPreventRemoveCallback:
+  | ((options: { data: { action: { type: string } } }) => void)
   | undefined;
 
 jest.mock("expo-router", () => ({
   Stack: { Screen: () => null },
   useRouter: () => mockRouter,
   useNavigation: () => ({
-    addListener: (_type: string, listener: typeof mockBeforeRemove) => {
-      mockBeforeRemove = listener;
-      return jest.fn();
-    },
     dispatch: mockDispatch,
   }),
+}));
+
+jest.mock("expo-router/react-navigation", () => ({
+  usePreventRemove: (
+    preventRemove: boolean,
+    callback: typeof mockPreventRemoveCallback,
+  ) => {
+    mockPreventRemove = preventRemove;
+    mockPreventRemoveCallback = callback;
+  },
 }));
 
 jest.mock("@/features/editor/expoEditorRuntime", () => ({
@@ -117,7 +121,8 @@ function createPreparedEditor() {
 describe("Editor session leave", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockBeforeRemove = undefined;
+    mockPreventRemove = false;
+    mockPreventRemoveCallback = undefined;
   });
 
   it("stays in the editor after a flush failure and navigates after retry succeeds", async () => {
@@ -146,7 +151,7 @@ describe("Editor session leave", () => {
     expect(mockReplace).toHaveBeenCalledWith("/");
   });
 
-  it("applies the same flush guard to system and gesture removal", async () => {
+  it("prevents native removal until the latest document flushes", async () => {
     runtime.prepareEditor.mockResolvedValue(createPreparedEditor());
     runtime.flush.mockResolvedValueOnce({
       status: "flush-failed",
@@ -156,21 +161,23 @@ describe("Editor session leave", () => {
     const view = await render(<EditorScreen />);
     await waitFor(() => expect(view.getByTestId("editor-back")).toBeTruthy());
     const action = { type: "GO_BACK" };
-    const preventDefault = jest.fn();
+    expect(mockPreventRemove).toBe(true);
 
     await act(async () => {
-      mockBeforeRemove?.({ preventDefault, data: { action } });
+      mockPreventRemoveCallback?.({ data: { action } });
     });
 
-    expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(view.getByTestId("editor-save-error")).toBeTruthy();
+    expect(mockPreventRemove).toBe(true);
     expect(mockDispatch).not.toHaveBeenCalled();
 
     await act(async () => {
-      mockBeforeRemove?.({ preventDefault, data: { action } });
+      mockPreventRemoveCallback?.({ data: { action } });
     });
 
     expect(runtime.flush).toHaveBeenCalledTimes(2);
+    expect(mockPreventRemove).toBe(false);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
     expect(mockDispatch).toHaveBeenCalledWith(action);
   });
 });
@@ -178,7 +185,8 @@ describe("Editor session leave", () => {
 describe("Editor preparation failure", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockBeforeRemove = undefined;
+    mockPreventRemove = false;
+    mockPreventRemoveCallback = undefined;
   });
 
   it("keeps a preview failure in a retryable Editor state until the user goes back", async () => {
