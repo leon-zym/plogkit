@@ -108,6 +108,8 @@ const candidate = (name: string): ImportCandidate => ({
   exif: null,
 });
 
+const firstDraftUri = "memory://library/drafts/draft-AGQAcgBhAGYAdAA6ADE";
+
 const createDraft = (library: DraftLibrary, candidates: readonly ImportCandidate[]) =>
   library.create(candidates, { metadataPolicy: "strip" });
 
@@ -180,7 +182,7 @@ describe("Draft Library", () => {
     expect(
       [...files.files.entries()].some(
         ([uri, value]) =>
-          uri.startsWith("memory://library/drafts/draft%3A1/") &&
+          uri.startsWith(`${firstDraftUri}/`) &&
           value instanceof Uint8Array &&
           value[0] === 9,
       ),
@@ -210,14 +212,14 @@ describe("Draft Library", () => {
     expect(
       [...files.files.entries()].some(
         ([uri, value]) =>
-          uri.startsWith("memory://library/drafts/draft%3A1/") &&
+          uri.startsWith(`${firstDraftUri}/`) &&
           value instanceof Uint8Array &&
           value[0] === 9,
       ),
     ).toBe(false);
     expect(
       [...files.directories].some(
-        (uri) => uri.startsWith("memory://library/drafts/draft%3A1/") && uri.includes("item-"),
+        (uri) => uri.startsWith(`${firstDraftUri}/`) && uri.includes("item-"),
       ),
     ).toBe(false);
     expect(files.directories.has("memory://library/staging/operation-1/items/item-0")).toBe(true);
@@ -236,7 +238,7 @@ describe("Draft Library", () => {
 
   it("rolls back staging when atomic aggregate publication fails", async () => {
     const { files, library } = setup();
-    files.failMoveTo = "memory://library/drafts/draft%3A1";
+    files.failMoveTo = firstDraftUri;
 
     await expect(createDraft(library, [candidate("one")])).resolves.toEqual({
       status: "create-failed",
@@ -365,8 +367,10 @@ describe("Draft Library", () => {
     expect(created).toMatchObject({ status: "created", draftId: "../draft:opaque" });
     if (created.status !== "created") throw new Error("expected a created Draft");
     const original = created.assets.resolve(importedAssetId("asset:opaque"), "original");
-    expect(original?.uri).toContain("/drafts/%2E%2E%2Fdraft%3Aopaque/");
-    expect(original?.uri).not.toContain("/drafts/../");
+    expect(original?.uri).toContain(
+      "/drafts/draft-AC4ALgAvAGQAcgBhAGYAdAA6AG8AcABhAHEAdQBl/",
+    );
+    expect(original?.uri).not.toMatch(/\/drafts\/[^/]*[.%][^/]*\//);
     await expect(library.read(created.draftId)).resolves.toMatchObject({ status: "ready" });
   });
 
@@ -406,7 +410,7 @@ describe("Draft Library", () => {
       reason: "asset-facts-mismatch",
     });
 
-    files.failMoveTo = "memory://library/drafts/draft%3A1/document.json";
+    files.failMoveTo = `${firstDraftUri}/document.json`;
     const rejected = updateDocument(changed, {
       canvas: { ...changed.canvas, backgroundColor: "#445566" },
     });
@@ -446,7 +450,7 @@ describe("Draft Library", () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
-    await files.removeFile(`memory://library/drafts/draft%3A1/${fileName}`);
+    await files.removeFile(`${firstDraftUri}/${fileName}`);
 
     await expect(library.read(created.draftId)).resolves.toEqual({
       status: "recovery-failed",
@@ -461,7 +465,7 @@ describe("Draft Library", () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
-    files.failFileExists = `memory://library/drafts/draft%3A1/${fileName}`;
+    files.failFileExists = `${firstDraftUri}/${fileName}`;
 
     await expect(library.read(created.draftId)).resolves.toEqual({
       status: "recovery-failed",
@@ -509,8 +513,8 @@ describe("Draft Library", () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
-    const documentUri = "memory://library/drafts/draft%3A1/document.json";
-    const catalogUri = "memory://library/drafts/draft%3A1/catalog.json";
+    const documentUri = `${firstDraftUri}/document.json`;
+    const catalogUri = `${firstDraftUri}/catalog.json`;
 
     const originalCatalog = await files.readText(catalogUri);
     await files.writeText(catalogUri, "not-json");
@@ -536,7 +540,7 @@ describe("Draft Library", () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
-    const catalogUri = "memory://library/drafts/draft%3A1/catalog.json";
+    const catalogUri = `${firstDraftUri}/catalog.json`;
     const catalog = JSON.parse(await files.readText(catalogUri)) as {
       entries: Record<string, unknown>[];
     };
@@ -590,7 +594,7 @@ describe("Draft Library", () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
-    files.failMoveTo = "memory://library/drafts/draft%3A1/catalog.json";
+    files.failMoveTo = `${firstDraftUri}/catalog.json`;
 
     const result = await library.ingest(created.draftId, [candidate("two")]);
 
@@ -600,10 +604,10 @@ describe("Draft Library", () => {
       errors: [{ index: 0, message: "publication failed" }],
       assets: { entries: ["provider:item/../1"] },
     });
-    expect(files.files.has("memory://library/drafts/draft%3A1/catalog.json.tmp")).toBe(false);
+    expect(files.files.has(`${firstDraftUri}/catalog.json.tmp`)).toBe(false);
     expect(
       [...files.files.keys()].some(
-        (uri) => uri.startsWith("memory://library/drafts/draft%3A1/") && uri.includes("asset-2"),
+        (uri) => uri.startsWith(`${firstDraftUri}/`) && uri.includes("asset-2"),
       ),
     ).toBe(false);
   });
@@ -708,7 +712,7 @@ describe("Draft Library", () => {
       status: "recovery-failed",
       reason: "original-missing",
     });
-    expect(await files.readText("memory://library/drafts/draft%3A1/catalog.json")).toContain(stale.id);
+    expect(await files.readText(`${firstDraftUri}/catalog.json`)).toContain(stale.id);
     expect(files.files.has(staleOriginal.uri)).toBe(true);
   });
 
@@ -731,7 +735,7 @@ describe("Draft Library", () => {
       if (uri === "memory://library/staging/crash-operation") throw new Error("cleanup busy");
       await originalRemove(uri);
     };
-    first.files.failMoveTo = "memory://library/drafts/draft%3A1/catalog.json";
+    first.files.failMoveTo = `${firstDraftUri}/catalog.json`;
 
     const reopened = await first.createLibrary().read(created.draftId);
 

@@ -218,7 +218,27 @@ function child(parent: string, name: string): string {
 }
 
 function storageDraftName(id: DraftId): string {
-  return encodeURIComponent(id).replace(/\./g, "%2E");
+  const bytes = new Uint8Array(id.length * 2);
+  for (let index = 0; index < id.length; index += 1) {
+    const codeUnit = id.charCodeAt(index);
+    bytes[index * 2] = codeUnit >>> 8;
+    bytes[index * 2 + 1] = codeUnit & 0xff;
+  }
+
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let encoded = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index]!;
+    const second = index + 1 < bytes.length ? bytes[index + 1]! : undefined;
+    const third = index + 2 < bytes.length ? bytes[index + 2]! : undefined;
+    encoded += alphabet[first >>> 2];
+    encoded += alphabet[((first & 0x03) << 4) | ((second ?? 0) >>> 4)];
+    if (second !== undefined) {
+      encoded += alphabet[((second & 0x0f) << 2) | ((third ?? 0) >>> 6)];
+    }
+    if (third !== undefined) encoded += alphabet[third & 0x3f];
+  }
+  return `draft-${encoded}`;
 }
 
 function originalExtension(candidate: ImportCandidate): string {
