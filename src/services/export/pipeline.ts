@@ -1,9 +1,9 @@
 import type { PlogDocument } from "../../core/document";
 import type { BasicExifMetadata } from "./exif";
-import { createExportPlan, type ExportPlan, type ExportPlanOverrides } from "./plan";
+import { createExportPlan, type ExportPlan } from "./plan";
 import type { ExportArtifact, ExportPipelineDependencies } from "./types";
 
-export interface RunExportOptions extends ExportPlanOverrides {
+export interface RunExportOptions {
   readonly basicMetadata?: BasicExifMetadata;
   readonly filename?: string;
 }
@@ -18,7 +18,7 @@ export async function runExportPipeline(
   options: RunExportOptions,
   dependencies: ExportPipelineDependencies,
 ): Promise<ExportResult> {
-  const plan = createExportPlan(document, options);
+  const plan = createExportPlan(document, dependencies.capabilities);
   const pixels = await dependencies.renderer.render(document, plan);
   try {
     if (pixels.width !== plan.width || pixels.height !== plan.height) {

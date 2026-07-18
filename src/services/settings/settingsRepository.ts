@@ -1,4 +1,4 @@
-import type { MetadataPolicy } from "@/core/document";
+import type { MetadataPolicy } from "@/core/exportPolicy";
 
 export const APP_SETTINGS_SCHEMA_VERSION = 1;
 

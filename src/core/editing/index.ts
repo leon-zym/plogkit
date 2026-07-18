@@ -6,13 +6,21 @@ import {
   isExactImageOrder,
   parseDocument,
   type CanvasRatio,
-  type ExportSettings,
   type Point,
   type PlogDocument,
   type StitchMode,
   type TextAlignment,
   type TextElement,
 } from "../document";
+import {
+  listPresetOptions,
+  resolveExportPolicy,
+  type ExportCapabilities,
+  type ExportFormat,
+  type ExportPresetId,
+  type ExportSettings,
+  type MetadataPolicy,
+} from "../exportPolicy";
 
 const HISTORY_LIMIT = 40;
 
@@ -151,10 +159,9 @@ export type EditIntent =
       readonly type: "stitch.reorder-images";
       readonly imageIds: readonly string[];
     }
-  | {
-      readonly type: "export.change-settings";
-      readonly settings: ExportSettings;
-    }
+  | { readonly type: "export.change-preset"; readonly presetId: ExportPresetId }
+  | { readonly type: "export.change-format"; readonly format: ExportFormat }
+  | { readonly type: "export.change-metadata-policy"; readonly policy: MetadataPolicy }
   | {
       readonly type: "text.add";
       readonly draft: TextDraft;
@@ -230,6 +237,7 @@ export interface CreateEditCommitModuleOptions {
   readonly initialDocument: PlogDocument;
   readonly onEditCommit?: (document: PlogDocument) => void;
   readonly createTextId?: () => string;
+  readonly exportCapabilities: ExportCapabilities;
 }
 
 export const editIntents = {
@@ -258,9 +266,17 @@ export const editIntents = {
     }),
   },
   export: {
-    changeSettings: (settings: ExportSettings): EditIntent => ({
-      type: "export.change-settings",
-      settings,
+    changePreset: (presetId: ExportPresetId): EditIntent => ({
+      type: "export.change-preset",
+      presetId,
+    }),
+    changeFormat: (format: ExportFormat): EditIntent => ({
+      type: "export.change-format",
+      format,
+    }),
+    changeMetadataPolicy: (policy: MetadataPolicy): EditIntent => ({
+      type: "export.change-metadata-policy",
+      policy,
     }),
   },
   text: {
@@ -329,10 +345,38 @@ function requireTextElement(document: PlogDocument, id: string): void {
   }
 }
 
+function requirePresetOption(presetId: ExportPresetId) {
+  const option = listPresetOptions().find(({ id }) => id === presetId);
+  if (option === undefined) throw new EditIntentRejection("invalid-value");
+  return option;
+}
+
+function normalizeMetadataCompatibility(
+  settings: ExportSettings,
+  capabilities: ExportCapabilities,
+): ExportSettings {
+  requirePresetOption(settings.presetId);
+  const resolution = resolveExportPolicy(
+    settings,
+    { naturalWidth: 1, naturalHeight: 1 },
+    capabilities,
+  );
+  if (
+    resolution.status === "failed" &&
+    resolution.error.code === "unsupported-policy" &&
+    (resolution.error.reason === "metadata-not-allowed" ||
+      resolution.error.reason === "metadata-unsupported")
+  ) {
+    return { ...settings, metadataPolicy: "strip" };
+  }
+  return settings;
+}
+
 function applyIntent(
   document: PlogDocument,
   intent: EditIntent,
   createTextId: () => string,
+  exportCapabilities: ExportCapabilities,
 ): PlogDocument {
   let nextDocument: PlogDocument;
   switch (intent.type) {
@@ -360,9 +404,53 @@ function applyIntent(
       nextDocument = reorderImages(document, intent.imageIds);
       break;
     }
-    case "export.change-settings":
-      nextDocument = setExportSettings(document, intent.settings);
+    case "export.change-preset": {
+      requirePresetOption(intent.presetId);
+      nextDocument = setExportSettings(
+        document,
+        normalizeMetadataCompatibility(
+          {
+            presetId: intent.presetId,
+            metadataPolicy: document.exportSettings.metadataPolicy,
+          },
+          exportCapabilities,
+        ),
+      );
       break;
+    }
+    case "export.change-format": {
+      const option = requirePresetOption(document.exportSettings.presetId);
+      if (!option.allowedFormats.includes(intent.format)) {
+        throw new EditIntentRejection("invalid-value");
+      }
+      nextDocument = setExportSettings(
+        document,
+        normalizeMetadataCompatibility(
+          {
+            ...document.exportSettings,
+            ...(intent.format === option.defaultFormat
+              ? { formatOverride: undefined }
+              : { formatOverride: intent.format }),
+          },
+          exportCapabilities,
+        ),
+      );
+      break;
+    }
+    case "export.change-metadata-policy": {
+      const settings = normalizeMetadataCompatibility(
+        {
+          ...document.exportSettings,
+          metadataPolicy: intent.policy,
+        },
+        exportCapabilities,
+      );
+      if (settings.metadataPolicy !== intent.policy) {
+        throw new EditIntentRejection("invalid-value");
+      }
+      nextDocument = setExportSettings(document, settings);
+      break;
+    }
     case "text.add": {
       if (intent.draft.content.length === 0) throw new EditIntentRejection("invalid-value");
       const id = createTextId();
@@ -406,6 +494,7 @@ export function createEditCommitModule({
   initialDocument,
   onEditCommit = () => undefined,
   createTextId = defaultCreateTextId,
+  exportCapabilities,
 }: CreateEditCommitModuleOptions): EditCommitModule {
   let history = createHistory(initialDocument);
   let revision = 0;
@@ -470,7 +559,12 @@ export function createEditCommitModule({
 
       let nextDocument: PlogDocument;
       try {
-        nextDocument = applyIntent(history.current, message.intent, createTextId);
+        nextDocument = applyIntent(
+          history.current,
+          message.intent,
+          createTextId,
+          exportCapabilities,
+        );
       } catch (error: unknown) {
         if (error instanceof EditIntentRejection) {
           return { status: "rejected", code: error.code };

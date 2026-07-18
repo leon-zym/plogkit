@@ -8,9 +8,6 @@ export class SkiaExportEncodeStage implements ExportEncodeStage {
     plan: ExportPlan,
     metadata?: Parameters<ExportEncodeStage["encode"]>[2],
   ): Uint8Array {
-    if (plan.metadataPolicy === "retain-basic" && plan.format === "png") {
-      throw new Error("retain-basic metadata is not supported for PNG export");
-    }
     const encoded = pixels.encode(plan.format, plan.quality);
     if (plan.metadataPolicy === "retain-basic") {
       return injectBasicExif(encoded, metadata ?? {});

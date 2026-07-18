@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,7 +14,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { ExportSettings, Point } from "@/core/document";
+import type { PlogDocument, Point } from "@/core/document";
+import {
+  resolveExportPolicy,
+  type ExportFormat,
+  type ExportPolicyError,
+  type ExportPresetId,
+  type MetadataPolicy,
+} from "@/core/exportPolicy";
 import {
   editIntents,
   type EditCommitModule,
@@ -35,7 +42,8 @@ import {
 import { editorRuntime } from "@/features/editor/runtime";
 import { useEditCommit } from "@/features/editor/state/editCommit";
 import { DocumentCanvas } from "@/features/editor/components/DocumentCanvas";
-import { exportDocument } from "@/services/export";
+import { documentToExportSourceFacts } from "@/render/exportSourceFacts";
+import { exportDocument, SKIA_EXPORT_CAPABILITIES } from "@/services/export";
 import { colors, spacing, typography } from "@/ui/theme";
 
 function LoadingEditor() {
@@ -46,6 +54,29 @@ function LoadingEditor() {
       <Text style={styles.loadingText}>{t("editor.saving")}</Text>
     </SafeAreaView>
   );
+}
+
+interface ExportPolicyPreflight {
+  readonly error: ExportPolicyError | null;
+  readonly canRetainBasic: boolean;
+}
+
+function preflightExportPolicy(document: PlogDocument): ExportPolicyPreflight {
+  const sourceFacts = documentToExportSourceFacts(document);
+  const current = resolveExportPolicy(
+    document.exportSettings,
+    sourceFacts,
+    SKIA_EXPORT_CAPABILITIES,
+  );
+  const retainBasic = resolveExportPolicy(
+    { ...document.exportSettings, metadataPolicy: "retain-basic" },
+    sourceFacts,
+    SKIA_EXPORT_CAPABILITIES,
+  );
+  return {
+    error: current.status === "failed" ? current.error : null,
+    canRetainBasic: retainBasic.status === "resolved",
+  };
 }
 
 export default function EditorScreen() {
@@ -93,6 +124,7 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
   const selectedText =
     document.textElements.find((element) => element.id === selectedTextId) ?? null;
   const toolbarTool: EditorTool = activeTool === "export" ? "background" : activeTool;
+  const exportPreflight = useMemo(() => preflightExportPolicy(document), [document]);
 
   useEffect(() => {
     panelScrollRef.current?.scrollTo({ animated: false, y: 0 });
@@ -175,9 +207,21 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
     selectText(id);
   };
 
-  const updateExportSettings = (settings: ExportSettings) => {
-    commitIntent(editIntents.export.changeSettings(settings));
+  const commitExportIntent = (intent: EditIntent) => {
+    commitIntent(intent);
     setExportStatus({ kind: "idle" });
+  };
+
+  const changeExportPreset = (presetId: ExportPresetId) => {
+    commitExportIntent(editIntents.export.changePreset(presetId));
+  };
+
+  const changeExportFormat = (format: ExportFormat) => {
+    commitExportIntent(editIntents.export.changeFormat(format));
+  };
+
+  const changeExportMetadataPolicy = (policy: MetadataPolicy) => {
+    commitExportIntent(editIntents.export.changeMetadataPolicy(policy));
   };
 
   const previewSelectedText = useCallback(
@@ -208,6 +252,7 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
         width: result.plan.width,
         height: result.plan.height,
         wasReduced: result.plan.wasReduced,
+        format: result.plan.format,
       });
     } catch {
       setExportStatus({ kind: "error" });
@@ -226,8 +271,12 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
     if (activeTool === "export") {
       return (
         <ExportPanel
+          canRetainBasic={exportPreflight.canRetainBasic}
           onExport={() => void runExport()}
-          onSettingsChange={updateExportSettings}
+          onFormatChange={changeExportFormat}
+          onMetadataPolicyChange={changeExportMetadataPolicy}
+          onPresetChange={changeExportPreset}
+          policyError={exportPreflight.error}
           settings={document.exportSettings}
           status={exportStatus}
         />
