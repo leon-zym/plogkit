@@ -263,21 +263,22 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
   const runExport = async () => {
     setExportStatus({ kind: "exporting" });
     try {
-      const firstImage = document.sourceImages[0];
-      const basicMetadata =
-        document.exportSettings.metadataPolicy === "retain-basic" && firstImage !== undefined
-          ? await editorRuntime.readBasicMetadata(firstImage.id)
-          : undefined;
-      const result = await exportDocument(document, assets, { basicMetadata });
-      setExportStatus({
-        kind: "success",
-        width: result.plan.width,
-        height: result.plan.height,
-        wasReduced: result.plan.wasReduced,
-        format: result.plan.format,
-      });
+      const result = await exportDocument(document, assets);
+      if (result.status === "success") {
+        setExportStatus({
+          kind: "success",
+          width: result.output.width,
+          height: result.output.height,
+          wasReduced: result.output.wasReduced,
+          format: result.output.format,
+        });
+      } else if (result.status === "cancelled") {
+        setExportStatus({ kind: "cancelled" });
+      } else {
+        setExportStatus({ kind: "error", code: result.code });
+      }
     } catch {
-      setExportStatus({ kind: "error" });
+      setExportStatus({ kind: "error", code: "unexpected" });
     }
   };
 

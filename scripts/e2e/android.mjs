@@ -212,6 +212,36 @@ export async function installAndSeedAndroid({ cleanup, device, fixtures, root })
       { cleanup },
     );
   }
+  const fixtureNames = fixtures.map((fixture) => fixture.split("/").at(-1));
+  await waitUntil(
+    () => {
+      const output = queryAndroidPhotos(device);
+      return fixtureNames.every((name) => output.includes(`_display_name=${name}`));
+    },
+    10000,
+    `Android MediaStore to index ${fixtureNames.join(" and ")}`,
+    500,
+  );
+}
+
+function queryAndroidPhotos(device) {
+  return capture("adb", [
+    "-s",
+    device.deviceId,
+    "shell",
+    "content",
+    "query",
+    "--uri",
+    "content://media/external/images/media",
+    "--projection",
+    "_id:_display_name:mime_type",
+  ]);
+}
+
+export function captureAndroidPhotoResources(device) {
+  return new Set(
+    [...queryAndroidPhotos(device).matchAll(/(?:^|\s)_id=(\d+)/gm)].map((match) => match[1]),
+  );
 }
 
 export function androidBuildArtifact(root) {

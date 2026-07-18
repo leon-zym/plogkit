@@ -1,34 +1,42 @@
-import { Directory, File, Paths } from "expo-file-system";
 import { Asset, requestPermissionsAsync } from "expo-media-library";
 
-import type { ExportPlan } from "./plan";
-import type { ExportArtifact, ExportDestination } from "./types";
+import type {
+  PhotosDestination,
+  PhotosDestinationResult,
+  PreparedExport,
+} from "./types";
 
-function outputFilename(plan: ExportPlan, filename?: string): string {
-  const base = filename ?? `plogkit-${Date.now()}`;
-  if (base.length === 0 || base.includes("/") || base.includes("\\")) {
-    throw new Error("export filename must be a non-empty file name without path separators");
-  }
-  return base.endsWith(`.${plan.extension}`) ? base : `${base}.${plan.extension}`;
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
-export class ExpoExportDestination implements ExportDestination {
-  async writeAndSave(
-    bytes: Uint8Array,
-    plan: ExportPlan,
-    filename?: string,
-  ): Promise<ExportArtifact> {
-    const directory = new Directory(Paths.document, "exports");
-    directory.create({ intermediates: true, idempotent: true });
-    const file = new File(directory, outputFilename(plan, filename));
-    file.create({ overwrite: false });
-    file.write(bytes);
+export class ExpoPhotosDestination implements PhotosDestination {
+  async publish(
+    prepared: PreparedExport,
+    signal?: AbortSignal,
+  ): Promise<PhotosDestinationResult> {
+    if (isAborted(signal)) return { status: "cancelled", phase: "permission" };
 
-    const permission = await requestPermissionsAsync(true, ["photo"]);
-    if (!permission.granted) {
-      throw new Error("photo library write permission was not granted");
+    let granted: boolean;
+    try {
+      granted = (await requestPermissionsAsync(true, ["photo"])).granted;
+    } catch {
+      return { status: "failure", code: "permission-denied", phase: "permission" };
     }
-    const asset = await Asset.create(file.uri);
-    return { fileUri: file.uri, assetId: asset.id };
+    if (!granted) {
+      return { status: "failure", code: "permission-denied", phase: "permission" };
+    }
+    if (isAborted(signal)) return { status: "cancelled", phase: "destination" };
+
+    let asset: Awaited<ReturnType<typeof Asset.create>>;
+    try {
+      asset = await Asset.create(prepared.uri);
+    } catch {
+      return { status: "failure", code: "destination-failed", phase: "destination" };
+    }
+    if (asset.id.length === 0) {
+      throw new Error("Photos destination returned an empty system asset identity");
+    }
+    return { status: "published", assetId: asset.id };
   }
 }

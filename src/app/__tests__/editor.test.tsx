@@ -36,7 +36,6 @@ jest.mock("@/features/editor/expoEditorRuntime", () => ({
     prepareEditor: jest.fn(),
     takeImportErrorCount: jest.fn(() => 0),
     flush: jest.fn(),
-    readBasicMetadata: jest.fn(),
   },
 }));
 
@@ -85,7 +84,7 @@ jest.mock("@/services/export", () => ({
 const runtime = editorRuntime as unknown as jest.Mocked<
   Pick<
     typeof editorRuntime,
-    "prepareEditor" | "takeImportErrorCount" | "flush" | "readBasicMetadata"
+    "prepareEditor" | "takeImportErrorCount" | "flush"
   >
 >;
 

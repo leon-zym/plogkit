@@ -122,7 +122,18 @@
     "action": "保存到相册",
     "exporting": "正在渲染导出…",
     "success": "已保存到相册",
-    "failure": "无法保存导出，当前编辑会话不受影响。",
+    "cancelled": "已取消导出，当前编辑会话不受影响。",
+    "failures": {
+      "presetUnavailable": "当前预设已不可用，请选择其他预设。",
+      "unsupportedPolicy": "当前设备无法完成所选导出策略。",
+      "stagingFailed": "临时存储空间不足，无法准备导出。",
+      "assetUnavailable": "有原图暂时不可用，请重新打开草稿后重试。",
+      "renderFailed": "无法渲染当前文档。",
+      "encodeFailed": "无法编码已渲染的图片。",
+      "permissionDenied": "请允许 PlogKit 添加照片后重试。",
+      "destinationFailed": "无法将图片添加到系统相册。",
+      "unexpected": "无法完成导出，当前编辑会话不受影响。"
+    },
     "reduced": "已按导出上限缩小为 {{width}} × {{height}}。"
   }
 }

@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   androidBuildArtifact,
   buildAndroid,
+  captureAndroidPhotoResources,
   installAndSeedAndroid,
   prepareAndroidDevice,
 } from "./android.mjs";
 import {
   buildIos,
+  captureIosPhotoResources,
   installAndSeedIos,
   iosBuildArtifact,
   prepareIosDevice,
@@ -24,6 +26,7 @@ import {
   run,
   runMaestroSuite,
   startMetro,
+  waitUntil,
   warmUpApp,
 } from "./runtime.mjs";
 
@@ -140,6 +143,35 @@ async function installAndSeed(device, cleanup) {
   else await installAndSeedAndroid(options);
 }
 
+function capturePhotoResources(device) {
+  return device.platform === "ios"
+    ? captureIosPhotoResources(device)
+    : captureAndroidPhotoResources(device);
+}
+
+async function runSuiteWithExportAssertion(options) {
+  const { device, flow } = options;
+  const assertsExport = flow === null || flow === "f04-export";
+  const before = assertsExport ? capturePhotoResources(device) : null;
+
+  await runMaestroSuite(options);
+
+  if (before === null) return;
+  const after = await waitUntil(
+    () => {
+      const resources = capturePhotoResources(device);
+      return [...resources].some((resource) => !before.has(resource)) ? resources : null;
+    },
+    10000,
+    `${device.platform} system photo library to contain a newly exported resource`,
+    500,
+  );
+  log(
+    device.platform,
+    `System photo resources gained a new identity (${before.size} before, ${after.size} after).`,
+  );
+}
+
 async function test(platforms, { artifactRoot, cleanup, deviceId, flow }) {
   await assertMetroPortAvailable();
   log("setup", `Preparing ${platforms.join(" + ")} test devices.`);
@@ -154,7 +186,9 @@ async function test(platforms, { artifactRoot, cleanup, deviceId, flow }) {
   }
 
   const results = await Promise.allSettled(
-    devices.map((device) => runMaestroSuite({ artifactRoot, cleanup, device, flow, root })),
+    devices.map((device) =>
+      runSuiteWithExportAssertion({ artifactRoot, cleanup, device, flow, root }),
+    ),
   );
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length > 0) {

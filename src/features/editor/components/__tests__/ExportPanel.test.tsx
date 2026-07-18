@@ -76,4 +76,21 @@ describe("ExportPanel", () => {
     fireEvent.press(exportButton);
     expect(onExport).not.toHaveBeenCalled();
   });
+
+  it("maps a pipeline failure code to localized guidance", async () => {
+    const settings = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
+    const view = await render(
+      <ExportPanel
+        {...callbacks}
+        canRetainBasic
+        policyError={null}
+        settings={settings}
+        status={{ kind: "error", code: "permission-denied" }}
+      />,
+    );
+
+    expect(view.getByTestId("export-error")).toHaveTextContent(
+      "Allow PlogKit to add photos, then try again.",
+    );
+  });
 });

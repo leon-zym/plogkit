@@ -1,7 +1,6 @@
 import type { PlogDocument } from "@/core/document";
 import type { EditCommitModule } from "@/core/editing";
 import type { MetadataPolicy } from "@/core/exportPolicy";
-import type { BasicExifMetadata } from "@/services/export/exif";
 import type {
   AssetCatalogSnapshot,
   CreateDraftResult,
@@ -10,7 +9,6 @@ import type {
   DraftRecoveryFailure,
   ImportCandidate,
 } from "@/services/drafts/draftLibrary";
-import { parseImageMetadataSidecar, toExifDateTime } from "@/services/image-import/metadata";
 import type {
   CurrentEditingSession,
   CurrentEditingSessionHandle,
@@ -28,7 +26,6 @@ export interface EditorRuntimeDependencies {
   readonly session: CurrentEditingSession;
   readonly selectCandidates: () => Promise<readonly ImportCandidate[]>;
   readonly loadMetadataPolicy: () => Promise<MetadataPolicy>;
-  readonly readMetadataText: (uri: string) => Promise<string | null>;
 }
 
 export type RestoreDraftResult =
@@ -132,26 +129,5 @@ export class EditorRuntime {
 
   async flush(): Promise<FlushCurrentEditingSessionResult> {
     return this.dependencies.session.flush();
-  }
-
-  async readBasicMetadata(imageId: PlogDocument["sourceImages"][number]["id"]): Promise<
-    BasicExifMetadata | undefined
-  > {
-    const descriptor = this.handle?.assets.resolve(imageId, "metadata") ?? null;
-    if (descriptor === null) return undefined;
-    try {
-      const json = await this.dependencies.readMetadataText(descriptor.uri);
-      if (json === null) return undefined;
-      const input: unknown = JSON.parse(json);
-      const metadata = parseImageMetadataSidecar(input);
-      if (metadata === null) return undefined;
-      return {
-        dateTimeOriginal: toExifDateTime(metadata.capturedAt),
-        make: metadata.deviceMake,
-        model: metadata.deviceModel,
-      };
-    } catch {
-      return undefined;
-    }
   }
 }

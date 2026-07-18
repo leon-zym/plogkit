@@ -1,5 +1,3 @@
-import { File } from "expo-file-system";
-
 import { createExpoDraftRuntimeStorage } from "@/services/drafts/expoDraftLibrary";
 import { createExpoImagePickerSource } from "@/services/image-import/expoImagePickerSource";
 import { createCurrentEditingSession } from "@/services/session/currentEditingSession";
@@ -16,8 +14,4 @@ export const editorRuntime = new EditorRuntime({
   session,
   selectCandidates: picker.select,
   loadMetadataPolicy: async () => (await settingsRuntime.load()).defaultMetadataPolicy,
-  readMetadataText: async (uri) => {
-    const file = new File(uri);
-    return file.exists ? file.text() : null;
-  },
 });
