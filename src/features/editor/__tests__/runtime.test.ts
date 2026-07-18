@@ -71,6 +71,67 @@ describe("editor Draft integration", () => {
     );
   });
 
+  it("shares concurrent editor preparation and starts a new run after it settles", async () => {
+    const document = createDocument([{ id: testImageId, width: 4000, height: 3000 }]);
+    const assets = snapshot("memory://prepared");
+    let markPreviewStarted: (() => void) | undefined;
+    let releasePreview: (() => void) | undefined;
+    const previewStarted = new Promise<void>((resolve) => {
+      markPreviewStarted = resolve;
+    });
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    const readPreview = jest.fn(async () => {
+      markPreviewStarted?.();
+      await previewGate;
+      return {
+        status: "ready" as const,
+        descriptor: assets.resolve(testImageId, "preview")!,
+        assets,
+      };
+    });
+    const library: DraftLibrary = {
+      create: jest.fn(),
+      ingest: jest.fn(),
+      save: jest.fn(async (_id, next) => ({ status: "saved" as const, document: next })),
+      read: jest.fn(async () => ({
+        status: "ready" as const,
+        draftId: testDraftId,
+        document,
+        assets,
+      })),
+      readPreview,
+    };
+    const runtime = new EditorRuntime({
+      storage: {
+        library,
+        readRecentDraftId: async () => testDraftId,
+        writeRecentDraftId: async () => undefined,
+      },
+      session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
+      selectCandidates: async () => [],
+      loadMetadataPolicy: async () => "strip",
+      readMetadataText: async () => null,
+    });
+
+    const first = runtime.prepareEditor();
+    await previewStarted;
+    const second = runtime.prepareEditor();
+    releasePreview?.();
+    const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+
+    expect(second).toBe(first);
+    expect(firstResult.status).toBe("fulfilled");
+    expect(secondResult.status).toBe("fulfilled");
+    expect(readPreview).toHaveBeenCalledTimes(1);
+
+    const next = runtime.prepareEditor();
+    expect(next).not.toBe(first);
+    await expect(next).resolves.toMatchObject({ editing: expect.any(Object) });
+    expect(readPreview).toHaveBeenCalledTimes(2);
+  });
+
   it("passes the explicit global metadata default into Draft creation", async () => {
     const candidates: readonly ImportCandidate[] = [
       {

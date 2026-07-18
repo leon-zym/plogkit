@@ -52,6 +52,7 @@ export class EditorRuntime {
   private readonly dependencies: EditorRuntimeDependencies;
   private handle: CurrentEditingSessionHandle | null = null;
   private restorePromise: Promise<RestoreDraftResult> | null = null;
+  private preparePromise: Promise<PreparedEditor | null> | null = null;
   private importErrors = 0;
 
   constructor(dependencies: EditorRuntimeDependencies) {
@@ -99,19 +100,27 @@ export class EditorRuntime {
     }
   }
 
-  async prepareEditor(): Promise<PreparedEditor | null> {
-    const restored = await this.restore();
-    const handle = this.handle;
-    if (restored.status !== "restored" || handle === null) return null;
-    const previews = await handle.preparePreviews();
-    if (previews.status !== "prepared") {
-      throw new Error(
-        previews.status === "preview-failed"
-          ? (previews.message ?? previews.reason)
-          : previews.status,
-      );
-    }
-    return { editing: handle.editing, assets: handle.assets };
+  prepareEditor(): Promise<PreparedEditor | null> {
+    if (this.preparePromise !== null) return this.preparePromise;
+    this.preparePromise = (async () => {
+      try {
+        const restored = await this.restore();
+        const handle = this.handle;
+        if (restored.status !== "restored" || handle === null) return null;
+        const previews = await handle.preparePreviews();
+        if (previews.status !== "prepared") {
+          throw new Error(
+            previews.status === "preview-failed"
+              ? (previews.message ?? previews.reason)
+              : previews.status,
+          );
+        }
+        return { editing: handle.editing, assets: handle.assets };
+      } finally {
+        this.preparePromise = null;
+      }
+    })();
+    return this.preparePromise;
   }
 
   async choosePhotos(): Promise<CreateDraftResult> {
