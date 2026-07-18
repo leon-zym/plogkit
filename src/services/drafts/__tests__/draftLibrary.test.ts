@@ -278,6 +278,22 @@ describe("Draft Library", () => {
     });
   });
 
+  it("retries storage initialization after a transient failure", async () => {
+    const { files, library } = setup();
+    files.failEnsureDirectory = "memory://library/drafts";
+
+    await expect(library.read(draftId("missing"))).resolves.toEqual({
+      status: "recovery-failed",
+      reason: "storage-unavailable",
+    });
+
+    files.failEnsureDirectory = null;
+    await expect(library.read(draftId("missing"))).resolves.toEqual({
+      status: "recovery-failed",
+      reason: "draft-not-found",
+    });
+  });
+
   it("reports item staging failure per candidate and continues the ingest batch", async () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);

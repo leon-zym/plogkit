@@ -372,11 +372,16 @@ export function createDraftLibrary({
 
   const initialize = (): Promise<void> => {
     initializePromise ??= (async () => {
-      await files.ensureDirectory(rootUri);
-      await files.ensureDirectory(draftsUri);
-      await files.ensureDirectory(stagingUri);
-      for (const residual of await files.listDirectories(stagingUri)) {
-        await safeRemoveDirectory(residual);
+      try {
+        await files.ensureDirectory(rootUri);
+        await files.ensureDirectory(draftsUri);
+        await files.ensureDirectory(stagingUri);
+        for (const residual of await files.listDirectories(stagingUri)) {
+          await safeRemoveDirectory(residual);
+        }
+      } catch (error: unknown) {
+        initializePromise = null;
+        throw error;
       }
     })();
     return initializePromise;
