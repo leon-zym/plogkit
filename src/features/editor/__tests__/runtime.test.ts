@@ -553,7 +553,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
 
@@ -607,7 +606,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
 
