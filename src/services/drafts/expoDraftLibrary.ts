@@ -62,11 +62,10 @@ export function createExpoDraftRuntimeStorage(): ExpoDraftRuntimeStorage {
   const root = new Directory(Paths.document, "plogkit");
   const files = createExpoDraftFiles();
   const previews: DraftLibraryPreviewAdapter = createSkiaPreviewGenerator();
-  const recent = new File(root, "recent-draft.json");
-  const recentTemporary = new File(root, "recent-draft.json.tmp");
   return {
     library: createDraftLibrary({ files, previews, rootUri: root.uri }),
     readRecentDraftId: async () => {
+      const recent = new File(root, "recent-draft.json");
       if (!recent.exists) return null;
       const input: unknown = JSON.parse(await recent.text());
       if (typeof input !== "object" || input === null || !("draftId" in input)) {
@@ -80,9 +79,10 @@ export function createExpoDraftRuntimeStorage(): ExpoDraftRuntimeStorage {
     },
     writeRecentDraftId: async (id) => {
       root.create({ idempotent: true, intermediates: true });
+      const recentTemporary = new File(root, "recent-draft.json.tmp");
       recentTemporary.create({ intermediates: true, overwrite: true });
       recentTemporary.write(JSON.stringify({ draftId: id }));
-      await recentTemporary.move(recent, { overwrite: true });
+      await recentTemporary.move(new File(root, "recent-draft.json"), { overwrite: true });
     },
   };
 }
