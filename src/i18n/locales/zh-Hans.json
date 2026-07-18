@@ -35,6 +35,7 @@
     "export": "导出",
     "saving": "正在保存",
     "saved": "已保存",
+    "saveFailed": "无法保存最新修改，请检查设备存储后重试返回。",
     "tools": {
       "background": "背景",
       "stitch": "拼接",

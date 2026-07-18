@@ -1,7 +1,6 @@
 import type { PlogDocument } from "@/core/document";
-import { createEditCommitModule, type EditCommitModule } from "@/core/editing";
+import type { EditCommitModule } from "@/core/editing";
 import type { MetadataPolicy } from "@/core/exportPolicy";
-import { SKIA_EXPORT_CAPABILITIES } from "@/services/export/capabilities";
 import type { BasicExifMetadata } from "@/services/export/exif";
 import type {
   AssetCatalogSnapshot,
@@ -12,10 +11,11 @@ import type {
   ImportCandidate,
 } from "@/services/drafts/draftLibrary";
 import { parseImageMetadataSidecar, toExifDateTime } from "@/services/image-import/metadata";
-import {
-  createAutosaveScheduler,
-  type AutosaveScheduler,
-} from "@/services/session/autosaveScheduler";
+import type {
+  CurrentEditingSession,
+  CurrentEditingSessionHandle,
+  FlushCurrentEditingSessionResult,
+} from "@/services/session/currentEditingSession";
 
 export interface DraftRuntimeStorage {
   readonly library: DraftLibrary;
@@ -25,6 +25,7 @@ export interface DraftRuntimeStorage {
 
 export interface EditorRuntimeDependencies {
   readonly storage: DraftRuntimeStorage;
+  readonly session: CurrentEditingSession;
   readonly selectCandidates: () => Promise<readonly ImportCandidate[]>;
   readonly loadMetadataPolicy: () => Promise<MetadataPolicy>;
   readonly readMetadataText: (uri: string) => Promise<string | null>;
@@ -33,7 +34,14 @@ export interface EditorRuntimeDependencies {
 export type RestoreDraftResult =
   | { readonly status: "none" }
   | { readonly status: "restored"; readonly draftId: DraftId; readonly document: PlogDocument }
-  | { readonly status: "recovery-failed"; readonly reason: DraftRecoveryFailure | "locator-corrupt" };
+  | {
+      readonly status: "recovery-failed";
+      readonly reason:
+        | DraftRecoveryFailure
+        | "locator-corrupt"
+        | "session-busy"
+        | "flush-failed";
+    };
 
 export interface PreparedEditor {
   readonly editing: EditCommitModule;
@@ -42,10 +50,7 @@ export interface PreparedEditor {
 
 export class EditorRuntime {
   private readonly dependencies: EditorRuntimeDependencies;
-  private draftId: DraftId | null = null;
-  private editing: EditCommitModule | null = null;
-  private assets: AssetCatalogSnapshot | null = null;
-  private autosave: AutosaveScheduler | null = null;
+  private handle: CurrentEditingSessionHandle | null = null;
   private restorePromise: Promise<RestoreDraftResult> | null = null;
   private importErrors = 0;
 
@@ -59,34 +64,12 @@ export class EditorRuntime {
     return count;
   }
 
-  private start(
-    id: DraftId,
-    document: PlogDocument,
-    assets: AssetCatalogSnapshot,
-  ): EditCommitModule {
-    const autosave = createAutosaveScheduler(async (nextDocument) => {
-      const result = await this.dependencies.storage.library.save(id, nextDocument);
-      if (result.status === "save-failed") {
-        throw new Error(result.message ?? result.reason);
-      }
-    });
-    this.draftId = id;
-    this.assets = assets;
-    this.autosave = autosave;
-    this.editing = createEditCommitModule({
-      initialDocument: document,
-      onEditCommit: (nextDocument) => autosave.schedule(nextDocument),
-      exportCapabilities: SKIA_EXPORT_CAPABILITIES,
-    });
-    return this.editing;
-  }
-
   async restore(): Promise<RestoreDraftResult> {
-    if (this.editing !== null && this.draftId !== null) {
+    if (this.handle !== null) {
       return {
         status: "restored",
-        draftId: this.draftId,
-        document: this.editing.read().document,
+        draftId: this.handle.draftId,
+        document: this.handle.editing.read().document,
       };
     }
     this.restorePromise ??= (async () => {
@@ -97,12 +80,17 @@ export class EditorRuntime {
         return { status: "recovery-failed", reason: "locator-corrupt" } as const;
       }
       if (id === null) return { status: "none" } as const;
-      const result = await this.dependencies.storage.library.read(id);
-      if (result.status === "recovery-failed") {
-        return { status: "recovery-failed", reason: result.reason } as const;
+      const result = await this.dependencies.session.open(id);
+      if (result.status === "open-failed") {
+        const reason = result.reason === "busy" ? "session-busy" : result.reason;
+        return { status: "recovery-failed", reason } as const;
       }
-      this.start(id, result.document, result.assets);
-      return { status: "restored", draftId: id, document: result.document } as const;
+      this.handle = result.handle;
+      return {
+        status: "restored",
+        draftId: id,
+        document: result.handle.editing.read().document,
+      } as const;
     })();
     try {
       return await this.restorePromise;
@@ -113,44 +101,43 @@ export class EditorRuntime {
 
   async prepareEditor(): Promise<PreparedEditor | null> {
     const restored = await this.restore();
-    if (
-      restored.status !== "restored" ||
-      this.draftId === null ||
-      this.editing === null ||
-      this.assets === null
-    ) {
-      return null;
+    const handle = this.handle;
+    if (restored.status !== "restored" || handle === null) return null;
+    const previews = await handle.preparePreviews();
+    if (previews.status !== "prepared") {
+      throw new Error(
+        previews.status === "preview-failed"
+          ? (previews.message ?? previews.reason)
+          : previews.status,
+      );
     }
-    for (const image of this.editing.read().document.sourceImages) {
-      const preview = await this.dependencies.storage.library.readPreview(this.draftId, image.id);
-      if (preview.status === "preview-failed") {
-        throw new Error(preview.message ?? preview.reason);
-      }
-      this.assets = preview.assets;
-    }
-    return { editing: this.editing, assets: this.assets };
+    return { editing: handle.editing, assets: handle.assets };
   }
 
   async choosePhotos(): Promise<CreateDraftResult> {
     const candidates = await this.dependencies.selectCandidates();
+    if (candidates.length === 0) return { status: "not-created", errors: [] };
     const metadataPolicy = await this.dependencies.loadMetadataPolicy();
     const result = await this.dependencies.storage.library.create(candidates, { metadataPolicy });
     if (result.status !== "created") return result;
-    await this.autosave?.dispose();
+    const opened = await this.dependencies.session.open(result.draftId);
+    if (opened.status === "open-failed") {
+      throw new Error(`created Draft could not become current: ${opened.reason}`);
+    }
+    this.handle = opened.handle;
     await this.dependencies.storage.writeRecentDraftId(result.draftId);
-    this.start(result.draftId, result.document, result.assets);
     this.importErrors = result.errors.length;
     return result;
   }
 
-  async flush(): Promise<void> {
-    await this.autosave?.flush();
+  async flush(): Promise<FlushCurrentEditingSessionResult> {
+    return this.dependencies.session.flush();
   }
 
   async readBasicMetadata(imageId: PlogDocument["sourceImages"][number]["id"]): Promise<
     BasicExifMetadata | undefined
   > {
-    const descriptor = this.assets?.resolve(imageId, "metadata") ?? null;
+    const descriptor = this.handle?.assets.resolve(imageId, "metadata") ?? null;
     if (descriptor === null) return undefined;
     try {
       const json = await this.dependencies.readMetadataText(descriptor.uri);

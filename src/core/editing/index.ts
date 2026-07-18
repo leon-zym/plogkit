@@ -4,11 +4,13 @@ import {
   cloneDocument,
   DocumentParseError,
   isExactImageOrder,
+  MAX_SOURCE_IMAGES,
   parseDocument,
   type CanvasRatio,
   type ImportedAssetId,
   type Point,
   type PlogDocument,
+  type SourceImage,
   type StitchMode,
   type TextAlignment,
   type TextElement,
@@ -128,6 +130,51 @@ function reorderImages(document: PlogDocument, order: readonly ImportedAssetId[]
   return parseDocument({ ...document, stitch: { ...document.stitch, order } });
 }
 
+function addImages(document: PlogDocument, images: readonly SourceImage[]): PlogDocument {
+  if (images.length === 0) throw new EditIntentRejection("invalid-value");
+  if (document.sourceImages.length + images.length > MAX_SOURCE_IMAGES) {
+    throw new EditIntentRejection("invalid-value");
+  }
+  const existing = new Set(document.sourceImages.map(({ id }) => id));
+  if (
+    images.some(({ id }) => existing.has(id)) ||
+    new Set(images.map(({ id }) => id)).size !== images.length
+  ) {
+    throw new EditIntentRejection("duplicate-entity");
+  }
+  return parseDocument({
+    ...document,
+    sourceImages: [...document.sourceImages, ...images],
+    stitch: {
+      ...document.stitch,
+      order: [...document.stitch.order, ...images.map(({ id }) => id)],
+    },
+  });
+}
+
+function replaceImage(
+  document: PlogDocument,
+  targetId: ImportedAssetId,
+  image: SourceImage,
+): PlogDocument {
+  if (!document.sourceImages.some(({ id }) => id === targetId)) {
+    throw new EditIntentRejection("entity-not-found");
+  }
+  if (document.sourceImages.some(({ id }) => id === image.id)) {
+    throw new EditIntentRejection("duplicate-entity");
+  }
+  return parseDocument({
+    ...document,
+    sourceImages: document.sourceImages.map((current) =>
+      current.id === targetId ? image : current,
+    ),
+    stitch: {
+      ...document.stitch,
+      order: document.stitch.order.map((id) => (id === targetId ? image.id : id)),
+    },
+  });
+}
+
 function setExportSettings(document: PlogDocument, exportSettings: ExportSettings): PlogDocument {
   return parseDocument({ ...document, exportSettings });
 }
@@ -200,6 +247,18 @@ export type EditMessage =
   | { readonly type: "undo" }
   | { readonly type: "redo" };
 
+type AssetEditIntent =
+  | { readonly type: "images.add"; readonly images: readonly SourceImage[] }
+  | {
+      readonly type: "images.replace";
+      readonly targetId: ImportedAssetId;
+      readonly image: SourceImage;
+    };
+
+type InternalEditMessage =
+  | EditMessage
+  | { readonly type: "commit"; readonly intent: AssetEditIntent };
+
 export interface EditCommitSnapshot {
   readonly document: PlogDocument;
   readonly previewDocument: PlogDocument;
@@ -223,6 +282,7 @@ export type EditResult =
     }
   | { readonly status: "previewed" }
   | { readonly status: "unchanged" }
+  | { readonly status: "unavailable"; readonly reason: "session-inactive" }
   | { readonly status: "rejected"; readonly code: EditRejectionCode };
 
 export type EditRejectionCode =
@@ -232,6 +292,19 @@ export interface EditCommitModule {
   readonly read: () => EditCommitSnapshot;
   readonly subscribe: (listener: () => void) => () => void;
   readonly dispatch: (message: EditMessage) => EditResult;
+}
+
+export type PublishedAssetMutation =
+  | { readonly type: "add"; readonly images: readonly SourceImage[] }
+  | {
+      readonly type: "replace";
+      readonly targetId: ImportedAssetId;
+      readonly image: SourceImage;
+    };
+
+export interface SessionEditCommitController {
+  readonly editing: EditCommitModule;
+  readonly commitPublishedAssets: (mutation: PublishedAssetMutation) => EditResult;
 }
 
 export interface CreateEditCommitModuleOptions {
@@ -375,7 +448,7 @@ function normalizeMetadataCompatibility(
 
 function applyIntent(
   document: PlogDocument,
-  intent: EditIntent,
+  intent: EditIntent | AssetEditIntent,
   createTextId: () => string,
   exportCapabilities: ExportCapabilities,
 ): PlogDocument {
@@ -405,6 +478,12 @@ function applyIntent(
       nextDocument = reorderImages(document, intent.imageIds);
       break;
     }
+    case "images.add":
+      nextDocument = addImages(document, intent.images);
+      break;
+    case "images.replace":
+      nextDocument = replaceImage(document, intent.targetId, intent.image);
+      break;
     case "export.change-preset": {
       requirePresetOption(intent.presetId);
       nextDocument = setExportSettings(
@@ -491,12 +570,12 @@ function applyIntent(
   return nextDocument;
 }
 
-export function createEditCommitModule({
+export function createSessionEditCommitController({
   initialDocument,
   onEditCommit = () => undefined,
   createTextId = defaultCreateTextId,
   exportCapabilities,
-}: CreateEditCommitModuleOptions): EditCommitModule {
+}: CreateEditCommitModuleOptions): SessionEditCommitController {
   let history = createHistory(initialDocument);
   let revision = 0;
   const store = createStore<EditCommitSnapshot>()(() => ({
@@ -533,7 +612,7 @@ export function createEditCommitModule({
     };
   };
 
-  const dispatch = (message: EditMessage): EditResult => {
+  const dispatch = (message: InternalEditMessage): EditResult => {
     if (isDispatching) {
       throw new Error("edit dispatch must not be reentrant");
     }
@@ -589,9 +668,30 @@ export function createEditCommitModule({
     }
   };
 
-  return {
+  const editing: EditCommitModule = Object.freeze({
     read: store.getState,
-    subscribe: (listener) => store.subscribe(listener),
-    dispatch,
-  };
+    subscribe: (listener: () => void) => store.subscribe(listener),
+    dispatch: (message: EditMessage): EditResult => dispatch(message),
+  });
+  return Object.freeze({
+    editing,
+    commitPublishedAssets: (mutation: PublishedAssetMutation) =>
+      dispatch({
+        type: "commit",
+        intent:
+          mutation.type === "add"
+            ? { type: "images.add", images: mutation.images }
+            : {
+                type: "images.replace",
+                targetId: mutation.targetId,
+                image: mutation.image,
+              },
+      }),
+  });
+}
+
+export function createEditCommitModule(
+  options: CreateEditCommitModuleOptions,
+): EditCommitModule {
+  return createSessionEditCommitController(options).editing;
 }
