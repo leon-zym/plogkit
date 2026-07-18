@@ -160,12 +160,24 @@ export class EditorRuntime {
     }
     const result = await this.dependencies.storage.library.create(candidates, { metadataPolicy });
     if (result.status !== "created") return result;
-    const opened = await this.dependencies.session.open(result.draftId);
+    const previousDraftId = this.handle?.draftId ?? null;
+    await this.dependencies.storage.writeRecentDraftId(result.draftId);
+    let opened: Awaited<ReturnType<CurrentEditingSession["open"]>>;
+    try {
+      opened = await this.dependencies.session.open(result.draftId);
+    } catch (error) {
+      if (previousDraftId !== null) {
+        await this.dependencies.storage.writeRecentDraftId(previousDraftId);
+      }
+      throw error;
+    }
     if (opened.status === "open-failed") {
+      if (previousDraftId !== null) {
+        await this.dependencies.storage.writeRecentDraftId(previousDraftId);
+      }
       throw new Error(`created Draft could not become current: ${opened.reason}`);
     }
     this.handle = opened.handle;
-    await this.dependencies.storage.writeRecentDraftId(result.draftId);
     this.importErrors = result.errors.length;
     return result;
   }

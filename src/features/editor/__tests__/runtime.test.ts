@@ -291,7 +291,7 @@ describe("editor Draft integration", () => {
     expect(library.create).not.toHaveBeenCalled();
   });
 
-  it("opens a created Draft before publishing its recent locator", async () => {
+  it("publishes a created Draft locator before switching the current session", async () => {
     const created = createdDraft();
     const calls: string[] = [];
     const library: DraftLibrary = {
@@ -328,7 +328,7 @@ describe("editor Draft integration", () => {
     });
 
     await expect(runtime.choosePhotos()).resolves.toMatchObject({ status: "created" });
-    expect(calls).toEqual(["open", "locator"]);
+    expect(calls).toEqual(["locator", "open"]);
     await expect(runtime.prepareEditor()).resolves.toMatchObject({
       status: "prepared",
       editing: expect.any(Object),
@@ -447,7 +447,7 @@ describe("editor Draft integration", () => {
 
     await expect(runtime.choosePhotos()).resolves.toMatchObject({ status: "created" });
 
-    expect(events).toEqual(["save-current", "create", "open-next", "locator"]);
+    expect(events).toEqual(["save-current", "create", "locator", "open-next"]);
     await expect(runtime.restore()).resolves.toMatchObject({
       status: "restored",
       draftId: nextDraftId,
@@ -514,6 +514,122 @@ describe("editor Draft integration", () => {
     await expect(runtime.restore()).resolves.toMatchObject({
       status: "restored",
       draftId: testDraftId,
+    });
+  });
+
+  it("keeps the current session when the created Draft locator cannot persist", async () => {
+    const currentDocument = createDocument([
+      { id: testImageId, width: 4000, height: 3000 },
+    ]);
+    const created = createdDraft();
+    const read = jest.fn(async (id: typeof testDraftId) => {
+      if (id === nextDraftId) {
+        return {
+          status: "ready" as const,
+          draftId: created.draftId,
+          document: created.document,
+          assets: created.assets,
+        };
+      }
+      return {
+        status: "ready" as const,
+        draftId: testDraftId,
+        document: currentDocument,
+        assets: snapshot("memory://current"),
+      };
+    });
+    const library: DraftLibrary = {
+      create: jest.fn(async () => created),
+      ingest: jest.fn(),
+      save: jest.fn(async (_id, document) => ({
+        status: "saved" as const,
+        document,
+      })),
+      read,
+      readPreview: jest.fn(async () => ({
+        status: "ready" as const,
+        descriptor: snapshot("memory://current").resolve(testImageId, "preview")!,
+        assets: snapshot("memory://current"),
+      })),
+    };
+    const runtime = new EditorRuntime({
+      storage: {
+        library,
+        readRecentDraftId: async () => testDraftId,
+        writeRecentDraftId: async () => {
+          throw new Error("locator write failed");
+        },
+      },
+      session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
+      selectCandidates: async () => [pickerCandidate],
+      loadMetadataPolicy: async () => "strip",
+      readMetadataText: async () => null,
+    });
+    await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
+
+    await expect(runtime.choosePhotos()).rejects.toThrow("locator write failed");
+
+    expect(read).not.toHaveBeenCalledWith(nextDraftId);
+    await expect(runtime.restore()).resolves.toMatchObject({
+      status: "restored",
+      draftId: testDraftId,
+      document: currentDocument,
+    });
+  });
+
+  it("restores the previous locator when the created Draft cannot open", async () => {
+    const currentDocument = createDocument([
+      { id: testImageId, width: 4000, height: 3000 },
+    ]);
+    const created = createdDraft();
+    const library: DraftLibrary = {
+      create: jest.fn(async () => created),
+      ingest: jest.fn(),
+      save: jest.fn(async (_id, document) => ({
+        status: "saved" as const,
+        document,
+      })),
+      read: jest.fn(async (id) =>
+        id === nextDraftId
+          ? ({ status: "recovery-failed", reason: "draft-not-found" } as const)
+          : ({
+              status: "ready" as const,
+              draftId: testDraftId,
+              document: currentDocument,
+              assets: snapshot("memory://current"),
+            } as const),
+      ),
+      readPreview: jest.fn(async () => ({
+        status: "ready" as const,
+        descriptor: snapshot("memory://current").resolve(testImageId, "preview")!,
+        assets: snapshot("memory://current"),
+      })),
+    };
+    const writtenLocators: (typeof testDraftId)[] = [];
+    const runtime = new EditorRuntime({
+      storage: {
+        library,
+        readRecentDraftId: async () => testDraftId,
+        writeRecentDraftId: async (id) => {
+          writtenLocators.push(id);
+        },
+      },
+      session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
+      selectCandidates: async () => [pickerCandidate],
+      loadMetadataPolicy: async () => "strip",
+      readMetadataText: async () => null,
+    });
+    await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
+
+    await expect(runtime.choosePhotos()).rejects.toThrow(
+      "created Draft could not become current: draft-not-found",
+    );
+
+    expect(writtenLocators).toEqual([nextDraftId, testDraftId]);
+    await expect(runtime.restore()).resolves.toMatchObject({
+      status: "restored",
+      draftId: testDraftId,
+      document: currentDocument,
     });
   });
 });
