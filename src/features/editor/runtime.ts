@@ -36,9 +36,19 @@ export type RestoreDraftResult =
   | { readonly status: "recovery-failed"; readonly reason: DraftRecoveryFailure | "locator-corrupt" };
 
 export interface PreparedEditor {
+  readonly status: "prepared";
   readonly editing: EditCommitModule;
   readonly assets: AssetCatalogSnapshot;
 }
+
+export type PrepareEditorResult =
+  | PreparedEditor
+  | { readonly status: "no-draft" }
+  | {
+      readonly status: "preview-failed";
+      readonly reason: DraftRecoveryFailure | "preview-unavailable";
+      readonly message?: string;
+    };
 
 export class EditorRuntime {
   private readonly dependencies: EditorRuntimeDependencies;
@@ -111,7 +121,7 @@ export class EditorRuntime {
     }
   }
 
-  async prepareEditor(): Promise<PreparedEditor | null> {
+  async prepareEditor(): Promise<PrepareEditorResult> {
     const restored = await this.restore();
     if (
       restored.status !== "restored" ||
@@ -119,25 +129,30 @@ export class EditorRuntime {
       this.editing === null ||
       this.assets === null
     ) {
-      return null;
+      return { status: "no-draft" };
     }
     for (const image of this.editing.read().document.sourceImages) {
       const preview = await this.dependencies.storage.library.readPreview(this.draftId, image.id);
       if (preview.status === "preview-failed") {
-        throw new Error(preview.message ?? preview.reason);
+        return {
+          status: "preview-failed",
+          reason: preview.reason,
+          ...(preview.message === undefined ? {} : { message: preview.message }),
+        };
       }
       this.assets = preview.assets;
     }
-    return { editing: this.editing, assets: this.assets };
+    return { status: "prepared", editing: this.editing, assets: this.assets };
   }
 
   async choosePhotos(): Promise<CreateDraftResult> {
     const candidates = await this.dependencies.selectCandidates();
     const metadataPolicy = await this.dependencies.loadMetadataPolicy();
+    await this.autosave?.flush();
     const result = await this.dependencies.storage.library.create(candidates, { metadataPolicy });
     if (result.status !== "created") return result;
-    await this.autosave?.dispose();
     await this.dependencies.storage.writeRecentDraftId(result.draftId);
+    await this.autosave?.dispose();
     this.start(result.draftId, result.document, result.assets);
     this.importErrors = result.errors.length;
     return result;

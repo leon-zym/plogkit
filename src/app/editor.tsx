@@ -47,6 +47,7 @@ import { documentToExportSourceFacts } from "@/render/exportSourceFacts";
 import { getDeviceTextLayoutEnvironment } from "@/render/deviceTextLayout";
 import { documentToRenderScene } from "@/render/scene";
 import { exportDocument, SKIA_EXPORT_CAPABILITIES } from "@/services/export";
+import { ActionButton } from "@/ui/ActionButton";
 import { colors, spacing, typography } from "@/ui/theme";
 
 function LoadingEditor() {
@@ -55,6 +56,42 @@ function LoadingEditor() {
     <SafeAreaView style={styles.loading} testID="editor-loading">
       <ActivityIndicator color={colors.accent} />
       <Text style={styles.loadingText}>{t("editor.saving")}</Text>
+    </SafeAreaView>
+  );
+}
+
+function EditorPreparationError({
+  onBack,
+  onRetry,
+}: {
+  readonly onBack: () => void;
+  readonly onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <SafeAreaView style={styles.preparationError} testID="editor-prepare-error">
+      <Text
+        accessibilityLiveRegion="assertive"
+        style={styles.preparationErrorText}
+        testID="editor-prepare-error-message"
+      >
+        {t("editor.preparationFailed")}
+      </Text>
+      <View style={styles.preparationErrorActions}>
+        <ActionButton
+          accessibilityLabel={t("common.retry")}
+          label={t("common.retry")}
+          onPress={onRetry}
+          testID="retry-editor-preparation"
+        />
+        <ActionButton
+          accessibilityLabel={t("common.back")}
+          label={t("common.back")}
+          onPress={onBack}
+          testID="leave-editor-preparation"
+          variant="secondary"
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -84,7 +121,12 @@ function preflightExportPolicy(document: PlogDocument): ExportPolicyPreflight {
 
 export default function EditorScreen() {
   const router = useRouter();
-  const [prepared, setPrepared] = useState<PreparedEditor | null>(null);
+  const [preparation, setPreparation] = useState<
+    | PreparedEditor
+    | { readonly status: "loading" }
+    | { readonly status: "failed" }
+  >({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -92,22 +134,35 @@ export default function EditorScreen() {
       .prepareEditor()
       .then((next) => {
         if (!active) return;
-        if (next === null) router.replace("/" as Href);
-        else setPrepared(next);
+        if (next.status === "no-draft") {
+          router.replace("/" as Href);
+        } else if (next.status === "preview-failed") {
+          setPreparation({ status: "failed" });
+        } else {
+          setPreparation(next);
+        }
       })
       .catch(() => {
-        if (active) router.replace("/" as Href);
+        if (active) setPreparation({ status: "failed" });
       });
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [attempt, router]);
 
-  return prepared === null ? (
-    <LoadingEditor />
-  ) : (
-    <ConnectedEditor assets={prepared.assets} editing={prepared.editing} />
-  );
+  if (preparation.status === "loading") return <LoadingEditor />;
+  if (preparation.status === "failed") {
+    return (
+      <EditorPreparationError
+        onBack={() => router.replace("/" as Href)}
+        onRetry={() => {
+          setPreparation({ status: "loading" });
+          setAttempt((current) => current + 1);
+        }}
+      />
+    );
+  }
+  return <ConnectedEditor {...preparation} />;
 }
 
 type ActiveEditorTool = EditorTool | "export";
@@ -448,6 +503,21 @@ const styles = StyleSheet.create({
   loadingText: {
     ...typography.label,
     color: colors.stageMuted,
+  },
+  preparationError: {
+    flex: 1,
+    justifyContent: "center",
+    gap: spacing.s6,
+    paddingHorizontal: spacing.s6,
+    backgroundColor: colors.surface,
+  },
+  preparationErrorText: {
+    ...typography.body,
+    color: colors.danger,
+    textAlign: "center",
+  },
+  preparationErrorActions: {
+    gap: spacing.s2,
   },
   importWarning: {
     ...typography.caption,

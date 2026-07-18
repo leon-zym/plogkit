@@ -7,6 +7,7 @@
     "delete": "Delete",
     "decrease": "Decrease",
     "increase": "Increase",
+    "retry": "Try again",
     "notAvailable": "Not available"
   },
   "home": {
@@ -36,6 +37,7 @@
     "export": "Export",
     "saving": "Saving",
     "saved": "Saved",
+    "preparationFailed": "We couldn't prepare the photo previews. Your draft is unchanged.",
     "tools": {
       "background": "Background",
       "stitch": "Stitch",
