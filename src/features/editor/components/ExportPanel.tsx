@@ -12,6 +12,7 @@ import {
 import { ActionButton } from "@/ui/ActionButton";
 import { OptionRow } from "@/ui/OptionRow";
 import { colors, radii, spacing, typography } from "@/ui/theme";
+import type { ExportFailure } from "@/services/export/pipeline";
 
 import { PanelShell, panelStyles } from "./PanelShell";
 
@@ -25,7 +26,11 @@ export type ExportStatus =
       readonly wasReduced: boolean;
       readonly format: ExportFormat;
     }
-  | { readonly kind: "error" };
+  | { readonly kind: "cancelled" }
+  | {
+      readonly kind: "error";
+      readonly code: ExportFailure["code"] | "unexpected";
+    };
 
 interface ExportPanelProps {
   readonly settings: ExportSettings;
@@ -57,6 +62,29 @@ function policyErrorMessageKey(error: ExportPolicyError): string {
       return "export.policyErrors.precompressionUnsupported";
     case "post-process-unsupported":
       return "export.policyErrors.postProcessUnsupported";
+  }
+}
+
+function exportFailureMessageKey(code: ExportFailure["code"] | "unexpected"): string {
+  switch (code) {
+    case "preset-unavailable":
+      return "export.failures.presetUnavailable";
+    case "unsupported-policy":
+      return "export.failures.unsupportedPolicy";
+    case "staging-failed":
+      return "export.failures.stagingFailed";
+    case "asset-unavailable":
+      return "export.failures.assetUnavailable";
+    case "render-failed":
+      return "export.failures.renderFailed";
+    case "encode-failed":
+      return "export.failures.encodeFailed";
+    case "permission-denied":
+      return "export.failures.permissionDenied";
+    case "destination-failed":
+      return "export.failures.destinationFailed";
+    case "unexpected":
+      return "export.failures.unexpected";
   }
 }
 
@@ -147,7 +175,12 @@ export function ExportPanel({
       ) : null}
       {status.kind === "error" ? (
         <Text accessibilityLiveRegion="assertive" style={styles.error} testID="export-error">
-          {t("export.failure")}
+          {t(exportFailureMessageKey(status.code))}
+        </Text>
+      ) : null}
+      {status.kind === "cancelled" ? (
+        <Text accessibilityLiveRegion="polite" style={styles.error} testID="export-cancelled">
+          {t("export.cancelled")}
         </Text>
       ) : null}
       <ActionButton

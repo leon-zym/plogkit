@@ -7,9 +7,11 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { editorRuntime } from "@/features/editor/expoEditorRuntime";
+import { initializeExpoExportStaging } from "@/services/export/expoStaging";
 
 export default function RootLayout() {
   useEffect(() => {
+    void initializeExpoExportStaging().catch(() => undefined);
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") void editorRuntime.flush().catch(() => undefined);
     });

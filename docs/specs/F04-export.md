@@ -105,7 +105,7 @@
 
 #### Scenario: 系统相册是唯一最终产物
 
-- 状态：已确认（待 [Issue #16](https://github.com/leon-zym/plogkit/issues/16)）
+- 状态：已实现
 - GIVEN 用户确认导出并收到成功反馈
 - WHEN 用户打开系统相册
 - THEN 系统相册中出现新图片
@@ -113,7 +113,7 @@
 
 #### Scenario: 取消或失败不保留隐藏导出副本
 
-- 状态：已确认（待 [Issue #16](https://github.com/leon-zym/plogkit/issues/16)）
+- 状态：已实现
 - GIVEN 一次导出被用户取消或以预期错误失败
 - WHEN 用户继续使用或重新启动 PlogKit
 - THEN 应用内没有可继续使用的最终导出副本或导出历史

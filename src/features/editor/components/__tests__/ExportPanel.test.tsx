@@ -14,9 +14,8 @@ const callbacks = {
 };
 
 describe("ExportPanel", () => {
-  it("shows only the formats projected for a multi-format preset", async () => {
+  it("shows the formats projected for a multi-format preset", async () => {
     const original = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
-    const social = parseExportSettings({ presetId: "social", metadataPolicy: "strip" });
     const view = await render(
       <ExportPanel
         {...callbacks}
@@ -29,8 +28,11 @@ describe("ExportPanel", () => {
 
     expect(view.getByTestId("export-format-jpeg")).toBeTruthy();
     expect(view.getByTestId("export-format-png")).toBeTruthy();
+  });
 
-    await view.rerender(
+  it("hides format selection for a single-format preset", async () => {
+    const social = parseExportSettings({ presetId: "social", metadataPolicy: "strip" });
+    const view = await render(
       <ExportPanel
         {...callbacks}
         canRetainBasic
@@ -75,5 +77,22 @@ describe("ExportPanel", () => {
 
     fireEvent.press(exportButton);
     expect(onExport).not.toHaveBeenCalled();
+  });
+
+  it("maps a pipeline failure code to localized guidance", async () => {
+    const settings = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
+    const view = await render(
+      <ExportPanel
+        {...callbacks}
+        canRetainBasic
+        policyError={null}
+        settings={settings}
+        status={{ kind: "error", code: "permission-denied" }}
+      />,
+    );
+
+    expect(view.getByTestId("export-error")).toHaveTextContent(
+      "Allow PlogKit to add photos, then try again.",
+    );
   });
 });

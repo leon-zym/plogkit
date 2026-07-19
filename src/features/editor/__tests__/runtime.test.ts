@@ -79,7 +79,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
 
     const prepared = await runtime.prepareEditor();
@@ -135,7 +134,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
 
     const first = runtime.prepareEditor();
@@ -192,7 +190,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
 
     await expect(runtime.prepareEditor()).resolves.toEqual({
@@ -226,7 +223,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library }),
       selectCandidates: async () => [],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
 
     await expect(runtime.prepareEditor()).resolves.toEqual({ status: "no-draft" });
@@ -252,7 +248,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "retain-basic",
-      readMetadataText: async () => null,
     });
 
     await runtime.choosePhotos();
@@ -280,7 +275,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library }),
       selectCandidates: async () => [],
       loadMetadataPolicy,
-      readMetadataText: async () => null,
     });
 
     await expect(runtime.choosePhotos()).resolves.toEqual({
@@ -324,7 +318,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
 
     await expect(runtime.choosePhotos()).resolves.toMatchObject({ status: "created" });
@@ -366,7 +359,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     const prepared = await runtime.prepareEditor();
     if (prepared.status !== "prepared") return;
@@ -436,7 +428,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     const prepared = await runtime.prepareEditor();
     if (prepared.status !== "prepared") return;
@@ -491,7 +482,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     const prepared = await runtime.prepareEditor();
     if (prepared.status !== "prepared") return;
@@ -563,7 +553,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
 
@@ -617,7 +606,6 @@ describe("editor Draft integration", () => {
       session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
       selectCandidates: async () => [pickerCandidate],
       loadMetadataPolicy: async () => "strip",
-      readMetadataText: async () => null,
     });
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
 

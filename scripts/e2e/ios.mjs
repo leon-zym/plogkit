@@ -1,7 +1,8 @@
-import { platform } from "node:os";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { homedir, platform } from "node:os";
+import { join, resolve } from "node:path";
 
-import { capture, log, run } from "./runtime.mjs";
+import { capture, log, run, waitUntil } from "./runtime.mjs";
 
 const deviceName = "PlogKit E2E";
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-26-5";
@@ -108,6 +109,50 @@ export async function installAndSeedIos({ cleanup, device, fixtures, root }) {
     cleanup,
     cwd: root,
   });
+  await waitUntil(
+    () => captureIosPhotoResources(device).size >= fixtures.length,
+    10000,
+    `iOS Photos to index ${fixtures.length} seeded resources`,
+    500,
+  );
+}
+
+function captureMediaFiles(directory, relativeDirectory = "") {
+  if (!existsSync(directory)) return new Set();
+  const resources = new Set();
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const relativePath = join(relativeDirectory, entry.name);
+    if (entry.isDirectory()) {
+      for (const nested of captureMediaFiles(path, relativePath)) resources.add(nested);
+    } else if (
+      entry.isFile() &&
+      /\.(?:heic|jpe?g|png)$/i.test(entry.name) &&
+      statSync(path).size > 0
+    ) {
+      resources.add(relativePath);
+    }
+  }
+  return resources;
+}
+
+export function captureIosPhotoResources(device) {
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(device.deviceId)) {
+    throw new Error(`Invalid iOS Simulator identifier: ${device.deviceId}`);
+  }
+  return captureMediaFiles(
+    join(
+      homedir(),
+      "Library",
+      "Developer",
+      "CoreSimulator",
+      "Devices",
+      device.deviceId,
+      "data",
+      "Media",
+      "DCIM",
+    ),
+  );
 }
 
 export function iosBuildArtifact(root) {

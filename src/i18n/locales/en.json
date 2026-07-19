@@ -125,7 +125,18 @@
     "action": "Save to Photos",
     "exporting": "Rendering export…",
     "success": "Saved to Photos",
-    "failure": "We couldn't save the export. Your editing session is unchanged.",
+    "cancelled": "Export cancelled. Your editing session is unchanged.",
+    "failures": {
+      "presetUnavailable": "This preset is no longer available. Choose another preset.",
+      "unsupportedPolicy": "This device cannot complete the selected export policy.",
+      "stagingFailed": "There isn't enough temporary storage to prepare this export.",
+      "assetUnavailable": "An original photo is unavailable. Reopen the draft and try again.",
+      "renderFailed": "The document could not be rendered for export.",
+      "encodeFailed": "The rendered image could not be encoded.",
+      "permissionDenied": "Allow PlogKit to add photos, then try again.",
+      "destinationFailed": "The image could not be added to Photos.",
+      "unexpected": "The export could not be completed. Your editing session is unchanged."
+    },
     "reduced": "Reduced to {{width}} × {{height}} to stay within export limits."
   }
 }
