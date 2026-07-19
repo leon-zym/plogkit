@@ -54,4 +54,19 @@ name: Add and style a text element
     id: commit-text
 - assertVisible: Morning note
 - assertVisible:
+    id: canvas-text-.*
+- tapOn:
+    id: canvas-text-.*
+- assertVisible:
+    id: canvas-text-.*
+    selected: true
+- swipe:
+    from:
+      id: canvas-text-.*
+    direction: RIGHT
+    duration: 500
+- tapOn:
     id: editor-undo
+- assertVisible: Morning note
+- assertVisible:
+    id: canvas-text-.*

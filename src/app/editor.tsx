@@ -41,8 +41,11 @@ import {
 } from "@/features/editor/components/TextPanel";
 import { editorRuntime } from "@/features/editor/runtime";
 import { useEditCommit } from "@/features/editor/state/editCommit";
+import { useTextLayoutSnapshot } from "@/features/editor/useTextLayoutSnapshot";
 import { DocumentCanvas } from "@/features/editor/components/DocumentCanvas";
 import { documentToExportSourceFacts } from "@/render/exportSourceFacts";
+import { getDeviceTextLayoutEnvironment } from "@/render/deviceTextLayout";
+import { documentToRenderScene } from "@/render/scene";
 import { exportDocument, SKIA_EXPORT_CAPABILITIES } from "@/services/export";
 import { colors, spacing, typography } from "@/ui/theme";
 
@@ -109,6 +112,12 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
   const { t } = useTranslation();
   const router = useRouter();
   const { document, previewDocument, canUndo, canRedo } = useEditCommit(editing);
+  const previewScene = useMemo(
+    () => documentToRenderScene(previewDocument, "preview"),
+    [previewDocument],
+  );
+  const textLayoutEnvironment = useMemo(() => getDeviceTextLayoutEnvironment(), []);
+  const textLayout = useTextLayoutSnapshot(textLayoutEnvironment, previewScene.texts);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ActiveEditorTool>("background");
 
@@ -376,16 +385,17 @@ function ConnectedEditor({ editing }: { readonly editing: EditCommitModule }) {
                   accessibilityLabel={t("editor.photoCount", {
                     count: document.sourceImages.length,
                   })}
-                  document={previewDocument}
+                  scene={previewScene}
+                  textLayout={textLayout.snapshot}
                   width={canvasWidth}
                 />
                 <TextGestureOverlay
                   accessibilityLabel={(index) => `${t("text.edit")} ${index + 1}`}
                   canvasWidth={canvasWidth}
+                  geometry={textLayout.snapshot?.geometry ?? []}
                   onCommitPosition={moveText}
                   onSelect={selectText}
                   selectedTextId={selectedTextId}
-                  texts={previewDocument.textElements}
                 />
               </View>
             ) : null}

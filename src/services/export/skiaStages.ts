@@ -1,7 +1,9 @@
-import { ImageFormat, Skia, type SkImage } from "@shopify/react-native-skia";
+import { ImageFormat, Skia, type SkImage, type SkSurface } from "@shopify/react-native-skia";
 
+import { getDeviceTextLayoutEnvironment } from "../../render/deviceTextLayout";
 import { documentToRenderScene } from "../../render/scene";
-import { drawSceneBackground, drawSceneImage, drawSceneText } from "../../render/skiaDraw";
+import { drawSceneBackground, drawSceneImage, drawTextLayout } from "../../render/skiaDraw";
+import { createTextLayoutSnapshot } from "../../render/textLayout";
 import type { ExportPlan } from "./plan";
 import type { ExportRenderStage, RenderedPixels } from "./types";
 
@@ -36,8 +38,23 @@ class SkiaRenderedPixels implements RenderedPixels {
 export class SkiaExportRenderStage implements ExportRenderStage {
   async render(document: Parameters<ExportRenderStage["render"]>[0], plan: ExportPlan) {
     const scene = documentToRenderScene(document, "original");
-    const surface = Skia.Surface.Make(plan.width, plan.height);
+    const textLayoutResult = createTextLayoutSnapshot(
+      getDeviceTextLayoutEnvironment(),
+      scene.texts,
+    );
+    if (textLayoutResult.status === "failure") {
+      throw new Error(`export text layout failed: ${textLayoutResult.message}`);
+    }
+    const textLayout = textLayoutResult.snapshot;
+    let surface: SkSurface | null;
+    try {
+      surface = Skia.Surface.Make(plan.width, plan.height);
+    } catch (error: unknown) {
+      textLayout.dispose();
+      throw error;
+    }
     if (surface === null) {
+      textLayout.dispose();
       throw new Error(`could not create ${plan.width}x${plan.height} CPU export surface`);
     }
 
@@ -66,8 +83,8 @@ export class SkiaExportRenderStage implements ExportRenderStage {
         }
       }
 
-      for (const text of scene.texts) {
-        drawSceneText(Skia, canvas, text);
+      for (const layout of textLayout.layouts) {
+        drawTextLayout(canvas, layout);
       }
       surface.flush();
       snapshot = surface.makeImageSnapshot();
@@ -76,6 +93,7 @@ export class SkiaExportRenderStage implements ExportRenderStage {
       snapshot?.dispose();
       throw error;
     } finally {
+      textLayout.dispose();
       surface.dispose();
     }
   }

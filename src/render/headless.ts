@@ -10,12 +10,14 @@ import {
 
 import { diffRgba, type RgbaDiff } from "./goldenDiff";
 import type { RenderScene } from "./scene";
+import { drawSceneBackground, drawSceneImage, drawTextLayout } from "./skiaDraw";
 import {
-  drawSceneBackground,
-  drawSceneImage,
-  drawSceneText,
-  type FontFamilyResolver,
-} from "./skiaDraw";
+  createTextLayoutEnvironment,
+  createTextLayoutSnapshot,
+  type AnyTextLayoutEnvironment,
+  type TextLayoutEnvironment,
+  type TextLayoutSnapshot,
+} from "./textLayout";
 
 export interface HeadlessFont {
   readonly family: string;
@@ -25,8 +27,7 @@ export interface HeadlessFont {
 export interface HeadlessRenderOptions {
   readonly width?: number;
   readonly height?: number;
-  readonly fontProvider?: SkTypefaceFontProvider;
-  readonly resolveFontFamilies?: FontFamilyResolver;
+  readonly textLayoutEnvironment?: AnyTextLayoutEnvironment;
 }
 
 export interface GoldenComparison extends Omit<RgbaDiff, "rgba"> {
@@ -62,6 +63,18 @@ export function createHeadlessFontProvider(fonts: readonly HeadlessFont[]): SkTy
   }
 }
 
+export function createHeadlessTextLayoutEnvironment(
+  fontProvider: SkTypefaceFontProvider,
+  fontFamilies: Readonly<Record<string, readonly string[]>>,
+): TextLayoutEnvironment {
+  const { Skia } = getSkiaExports();
+  return createTextLayoutEnvironment({
+    api: Skia as unknown as typeof import("@shopify/react-native-skia").Skia,
+    fontProvider,
+    fontFamilies,
+  });
+}
+
 /** CanvasKit harness: encoded image fixtures + shared scene -> deterministic PNG bytes. */
 export async function renderHeadlessScene(
   scene: RenderScene,
@@ -74,6 +87,7 @@ export async function renderHeadlessScene(
   const surface = makeOffscreenSurface(width, height);
   const images = new Map<string, SkImage>();
   let snapshot: SkImage | null = null;
+  let textLayout: TextLayoutSnapshot | null = null;
 
   try {
     for (const node of scene.images) {
@@ -94,8 +108,15 @@ export async function renderHeadlessScene(
       images.set(node.imageId, image);
     }
 
-    if (scene.texts.length > 0 && options.fontProvider === undefined) {
-      throw new Error("headless text rendering requires a bundled-font provider");
+    if (scene.texts.length > 0 && options.textLayoutEnvironment === undefined) {
+      throw new Error("headless text rendering requires a bundled-font layout environment");
+    }
+    if (options.textLayoutEnvironment !== undefined) {
+      const result = createTextLayoutSnapshot(options.textLayoutEnvironment, scene.texts);
+      if (result.status === "failure") {
+        throw new Error(`headless text layout failed: ${result.message}`);
+      }
+      textLayout = result.snapshot;
     }
 
     const sceneSkia = Skia as unknown as typeof import("@shopify/react-native-skia").Skia;
@@ -109,8 +130,8 @@ export async function renderHeadlessScene(
       }
       drawSceneImage(sceneSkia, canvas, node, image);
     }
-    for (const text of scene.texts) {
-      drawSceneText(sceneSkia, canvas, text, options.fontProvider, options.resolveFontFamilies);
+    for (const layout of textLayout?.layouts ?? []) {
+      drawTextLayout(canvas, layout);
     }
     surface.flush();
     snapshot = surface.makeImageSnapshot();
@@ -120,6 +141,7 @@ export async function renderHeadlessScene(
     for (const image of images.values()) {
       image.dispose();
     }
+    textLayout?.dispose();
     surface.dispose();
   }
 }

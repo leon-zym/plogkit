@@ -3,18 +3,18 @@ import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 
-import type { Point, TextElement } from "@/core/document";
+import type { Point } from "@/core/document";
+import { LOGICAL_CANVAS_WIDTH } from "@/render/scene";
+import {
+  projectTextLayoutGeometry,
+  type ProjectedTextLayoutGeometry,
+  type TextLayoutGeometry,
+} from "@/render/textLayoutGeometry";
 import { colors } from "@/ui/theme";
 
-function estimatedTextHeight(text: TextElement): number {
-  const averageGlyphWidth = text.fontSize * 0.72;
-  const glyphsPerLine = Math.max(1, Math.floor(text.width / averageGlyphWidth));
-  const lines = Math.max(1, Math.ceil(text.content.length / glyphsPerLine));
-  return lines * text.fontSize * text.lineHeight;
-}
-
 interface DraggableTextHitProps {
-  readonly text: TextElement;
+  readonly geometry: TextLayoutGeometry;
+  readonly projected: ProjectedTextLayoutGeometry;
   readonly scale: number;
   readonly selected: boolean;
   readonly accessibilityLabel: string;
@@ -23,7 +23,8 @@ interface DraggableTextHitProps {
 }
 
 function DraggableTextHit({
-  text,
+  geometry,
+  projected,
   scale,
   selected,
   accessibilityLabel,
@@ -34,18 +35,18 @@ function DraggableTextHit({
   const translationY = useSharedValue(0);
   const commit = useCallback(
     (x: number, y: number) => {
-      onCommitPosition(text.id, {
-        x: text.position.x + x / scale,
-        y: text.position.y + y / scale,
+      onCommitPosition(geometry.id, {
+        x: geometry.placement.x + x / scale,
+        y: geometry.placement.y + y / scale,
       });
     },
-    [onCommitPosition, scale, text.id, text.position.x, text.position.y],
+    [geometry.id, geometry.placement.x, geometry.placement.y, onCommitPosition, scale],
   );
   const gesture = useMemo(
     () =>
       Gesture.Pan()
         .minDistance(0)
-        .onBegin(() => runOnJS(onSelect)(text.id))
+        .onBegin(() => runOnJS(onSelect)(geometry.id))
         .onUpdate((event) => {
           translationX.set(event.translationX);
           translationY.set(event.translationY);
@@ -57,7 +58,7 @@ function DraggableTextHit({
           translationY.set(0);
           if (Math.abs(x) >= 1 || Math.abs(y) >= 1) runOnJS(commit)(x, y);
         }),
-    [commit, onSelect, text.id, translationX, translationY],
+    [commit, geometry.id, onSelect, translationX, translationY],
   );
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translationX.get() }, { translateY: translationY.get() }],
@@ -72,22 +73,35 @@ function DraggableTextHit({
         style={[
           styles.hit,
           {
-            left: text.position.x * scale,
-            top: text.position.y * scale,
-            width: Math.max(44, text.width * scale),
-            height: Math.max(44, estimatedTextHeight(text) * scale),
+            left: projected.touchBounds.x,
+            top: projected.touchBounds.y,
+            width: projected.touchBounds.width,
+            height: projected.touchBounds.height,
+            zIndex: projected.hitPriority,
           },
           animatedStyle,
         ]}
-        testID={`canvas-text-${text.id}`}
+        testID={`canvas-text-${geometry.id}`}
       >
         {selected ? (
-          <>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.selection,
+              {
+                left: projected.visualBounds.x - projected.touchBounds.x,
+                top: projected.visualBounds.y - projected.touchBounds.y,
+                width: projected.visualBounds.width,
+                height: projected.visualBounds.height,
+              },
+            ]}
+            testID={`canvas-text-selection-${geometry.id}`}
+          >
             <View style={[styles.corner, styles.topLeft]} />
             <View style={[styles.corner, styles.topRight]} />
             <View style={[styles.corner, styles.bottomLeft]} />
             <View style={[styles.corner, styles.bottomRight]} />
-          </>
+          </View>
         ) : null}
       </Animated.View>
     </GestureDetector>
@@ -95,7 +109,7 @@ function DraggableTextHit({
 }
 
 export interface TextGestureOverlayProps {
-  readonly texts: readonly TextElement[];
+  readonly geometry: readonly TextLayoutGeometry[];
   readonly canvasWidth: number;
   readonly selectedTextId: string | null;
   readonly accessibilityLabel: (index: number) => string;
@@ -104,27 +118,35 @@ export interface TextGestureOverlayProps {
 }
 
 export function TextGestureOverlay({
-  texts,
+  geometry,
   canvasWidth,
   selectedTextId,
   accessibilityLabel,
   onSelect,
   onCommitPosition,
 }: TextGestureOverlayProps) {
-  const scale = canvasWidth / 1000;
+  const scale = canvasWidth / LOGICAL_CANVAS_WIDTH;
+  const projected = useMemo(() => projectTextLayoutGeometry(geometry, scale), [geometry, scale]);
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      {texts.map((text, index) => (
-        <DraggableTextHit
-          accessibilityLabel={accessibilityLabel(index)}
-          key={text.id}
-          onCommitPosition={onCommitPosition}
-          onSelect={onSelect}
-          scale={scale}
-          selected={selectedTextId === text.id}
-          text={text}
-        />
-      ))}
+      {projected.map((item, index) => {
+        const source = geometry[index];
+        if (source === undefined || source.id !== item.id) {
+          throw new Error("projected text geometry no longer matches its snapshot");
+        }
+        return (
+          <DraggableTextHit
+            accessibilityLabel={accessibilityLabel(index)}
+            geometry={source}
+            key={item.id}
+            onCommitPosition={onCommitPosition}
+            onSelect={onSelect}
+            projected={item}
+            scale={scale}
+            selected={selectedTextId === item.id}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -133,6 +155,9 @@ const CORNER_LENGTH = 14;
 
 const styles = StyleSheet.create({
   hit: {
+    position: "absolute",
+  },
+  selection: {
     position: "absolute",
   },
   corner: {
