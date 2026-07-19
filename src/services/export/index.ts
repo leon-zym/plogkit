@@ -1,4 +1,5 @@
 import type { PlogDocument } from "../../core/document";
+import type { SceneImageAssetResolver } from "../../render/scene";
 import { SKIA_EXPORT_CAPABILITIES } from "./capabilities";
 import { SkiaExportEncodeStage } from "./encodeStage";
 import { ExpoExportDestination } from "./expoDestination";
@@ -27,7 +28,8 @@ const defaultDependencies = {
 
 export function exportDocument(
   document: PlogDocument,
+  assets: SceneImageAssetResolver,
   options: RunExportOptions = {},
 ): Promise<ExportResult> {
-  return runExportPipeline(document, options, defaultDependencies);
+  return runExportPipeline(document, assets, options, defaultDependencies);
 }

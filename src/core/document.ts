@@ -8,7 +8,7 @@ import {
   type MetadataPolicy,
 } from "./exportPolicy";
 
-export const DOCUMENT_SCHEMA_VERSION = 1;
+export const DOCUMENT_SCHEMA_VERSION = 2;
 export const MAX_SOURCE_IMAGES = 9;
 
 export const CANVAS_RATIOS = ["original", "1:1", "3:4", "4:5", "9:16"] as const;
@@ -17,10 +17,18 @@ export type CanvasRatio = (typeof CANVAS_RATIOS)[number];
 export type StitchMode = "vertical" | "grid";
 export type TextAlignment = "left" | "center" | "right";
 
+declare const importedAssetIdBrand: unique symbol;
+export type ImportedAssetId = string & { readonly [importedAssetIdBrand]: true };
+
+export function importedAssetId(value: string): ImportedAssetId {
+  if (value.length === 0) {
+    throw new Error("ImportedAssetId must be a non-empty opaque identity");
+  }
+  return value as ImportedAssetId;
+}
+
 export interface SourceImage {
-  readonly id: string;
-  readonly originalUri: string;
-  readonly previewUri: string;
+  readonly id: ImportedAssetId;
   readonly width: number;
   readonly height: number;
 }
@@ -33,7 +41,7 @@ export interface CanvasSettings {
 export interface StitchSettings {
   readonly mode: StitchMode;
   readonly spacing: number;
-  readonly order: readonly string[];
+  readonly order: readonly ImportedAssetId[];
 }
 
 export interface Point {
@@ -139,12 +147,19 @@ function parseSourceImage(value: unknown, index: number): SourceImage {
   const path = `sourceImages[${index}]`;
   const record = requireRecord(value, path);
   return {
-    id: requireNonEmptyString(record.id, `${path}.id`),
-    originalUri: requireNonEmptyString(record.originalUri, `${path}.originalUri`),
-    previewUri: requireNonEmptyString(record.previewUri, `${path}.previewUri`),
+    id: parseImportedAssetId(record.id, `${path}.id`),
     width: requirePositiveInteger(record.width, `${path}.width`),
     height: requirePositiveInteger(record.height, `${path}.height`),
   };
+}
+
+function parseImportedAssetId(value: unknown, path: string): ImportedAssetId {
+  const identity = requireNonEmptyString(value, path);
+  try {
+    return importedAssetId(identity);
+  } catch {
+    return invalid(`${path} must be a non-empty opaque identity`);
+  }
 }
 
 function parseSourceImages(value: unknown): readonly SourceImage[] {
@@ -184,7 +199,10 @@ function parseCanvas(value: unknown): CanvasSettings {
   };
 }
 
-export function isExactImageOrder(order: readonly string[], imageIds: readonly string[]): boolean {
+export function isExactImageOrder(
+  order: readonly ImportedAssetId[],
+  imageIds: readonly ImportedAssetId[],
+): boolean {
   if (order.length !== imageIds.length || new Set(order).size !== order.length) {
     return false;
   }
@@ -192,7 +210,7 @@ export function isExactImageOrder(order: readonly string[], imageIds: readonly s
   return order.every((id) => expected.has(id));
 }
 
-function parseStitch(value: unknown, imageIds: readonly string[]): StitchSettings {
+function parseStitch(value: unknown, imageIds: readonly ImportedAssetId[]): StitchSettings {
   const record = requireRecord(value, "stitch");
   if (record.mode !== "vertical" && record.mode !== "grid") {
     return invalid("stitch.mode must be vertical or grid");
@@ -200,16 +218,21 @@ function parseStitch(value: unknown, imageIds: readonly string[]): StitchSetting
   if (!Array.isArray(record.order)) {
     return invalid("stitch.order must be an array");
   }
-  const order = record.order.map((id, index) =>
+  const rawOrder = record.order.map((id, index) =>
     requireNonEmptyString(id, `stitch.order[${index}]`),
   );
-  if (!isExactImageOrder(order, imageIds)) {
+  const canonicalById = new Map<string, ImportedAssetId>(imageIds.map((id) => [id, id]));
+  if (
+    rawOrder.length !== imageIds.length ||
+    new Set(rawOrder).size !== rawOrder.length ||
+    !rawOrder.every((id) => canonicalById.has(id))
+  ) {
     return invalid("stitch.order must be an exact permutation of source image ids");
   }
   return {
     mode: record.mode,
     spacing: requireNonNegativeNumber(record.spacing, "stitch.spacing"),
-    order,
+    order: rawOrder.map((id) => canonicalById.get(id)!),
   };
 }
 

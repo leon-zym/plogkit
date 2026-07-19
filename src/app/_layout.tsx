@@ -6,7 +6,7 @@ import { AppState } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { editorRuntime } from "@/features/editor/runtime";
+import { editorRuntime } from "@/features/editor/expoEditorRuntime";
 
 export default function RootLayout() {
   useEffect(() => {

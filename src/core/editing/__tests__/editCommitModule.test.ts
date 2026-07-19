@@ -1,4 +1,9 @@
-import { createDocument, createEmptyDocument, type SourceImage } from "../../document";
+import {
+  createDocument,
+  createEmptyDocument,
+  importedAssetId,
+  type SourceImage,
+} from "../../document";
 import { listPresetOptions } from "../../exportPolicy";
 import { SKIA_EXPORT_CAPABILITIES } from "../../../services/export/capabilities";
 import {
@@ -10,16 +15,12 @@ import {
 
 const images: readonly SourceImage[] = [
   {
-    id: "image-1",
-    originalUri: "file:///image-1.jpg",
-    previewUri: "file:///image-1-preview.jpg",
+    id: importedAssetId("image-1"),
     width: 1200,
     height: 800,
   },
   {
-    id: "image-2",
-    originalUri: "file:///image-2.jpg",
-    previewUri: "file:///image-2-preview.jpg",
+    id: importedAssetId("image-2"),
     width: 800,
     height: 1200,
   },
@@ -215,7 +216,10 @@ describe("edit commit module", () => {
 
     editing.dispatch({
       type: "commit",
-      intent: editIntents.stitch.reorderImages(["image-2", "image-1"]),
+      intent: editIntents.stitch.reorderImages([
+        importedAssetId("image-2"),
+        importedAssetId("image-1"),
+      ]),
     });
 
     expect(editing.read().document.stitch.order).toEqual(["image-2", "image-1"]);
@@ -562,7 +566,10 @@ describe("edit commit module", () => {
 
     const result = editing.dispatch({
       type: "commit",
-      intent: editIntents.stitch.reorderImages(["image-1", "image-1"]),
+      intent: editIntents.stitch.reorderImages([
+        importedAssetId("image-1"),
+        importedAssetId("image-1"),
+      ]),
     });
 
     expect(result).toEqual({ status: "rejected", code: "invalid-order" });

@@ -1,4 +1,5 @@
 import type { PlogDocument } from "../../core/document";
+import type { SceneImageAssetResolver } from "../../render/scene";
 import type { BasicExifMetadata } from "./exif";
 import { createExportPlan, type ExportPlan } from "./plan";
 import type { ExportArtifact, ExportPipelineDependencies } from "./types";
@@ -15,11 +16,12 @@ export interface ExportResult extends ExportArtifact {
 /** Runs render -> encode -> file/save while always releasing rendered pixel ownership. */
 export async function runExportPipeline(
   document: PlogDocument,
+  assets: SceneImageAssetResolver,
   options: RunExportOptions,
   dependencies: ExportPipelineDependencies,
 ): Promise<ExportResult> {
   const plan = createExportPlan(document, dependencies.capabilities);
-  const pixels = await dependencies.renderer.render(document, plan);
+  const pixels = await dependencies.renderer.render(document, plan, assets);
   try {
     if (pixels.width !== plan.width || pixels.height !== plan.height) {
       throw new Error("render stage returned dimensions that do not match the export plan");

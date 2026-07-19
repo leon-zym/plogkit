@@ -1,10 +1,25 @@
 import { ImageFormat, Skia } from "@shopify/react-native-skia";
 import { File } from "expo-file-system";
 
-import type { PreviewGenerator } from "./importImages";
+import type { DraftLibraryPreviewAdapter } from "../drafts/draftLibrary";
 
-export function createSkiaPreviewGenerator(): PreviewGenerator {
+export function createSkiaPreviewGenerator(): DraftLibraryPreviewAdapter {
   return {
+    isValid: async (uri) => {
+      try {
+        const data = await Skia.Data.fromURI(uri);
+        try {
+          const image = Skia.Image.MakeImageFromEncoded(data);
+          if (image === null) return false;
+          image.dispose();
+          return true;
+        } finally {
+          data.dispose();
+        }
+      } catch {
+        return false;
+      }
+    },
     generate: async (sourceUri, destinationUri, maxLongEdge) => {
       if (!Number.isInteger(maxLongEdge) || maxLongEdge <= 0) {
         throw new Error("preview max long edge must be a positive integer");

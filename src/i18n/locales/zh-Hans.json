@@ -7,6 +7,7 @@
     "delete": "删除",
     "decrease": "减少",
     "increase": "增加",
+    "retry": "重试",
     "notAvailable": "不可用"
   },
   "home": {
@@ -20,7 +21,7 @@
     "importing": "正在准备照片…",
     "importPartial": "部分照片未能导入，已完成的照片可以继续编辑。",
     "importFailed": "无法准备这些照片，请重新选择。",
-    "recoveryFailed": "上次会话已损坏。损坏文件已备份，并已打开新会话。"
+    "recoveryFailed": "无法安全打开上次草稿。你可以重新选择照片开始编辑。"
   },
   "settings": {
     "title": "设置",
@@ -35,6 +36,7 @@
     "export": "导出",
     "saving": "正在保存",
     "saved": "已保存",
+    "preparationFailed": "无法准备照片预览，当前草稿未受影响。",
     "tools": {
       "background": "背景",
       "stitch": "拼接",

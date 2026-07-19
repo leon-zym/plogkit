@@ -1,5 +1,6 @@
 import type { PlogDocument } from "../../core/document";
 import type { ExportCapabilities } from "../../core/exportPolicy";
+import type { SceneImageAssetResolver } from "../../render/scene";
 import type { BasicExifMetadata } from "./exif";
 import type { ExportPlan } from "./plan";
 
@@ -11,7 +12,11 @@ export interface RenderedPixels {
 }
 
 export interface ExportRenderStage {
-  render(document: PlogDocument, plan: ExportPlan): Promise<RenderedPixels>;
+  render(
+    document: PlogDocument,
+    plan: ExportPlan,
+    assets: SceneImageAssetResolver,
+  ): Promise<RenderedPixels>;
 }
 
 export interface ExportEncodeStage {

@@ -1,32 +1,24 @@
-import type { SourceImage, StitchSettings } from "../document";
+import { importedAssetId, type ImportedAssetId, type SourceImage, type StitchSettings } from "../document";
 import { containRect, layoutStitch } from "../layout";
 
 const images: readonly SourceImage[] = [
   {
-    id: "wide",
-    originalUri: "file:///wide.jpg",
-    previewUri: "file:///wide-preview.jpg",
+    id: importedAssetId("wide"),
     width: 400,
     height: 200,
   },
   {
-    id: "square",
-    originalUri: "file:///square.jpg",
-    previewUri: "file:///square-preview.jpg",
+    id: importedAssetId("square"),
     width: 200,
     height: 200,
   },
   {
-    id: "tall",
-    originalUri: "file:///tall.jpg",
-    previewUri: "file:///tall-preview.jpg",
+    id: importedAssetId("tall"),
     width: 100,
     height: 200,
   },
   {
-    id: "wide-2",
-    originalUri: "file:///wide-2.jpg",
-    previewUri: "file:///wide-2-preview.jpg",
+    id: importedAssetId("wide-2"),
     width: 300,
     height: 100,
   },
@@ -34,7 +26,7 @@ const images: readonly SourceImage[] = [
 
 const stitch = (
   mode: StitchSettings["mode"],
-  order: readonly string[],
+  order: readonly ImportedAssetId[],
   spacing = 10,
 ): StitchSettings => ({ mode, order, spacing });
 
@@ -54,7 +46,11 @@ describe("contain geometry", () => {
 
 describe("stitch layout", () => {
   it("lays out vertical images at a common width in document order", () => {
-    const result = layoutStitch(images.slice(0, 2), stitch("vertical", ["square", "wide"]), 200);
+    const result = layoutStitch(
+      images.slice(0, 2),
+      stitch("vertical", [importedAssetId("square"), importedAssetId("wide")]),
+      200,
+    );
 
     expect(result).toEqual({
       width: 200,
@@ -111,7 +107,7 @@ describe("stitch layout", () => {
   });
 
   it("uses one full-width cell for a single grid image", () => {
-    const result = layoutStitch([images[0]], stitch("grid", ["wide"]), 210);
+    const result = layoutStitch([images[0]], stitch("grid", [importedAssetId("wide")]), 210);
 
     expect(result.height).toBe(210);
     expect(result.items[0]?.frame).toEqual({ x: 0, y: 0, width: 210, height: 210 });
@@ -144,15 +140,18 @@ describe("stitch layout", () => {
     ).toThrow("finite");
     expect(() =>
       layoutStitch(
-        Array.from({ length: 10 }, (_, index) => ({ ...images[0], id: `image-${index}` })),
+        Array.from({ length: 10 }, (_, index) => ({
+          ...images[0],
+          id: importedAssetId(`image-${index}`),
+        })),
         stitch(
           "vertical",
-          Array.from({ length: 10 }, (_, index) => `image-${index}`),
+          Array.from({ length: 10 }, (_, index) => importedAssetId(`image-${index}`)),
         ),
         200,
       ),
     ).toThrow("at most 9");
-    expect(() => layoutStitch(images, stitch("vertical", ["wide"]), 200)).toThrow(
+    expect(() => layoutStitch(images, stitch("vertical", [importedAssetId("wide")]), 200)).toThrow(
       "exact permutation",
     );
     expect(() =>

@@ -12,7 +12,12 @@ import {
 import React, { useEffect, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 
-import type { RenderScene, SceneImage } from "@/render/scene";
+import {
+  resolveSceneImageUri,
+  type RenderScene,
+  type SceneImage,
+  type SceneImageAssetResolver,
+} from "@/render/scene";
 import type { TextLayout, TextLayoutSnapshot } from "@/render/textLayout";
 
 interface ImageLoadState {
@@ -84,8 +89,15 @@ function PendingImage({ node, failed }: { readonly node: SceneImage; readonly fa
   );
 }
 
-function SceneImageNode({ node }: { readonly node: SceneImage }) {
-  const state = useDisposableImage(node.uri);
+function SceneImageNode({
+  assets,
+  node,
+}: {
+  readonly assets: SceneImageAssetResolver;
+  readonly node: SceneImage;
+}) {
+  const uri = resolveSceneImageUri(assets, node, "preview");
+  const state = useDisposableImage(uri);
   if (state?.image === null || state?.image === undefined) {
     return <PendingImage node={node} failed={state?.status === "error"} />;
   }
@@ -153,6 +165,7 @@ function SceneTextNode({
 }
 
 export interface DocumentCanvasProps {
+  readonly assets: SceneImageAssetResolver;
   readonly scene: RenderScene;
   readonly textLayout: TextLayoutSnapshot | null;
   readonly width: number;
@@ -161,8 +174,9 @@ export interface DocumentCanvasProps {
   readonly style?: StyleProp<ViewStyle>;
 }
 
-/** Device preview. It intentionally consumes previewUri while export consumes originalUri. */
+/** Device preview resolves the Draft's preview descriptor; export resolves the original. */
 export function DocumentCanvas({
+  assets,
   scene,
   textLayout,
   width,
@@ -186,7 +200,7 @@ export function DocumentCanvas({
       <Group transform={[{ scale }]}>
         <Rect x={0} y={0} width={scene.width} height={scene.height} color={scene.backgroundColor} />
         {scene.images.map((image) => (
-          <SceneImageNode key={image.imageId} node={image} />
+          <SceneImageNode assets={assets} key={image.imageId} node={image} />
         ))}
         {textLayout?.layouts.map((layout) => (
           <SceneTextNode key={layout.id} layout={layout} scene={scene} />
