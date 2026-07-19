@@ -1,5 +1,12 @@
 import { createDocument, createEmptyDocument, type SourceImage } from "../../document";
-import { createEditCommitModule, editIntents, type TextDraft } from "../index";
+import { listPresetOptions } from "../../exportPolicy";
+import { SKIA_EXPORT_CAPABILITIES } from "../../../services/export/capabilities";
+import {
+  createEditCommitModule as createRuntimeEditCommitModule,
+  editIntents,
+  type CreateEditCommitModuleOptions,
+  type TextDraft,
+} from "../index";
 
 const images: readonly SourceImage[] = [
   {
@@ -26,6 +33,15 @@ const textDraft: TextDraft = {
   lineHeight: 1.35,
   backgroundColor: null,
 };
+
+function createEditCommitModule(
+  options: Omit<CreateEditCommitModuleOptions, "exportCapabilities">,
+) {
+  return createRuntimeEditCommitModule({
+    ...options,
+    exportCapabilities: SKIA_EXPORT_CAPABILITIES,
+  });
+}
 
 describe("edit commit module", () => {
   it("turns one canvas intent into one edit commit", () => {
@@ -205,21 +221,64 @@ describe("edit commit module", () => {
     expect(editing.read().document.stitch.order).toEqual(["image-2", "image-1"]);
   });
 
-  it("changes export settings through one semantic intent", () => {
-    const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
+  it("switches preset and normalizes format and metadata as one edit commit", () => {
+    const autosaved = jest.fn();
+    const editing = createEditCommitModule({
+      initialDocument: createDocument([], { metadataPolicy: "retain-basic" }),
+      onEditCommit: autosaved,
+    });
+    const socialPreset = listPresetOptions().find(({ id }) => id === "social");
+    if (socialPreset === undefined) throw new Error("social preset fixture is missing");
 
     editing.dispatch({
       type: "commit",
-      intent: editIntents.export.changeSettings({
-        presetId: "compact",
-        format: "png",
-        metadataPolicy: "strip",
-      }),
+      intent: editIntents.export.changeFormat("png"),
+    });
+    expect(editing.read().document.exportSettings).toEqual({
+      presetId: "original",
+      formatOverride: "png",
+      metadataPolicy: "strip",
+    });
+    autosaved.mockClear();
+
+    const switched = editing.dispatch({
+      type: "commit",
+      intent: editIntents.export.changePreset(socialPreset.id),
+    });
+
+    expect(switched).toMatchObject({ status: "changed", revision: 2 });
+    expect(editing.read().document.exportSettings).toEqual({
+      presetId: "social",
+      metadataPolicy: "strip",
+    });
+    expect(autosaved).toHaveBeenCalledTimes(1);
+
+    editing.dispatch({ type: "undo" });
+    expect(editing.read().document.exportSettings).toEqual({
+      presetId: "original",
+      formatOverride: "png",
+      metadataPolicy: "strip",
+    });
+  });
+
+  it("safely strips metadata when the backend cannot retain it after a preset switch", () => {
+    const editing = createRuntimeEditCommitModule({
+      initialDocument: createDocument([], { metadataPolicy: "retain-basic" }),
+      exportCapabilities: {
+        ...SKIA_EXPORT_CAPABILITIES,
+        metadataPolicies: { jpeg: ["strip"], png: ["strip"] },
+      },
+    });
+    const socialPreset = listPresetOptions().find(({ id }) => id === "social");
+    if (socialPreset === undefined) throw new Error("social preset fixture is missing");
+
+    editing.dispatch({
+      type: "commit",
+      intent: editIntents.export.changePreset(socialPreset.id),
     });
 
     expect(editing.read().document.exportSettings).toEqual({
-      presetId: "compact",
-      format: "png",
+      presetId: "social",
       metadataPolicy: "strip",
     });
   });

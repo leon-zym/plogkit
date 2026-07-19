@@ -6,7 +6,7 @@ import { createExpoImagePickerSource } from "@/services/image-import/expoImagePi
 import { importImages, type ImageImportResult } from "@/services/image-import/importImages";
 import { parseImageMetadataSidecar, toExifDateTime } from "@/services/image-import/metadata";
 import { createSkiaPreviewGenerator } from "@/services/image-import/skiaPreviewGenerator";
-import type { BasicExifMetadata } from "@/services/export";
+import { SKIA_EXPORT_CAPABILITIES, type BasicExifMetadata } from "@/services/export";
 import {
   createAutosaveScheduler,
   type AutosaveScheduler,
@@ -53,6 +53,7 @@ class EditorRuntime {
     this.editing = createEditCommitModule({
       initialDocument: document,
       onEditCommit: (nextDocument) => autosave.schedule(nextDocument),
+      exportCapabilities: SKIA_EXPORT_CAPABILITIES,
     });
     return this.editing;
   }

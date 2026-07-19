@@ -62,7 +62,7 @@
 
 #### Scenario: 草稿保存不同于全局默认的元数据选择
 
-- 状态：已确认（待 [Issue #12](https://github.com/leon-zym/plogkit/issues/12)）
+- 状态：已实现
 - GIVEN 全局设置为"剥离 EXIF"
 - WHEN 用户在当前草稿的导出面板选择"保留拍摄信息"并导出
 - THEN 导出的图片保留拍摄时间/设备信息但不含 GPS
@@ -81,7 +81,7 @@
 
 #### Scenario: 切换预设归一化覆盖项
 
-- 状态：已确认（待 [Issue #12](https://github.com/leon-zym/plogkit/issues/12)）
+- 状态：已实现
 - GIVEN 用户在当前多格式预设中选择了非默认格式
 - WHEN 用户切换到另一预设
 - THEN 导出面板直接显示新预设的默认格式，不继承旧格式选择
@@ -89,7 +89,7 @@
 
 #### Scenario: 预设决定是否提供格式选择
 
-- 状态：已确认（待 [Issue #12](https://github.com/leon-zym/plogkit/issues/12)）
+- 状态：已实现
 - GIVEN 用户查看一个导出预设
 - WHEN 该预设只允许一种格式
 - THEN 导出面板不显示格式选择
@@ -97,7 +97,7 @@
 
 #### Scenario: 不可用策略阻止导出而不阻止编辑
 
-- 状态：已确认（待 [Issue #12](https://github.com/leon-zym/plogkit/issues/12)）
+- 状态：已实现
 - GIVEN 当前草稿引用的预设已不可用，或其输出要求超出当前设备能力
 - WHEN 用户尝试导出
 - THEN 应用说明预设不可用或能力不支持，并且不静默输出较弱结果

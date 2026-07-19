@@ -1,6 +1,13 @@
 /**
  * The serializable editing document is the single source of truth (ADR 0003).
  */
+import {
+  listPresetOptions,
+  parseExportSettings,
+  type ExportSettings,
+  type MetadataPolicy,
+} from "./exportPolicy";
+
 export const DOCUMENT_SCHEMA_VERSION = 1;
 export const MAX_SOURCE_IMAGES = 9;
 
@@ -9,9 +16,6 @@ export type CanvasRatio = (typeof CANVAS_RATIOS)[number];
 
 export type StitchMode = "vertical" | "grid";
 export type TextAlignment = "left" | "center" | "right";
-export type ExportPresetId = "original" | "social" | "compact";
-export type ExportFormat = "jpeg" | "png";
-export type MetadataPolicy = "strip" | "retain-basic";
 
 export interface SourceImage {
   readonly id: string;
@@ -48,12 +52,6 @@ export interface TextElement {
   readonly alignment: TextAlignment;
   readonly lineHeight: number;
   readonly backgroundColor: string | null;
-}
-
-export interface ExportSettings {
-  readonly presetId: ExportPresetId;
-  readonly format: ExportFormat;
-  readonly metadataPolicy: MetadataPolicy;
 }
 
 export interface PlogDocument {
@@ -262,26 +260,12 @@ function parseTextElements(value: unknown): readonly TextElement[] {
   return elements;
 }
 
-function parseExportSettings(value: unknown): ExportSettings {
-  const record = requireRecord(value, "exportSettings");
-  if (
-    record.presetId !== "original" &&
-    record.presetId !== "social" &&
-    record.presetId !== "compact"
-  ) {
-    return invalid("exportSettings.presetId is not supported");
+function parseDocumentExportSettings(value: unknown): ExportSettings {
+  try {
+    return parseExportSettings(value);
+  } catch (error: unknown) {
+    return invalid(error instanceof Error ? error.message : "export settings are invalid");
   }
-  if (record.format !== "jpeg" && record.format !== "png") {
-    return invalid("exportSettings.format is not supported");
-  }
-  if (record.metadataPolicy !== "strip" && record.metadataPolicy !== "retain-basic") {
-    return invalid("exportSettings.metadataPolicy is not supported");
-  }
-  return {
-    presetId: record.presetId,
-    format: record.format,
-    metadataPolicy: record.metadataPolicy,
-  };
 }
 
 function validateCurrentDocument(input: unknown): PlogDocument {
@@ -299,7 +283,7 @@ function validateCurrentDocument(input: unknown): PlogDocument {
       sourceImages.map(({ id }) => id),
     ),
     textElements: parseTextElements(record.textElements),
-    exportSettings: parseExportSettings(record.exportSettings),
+    exportSettings: parseDocumentExportSettings(record.exportSettings),
   };
 }
 
@@ -369,6 +353,8 @@ export function createDocument(
   sourceImages: readonly SourceImage[] = [],
   { metadataPolicy = "strip" }: CreateDocumentOptions = {},
 ): PlogDocument {
+  const defaultPreset = listPresetOptions()[0];
+  if (defaultPreset === undefined) throw new Error("export preset catalog is empty");
   return parseDocument({
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
     sourceImages,
@@ -383,8 +369,7 @@ export function createDocument(
     },
     textElements: [],
     exportSettings: {
-      presetId: "original",
-      format: "jpeg",
+      presetId: defaultPreset.id,
       metadataPolicy,
     },
   });

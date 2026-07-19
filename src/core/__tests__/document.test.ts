@@ -49,7 +49,6 @@ describe("document model", () => {
       textElements: [],
       exportSettings: {
         presetId: "original",
-        format: "jpeg",
         metadataPolicy: "strip",
       },
     });
@@ -73,6 +72,20 @@ describe("document model", () => {
 
     expect(parseDocument(JSON.parse(JSON.stringify(doc)))).toEqual(doc);
     expect(parseDocumentJson(JSON.stringify(doc))).toEqual(doc);
+  });
+
+  it("keeps an unavailable opaque preset identity editable", () => {
+    const document = createDocument([image]);
+
+    expect(
+      parseDocument({
+        ...document,
+        exportSettings: {
+          presetId: "retired-preset",
+          metadataPolicy: "strip",
+        },
+      }).exportSettings,
+    ).toEqual({ presetId: "retired-preset", metadataPolicy: "strip" });
   });
 
   it("routes current documents through the migration entry", () => {
@@ -257,23 +270,23 @@ describe("document model", () => {
       },
     ],
     [
-      "an unknown export preset",
-      {
-        ...createDocument([image]),
-        exportSettings: {
-          presetId: "custom",
-          format: "jpeg",
-          metadataPolicy: "strip",
-        },
-      },
-    ],
-    [
       "an unsupported export format",
       {
         ...createDocument([image]),
         exportSettings: {
           presetId: "original",
-          format: "webp",
+          formatOverride: "webp",
+          metadataPolicy: "strip",
+        },
+      },
+    ],
+    [
+      "the unpublished legacy export format field",
+      {
+        ...createDocument([image]),
+        exportSettings: {
+          presetId: "original",
+          format: "jpeg",
           metadataPolicy: "strip",
         },
       },
@@ -284,7 +297,6 @@ describe("document model", () => {
         ...createDocument([image]),
         exportSettings: {
           presetId: "original",
-          format: "jpeg",
           metadataPolicy: "keep-gps",
         },
       },

@@ -1,4 +1,5 @@
 import type { PlogDocument } from "../../core/document";
+import type { ExportCapabilities } from "../../core/exportPolicy";
 import type { BasicExifMetadata } from "./exif";
 import type { ExportPlan } from "./plan";
 
@@ -27,6 +28,7 @@ export interface ExportArtifact {
 }
 
 export interface ExportPipelineDependencies {
+  readonly capabilities: ExportCapabilities;
   readonly renderer: ExportRenderStage;
   readonly encoder: ExportEncodeStage;
   readonly destination: ExportDestination;

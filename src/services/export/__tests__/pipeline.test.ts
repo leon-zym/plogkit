@@ -1,5 +1,5 @@
 import { createDocument } from "../../../core/document";
-import { SkiaExportEncodeStage } from "../encodeStage";
+import { SKIA_EXPORT_CAPABILITIES } from "../capabilities";
 import { runExportPipeline } from "../pipeline";
 import type {
   ExportDestination,
@@ -37,12 +37,28 @@ describe("two-stage export orchestration", () => {
       writeAndSave: jest.fn(async () => ({ fileUri: "file:///export.jpg", assetId: "asset-1" })),
     };
 
-    const result = await runExportPipeline(document, {}, { renderer, encoder, destination });
+    const result = await runExportPipeline(
+      document,
+      {},
+      {
+        capabilities: SKIA_EXPORT_CAPABILITIES,
+        renderer,
+        encoder,
+        destination,
+      },
+    );
 
     expect(result).toMatchObject({
       fileUri: "file:///export.jpg",
       assetId: "asset-1",
-      plan: { width: 4000, height: 3000, format: "jpeg" },
+      plan: {
+        catalogSchemaVersion: 1,
+        presetId: "original",
+        presetRevision: 1,
+        width: 4000,
+        height: 3000,
+        format: "jpeg",
+      },
     });
     expect(pixels.dispose).toHaveBeenCalledTimes(1);
   });
@@ -59,28 +75,17 @@ describe("two-stage export orchestration", () => {
     };
 
     await expect(
-      runExportPipeline(document, {}, { renderer, encoder, destination }),
+      runExportPipeline(
+        document,
+        {},
+        {
+          capabilities: SKIA_EXPORT_CAPABILITIES,
+          renderer,
+          encoder,
+          destination,
+        },
+      ),
     ).rejects.toThrow("save failed");
     expect(pixels.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects PNG retain-basic explicitly before pretending metadata was retained", () => {
-    const pixels = makePixels();
-    const encoder = new SkiaExportEncodeStage();
-
-    expect(() =>
-      encoder.encode(pixels, {
-        presetId: "original",
-        width: 4000,
-        height: 3000,
-        wasReduced: false,
-        format: "png",
-        quality: 0.95,
-        metadataPolicy: "retain-basic",
-        extension: "png",
-        mimeType: "image/png",
-      }),
-    ).toThrow("not supported for PNG");
-    expect(pixels.encode).not.toHaveBeenCalled();
   });
 });

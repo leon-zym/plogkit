@@ -1,52 +1,40 @@
-import type {
-  ExportFormat,
-  ExportPresetId,
-  MetadataPolicy,
-  PlogDocument,
-} from "../../core/document";
-import { calculateExportSize, getExportPreset } from "../../core/presets";
-import { documentToRenderScene, getNaturalSceneSize } from "../../render/scene";
+import type { PlogDocument } from "../../core/document";
+import {
+  resolveExportPolicy,
+  type ExportCapabilities,
+  type ExportPolicyError,
+  type ResolvedExportPolicy,
+} from "../../core/exportPolicy";
+import { documentToExportSourceFacts } from "../../render/exportSourceFacts";
 
-export interface ExportPlanOverrides {
-  readonly presetId?: ExportPresetId;
-  readonly format?: ExportFormat;
-  readonly metadataPolicy?: MetadataPolicy;
+export type ExportPlan = ResolvedExportPolicy;
+
+export class ExportPlanningError extends Error {
+  readonly code: ExportPolicyError["code"];
+  readonly diagnostic: ExportPolicyError;
+
+  constructor(diagnostic: ExportPolicyError) {
+    super(
+      diagnostic.code === "preset-unavailable"
+        ? `export preset ${diagnostic.requestedPresetId} is unavailable`
+        : `export policy is unsupported: ${diagnostic.reason}`,
+    );
+    this.name = "ExportPlanningError";
+    this.code = diagnostic.code;
+    this.diagnostic = diagnostic;
+  }
 }
 
-export interface ExportPlan {
-  readonly presetId: ExportPresetId;
-  readonly width: number;
-  readonly height: number;
-  readonly wasReduced: boolean;
-  readonly format: ExportFormat;
-  readonly quality: number;
-  readonly metadataPolicy: MetadataPolicy;
-  readonly extension: "jpg" | "png";
-  readonly mimeType: "image/jpeg" | "image/png";
-}
-
-/** Pure planning step shared by UI previews and the concrete export pipeline. */
+/** Adapts document geometry to the authoritative Export Policy resolver. */
 export function createExportPlan(
   document: PlogDocument,
-  overrides: ExportPlanOverrides = {},
+  capabilities: ExportCapabilities,
 ): ExportPlan {
-  const presetId = overrides.presetId ?? document.exportSettings.presetId;
-  const preset = getExportPreset(presetId);
-  const scene = documentToRenderScene(document, "original");
-  const naturalSize = getNaturalSceneSize(scene);
-  const size = calculateExportSize(naturalSize.width, naturalSize.height, preset);
-  const format = overrides.format ?? document.exportSettings.format ?? preset.format;
-
-  return {
-    presetId,
-    width: size.width,
-    height: size.height,
-    wasReduced: size.wasReduced,
-    format,
-    quality: preset.quality,
-    metadataPolicy:
-      overrides.metadataPolicy ?? document.exportSettings.metadataPolicy ?? preset.metadataPolicy,
-    extension: format === "jpeg" ? "jpg" : "png",
-    mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
-  };
+  const resolution = resolveExportPolicy(
+    document.exportSettings,
+    documentToExportSourceFacts(document),
+    capabilities,
+  );
+  if (resolution.status === "failed") throw new ExportPlanningError(resolution.error);
+  return resolution.policy;
 }

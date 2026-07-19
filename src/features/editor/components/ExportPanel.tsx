@@ -1,7 +1,14 @@
-import { StyleSheet, Switch, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
+import { StyleSheet, Switch, Text, View } from "react-native";
 
-import type { ExportFormat, ExportPresetId, ExportSettings } from "@/core/document";
+import {
+  listPresetOptions,
+  type ExportFormat,
+  type ExportPolicyError,
+  type ExportPresetId,
+  type ExportSettings,
+  type MetadataPolicy,
+} from "@/core/exportPolicy";
 import { ActionButton } from "@/ui/ActionButton";
 import { OptionRow } from "@/ui/OptionRow";
 import { colors, radii, spacing, typography } from "@/ui/theme";
@@ -16,85 +23,114 @@ export type ExportStatus =
       readonly width: number;
       readonly height: number;
       readonly wasReduced: boolean;
+      readonly format: ExportFormat;
     }
   | { readonly kind: "error" };
 
-export interface ExportPanelProps {
+interface ExportPanelProps {
   readonly settings: ExportSettings;
   readonly status: ExportStatus;
-  readonly onSettingsChange: (settings: ExportSettings) => void;
+  readonly policyError: ExportPolicyError | null;
+  readonly canRetainBasic: boolean;
+  readonly onPresetChange: (presetId: ExportPresetId) => void;
+  readonly onFormatChange: (format: ExportFormat) => void;
+  readonly onMetadataPolicyChange: (policy: MetadataPolicy) => void;
   readonly onExport: () => void;
 }
 
-export function ExportPanel({ settings, status, onSettingsChange, onExport }: ExportPanelProps) {
-  const { t } = useTranslation();
-  const presetOptions: readonly {
-    value: ExportPresetId;
-    label: string;
-    accessibilityLabel: string;
-  }[] = (["original", "social", "compact"] as const).map((value) => ({
-    value,
-    label: t(`export.presets.${value}`),
-    accessibilityLabel: t(`export.presets.${value}`),
-  }));
-  const formatOptions: readonly {
-    value: ExportFormat;
-    label: string;
-    accessibilityLabel: string;
-  }[] = [
-    { value: "jpeg", label: "JPEG", accessibilityLabel: "JPEG" },
-    { value: "png", label: "PNG", accessibilityLabel: "PNG" },
-  ];
-  const canRetainBasic = settings.format === "jpeg";
-  const retainBasic = canRetainBasic && settings.metadataPolicy === "retain-basic";
+function policyErrorMessageKey(error: ExportPolicyError): string {
+  if (error.code === "preset-unavailable") return "export.policyErrors.presetUnavailable";
+  switch (error.reason) {
+    case "format-not-allowed":
+      return "export.policyErrors.formatNotAllowed";
+    case "metadata-not-allowed":
+      return "export.policyErrors.metadataNotAllowed";
+    case "format-unsupported":
+      return "export.policyErrors.formatUnsupported";
+    case "metadata-unsupported":
+      return "export.policyErrors.metadataUnsupported";
+    case "dynamic-range-unsupported":
+      return "export.policyErrors.dynamicRangeUnsupported";
+    case "dynamic-photo-unsupported":
+      return "export.policyErrors.dynamicPhotoUnsupported";
+    case "precompression-unsupported":
+      return "export.policyErrors.precompressionUnsupported";
+    case "post-process-unsupported":
+      return "export.policyErrors.postProcessUnsupported";
+  }
+}
 
-  const update = (next: Partial<ExportSettings>) => {
-    const merged = { ...settings, ...next };
-    onSettingsChange({
-      ...merged,
-      metadataPolicy: merged.format === "png" ? "strip" : merged.metadataPolicy,
-    });
-  };
+export function ExportPanel({
+  settings,
+  status,
+  policyError,
+  canRetainBasic,
+  onPresetChange,
+  onFormatChange,
+  onMetadataPolicyChange,
+  onExport,
+}: ExportPanelProps) {
+  const { t } = useTranslation();
+  const options = listPresetOptions();
+  const selectedPreset = options.find(({ id }) => id === settings.presetId);
+  const selectedFormat = settings.formatOverride ?? selectedPreset?.defaultFormat;
+  const presetOptions = options.map(({ id, labelKey }) => ({
+    value: id,
+    label: t(labelKey),
+    accessibilityLabel: t(labelKey),
+  }));
+  const formatOptions =
+    selectedPreset?.allowedFormats.map((format) => ({
+      value: format,
+      label: format.toUpperCase(),
+      accessibilityLabel: format.toUpperCase(),
+    })) ?? [];
+  const retainBasic = canRetainBasic && settings.metadataPolicy === "retain-basic";
 
   return (
     <PanelShell title={t("export.title")}>
       <View style={panelStyles.section}>
         <Text style={panelStyles.sectionLabel}>{t("export.preset")}</Text>
         <OptionRow
-          onChange={(presetId) => update({ presetId })}
+          onChange={onPresetChange}
           options={presetOptions}
           testIDPrefix="export-preset"
           value={settings.presetId}
         />
       </View>
-      <View style={panelStyles.section}>
-        <Text style={panelStyles.sectionLabel}>{t("export.format")}</Text>
-        <OptionRow
-          onChange={(format) => update({ format })}
-          options={formatOptions}
-          testIDPrefix="export-format"
-          value={settings.format}
-        />
-      </View>
+      {selectedPreset !== undefined && selectedFormat !== undefined && formatOptions.length > 1 ? (
+        <View style={panelStyles.section}>
+          <Text style={panelStyles.sectionLabel}>{t("export.format")}</Text>
+          <OptionRow
+            onChange={onFormatChange}
+            options={formatOptions}
+            testIDPrefix="export-format"
+            value={selectedFormat}
+          />
+        </View>
+      ) : null}
       <View style={styles.privacyRow}>
         <View style={styles.privacyCopy}>
           <Text style={styles.privacyTitle}>{t("export.retainBasic")}</Text>
           <Text style={styles.privacyBody}>
-            {canRetainBasic ? t("export.sRGBNotice") : t("export.retainUnavailablePng")}
+            {canRetainBasic ? t("export.sRGBNotice") : t("export.retainUnavailable")}
           </Text>
         </View>
         <Switch
           accessibilityLabel={t("export.retainBasic")}
           disabled={!canRetainBasic}
-          onValueChange={(enabled) =>
-            update({ metadataPolicy: enabled ? "retain-basic" : "strip" })
-          }
+          onValueChange={(enabled) => onMetadataPolicyChange(enabled ? "retain-basic" : "strip")}
           testID="export-retain-basic"
           thumbColor={colors.surface}
           trackColor={{ false: colors.line, true: colors.accent }}
           value={retainBasic}
         />
       </View>
+      {policyError !== null ? (
+        <Text accessibilityLiveRegion="assertive" style={styles.error} testID="export-policy-error">
+          {t(policyErrorMessageKey(policyError))}
+        </Text>
+      ) : null}
       {status.kind === "success" ? (
         <View accessibilityLiveRegion="polite" style={styles.success} testID="export-success">
           <Text style={styles.successTitle}>{t("export.success")}</Text>
@@ -104,7 +140,7 @@ export function ExportPanel({ settings, status, onSettingsChange, onExport }: Ex
             </Text>
           ) : (
             <Text style={styles.successDetail}>
-              {settings.format.toUpperCase()} · {status.width} × {status.height}
+              {status.format.toUpperCase()} · {status.width} × {status.height}
             </Text>
           )}
         </View>
@@ -116,7 +152,7 @@ export function ExportPanel({ settings, status, onSettingsChange, onExport }: Ex
       ) : null}
       <ActionButton
         accessibilityLabel={t("export.action")}
-        disabled={status.kind === "exporting"}
+        disabled={status.kind === "exporting" || policyError !== null}
         label={status.kind === "exporting" ? t("export.exporting") : t("export.action")}
         onPress={onExport}
         testID="export-document"
