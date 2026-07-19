@@ -70,7 +70,7 @@
 
 #### Scenario: 替换图片可以在当前会话撤销
 
-- 状态：已确认（待 [Issue #15](https://github.com/leon-zym/plogkit/issues/15)）
+- 状态：已确认（当前会话语义已由 [Issue #15](https://github.com/leon-zym/plogkit/issues/15) 实现，待用户入口）
 - GIVEN 当前编辑会话中的文档包含一张图片
 - WHEN 用户替换该图片后执行撤销
 - THEN 原图片重新出现在文档与预览中

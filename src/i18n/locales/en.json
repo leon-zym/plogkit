@@ -37,6 +37,7 @@
     "export": "Export",
     "saving": "Saving",
     "saved": "Saved",
+    "saveFailed": "Your latest changes could not be saved. Check device storage and try going back again.",
     "preparationFailed": "We couldn't prepare the photo previews. Your draft is unchanged.",
     "tools": {
       "background": "Background",

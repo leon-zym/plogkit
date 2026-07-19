@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, type Href } from "expo-router";
+import { Stack, useNavigation, useRouter, type Href } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -136,7 +137,7 @@ export default function EditorScreen() {
         if (!active) return;
         if (next.status === "no-draft") {
           router.replace("/" as Href);
-        } else if (next.status === "preview-failed") {
+        } else if (next.status !== "prepared") {
           setPreparation({ status: "failed" });
         } else {
           setPreparation(next);
@@ -150,19 +151,26 @@ export default function EditorScreen() {
     };
   }, [attempt, router]);
 
-  if (preparation.status === "loading") return <LoadingEditor />;
-  if (preparation.status === "failed") {
-    return (
-      <EditorPreparationError
-        onBack={() => router.replace("/" as Href)}
-        onRetry={() => {
-          setPreparation({ status: "loading" });
-          setAttempt((current) => current + 1);
-        }}
+  return (
+    <>
+      <Stack.Screen
+        options={{ gestureEnabled: false, headerBackButtonMenuEnabled: false }}
       />
-    );
-  }
-  return <ConnectedEditor {...preparation} />;
+      {preparation.status === "loading" ? (
+        <LoadingEditor />
+      ) : preparation.status === "failed" ? (
+        <EditorPreparationError
+          onBack={() => router.replace("/" as Href)}
+          onRetry={() => {
+            setPreparation({ status: "loading" });
+            setAttempt((current) => current + 1);
+          }}
+        />
+      ) : (
+        <ConnectedEditor {...preparation} />
+      )}
+    </>
+  );
 }
 
 type ActiveEditorTool = EditorTool | "export";
@@ -170,6 +178,7 @@ type ActiveEditorTool = EditorTool | "export";
 function ConnectedEditor({ assets, editing }: PreparedEditor) {
   const { t } = useTranslation();
   const router = useRouter();
+  const navigation = useNavigation();
   const { document, previewDocument, canUndo, canRedo } = useEditCommit(editing);
   const previewScene = useMemo(
     () => documentToRenderScene(previewDocument),
@@ -183,6 +192,10 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
   const [stageWidth, setStageWidth] = useState(0);
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ kind: "idle" });
   const [importErrorCount] = useState(() => editorRuntime.takeImportErrorCount());
+  const [saveFailed, setSaveFailed] = useState(false);
+  const leavePending = useRef(false);
+  const [leaveAllowed, setLeaveAllowed] = useState(false);
+  const pendingLeave = useRef<(() => void) | null>(null);
   const canvasScrollRef = useRef<ScrollView>(null);
   const canvasScrollY = useRef(0);
   const canvasScrollYBeforeKeyboard = useRef<number | null>(null);
@@ -327,13 +340,37 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
     }
   };
 
-  const goBack = async () => {
+  const attemptLeave = useCallback(async (navigate: () => void) => {
+    if (leavePending.current) return;
+    leavePending.current = true;
+    setSaveFailed(false);
     try {
-      await editorRuntime.flush();
+      const result = await editorRuntime.flush();
+      if (result.status === "flushed") {
+        pendingLeave.current = navigate;
+        setLeaveAllowed(true);
+      } else {
+        setSaveFailed(true);
+      }
+    } catch {
+      setSaveFailed(true);
     } finally {
-      router.replace("/" as Href);
+      leavePending.current = false;
     }
-  };
+  }, []);
+
+  usePreventRemove(!leaveAllowed, ({ data }) => {
+    void attemptLeave(() => navigation.dispatch(data.action));
+  });
+
+  useEffect(() => {
+    if (!leaveAllowed) return;
+    const navigate = pendingLeave.current;
+    pendingLeave.current = null;
+    navigate?.();
+  }, [leaveAllowed]);
+
+  const goBack = () => attemptLeave(() => router.replace("/" as Href));
 
   const renderPanel = () => {
     if (activeTool === "export") {
@@ -417,6 +454,15 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
             consumeEffects(editing.dispatch({ type: "undo" }));
           }}
         />
+        {saveFailed ? (
+          <Text
+            accessibilityLiveRegion="assertive"
+            style={styles.saveError}
+            testID="editor-save-error"
+          >
+            {t("editor.saveFailed")}
+          </Text>
+        ) : null}
         {importErrorCount > 0 ? (
           <Text
             accessibilityLiveRegion="polite"
@@ -522,6 +568,13 @@ const styles = StyleSheet.create({
   importWarning: {
     ...typography.caption,
     color: colors.ink,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: spacing.s4,
+    paddingVertical: spacing.s2,
+  },
+  saveError: {
+    ...typography.caption,
+    color: colors.danger,
     backgroundColor: colors.accentSoft,
     paddingHorizontal: spacing.s4,
     paddingVertical: spacing.s2,
