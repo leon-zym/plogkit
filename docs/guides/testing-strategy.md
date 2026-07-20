@@ -47,6 +47,22 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 
 当可见界面不足以证明持久化结果时，通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
+### 设备 readiness 与 flow 隔离
+
+Android runner 在 `sys.boot_completed=1` 之后逐项确认 boot animation 停止、设备已 provisioned 和 launcher 可响应，避免 System UI 还未稳定就进入安装。iOS runner 在构建和测试前自动校验 Xcode、Simulator runtime 和 Maestro 版本，Xcode beta 工具链输出警告而非静默失败。
+
+每个业务 flow 在独立的 `maestro test` 进程中运行，一次 XCTest hierarchy failure 或 driver 错误不会导致后续 flow 级联失败；runner 在失败后继续执行剩余 flow，最终汇总所有失败及其分类：
+
+| 类别                 | 含义                                        |
+| -------------------- | ------------------------------------------- |
+| `metro`              | Metro bundler 未响应或退出                  |
+| `xctest-driver`      | XCTest 无障碍层级故障或 Maestro driver 错误 |
+| `system-ui`          | 模拟器未就绪或 System UI ANR                |
+| `app-crash`          | PlogKit App 自身崩溃                        |
+| `business-assertion` | 业务断言失败（默认）                        |
+
+`app-crash` 和 `xctest-driver` 失败时自动收集 DiagnosticReports（iOS）或 logcat、ANR traces（Android），其余类别依赖已保存的 flow artifact 诊断。详见[开发环境](dev-environment.md)。
+
 ### L5 CI
 
 | 触发                     | Runner                   | 内容                                                      |

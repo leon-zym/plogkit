@@ -15,6 +15,7 @@ import {
   installAndSeedIos,
   iosBuildArtifact,
   prepareIosDevice,
+  validateIosEnvironment,
   validateIosHost,
 } from "./ios.mjs";
 import {
@@ -94,7 +95,10 @@ function buildWorkers() {
 }
 
 function validate({ flow, phase, platforms }) {
-  if (platforms.includes("ios")) validateIosHost();
+  if (platforms.includes("ios")) {
+    validateIosHost();
+    validateIosEnvironment();
+  }
   for (const fixture of fixtures) {
     if (!existsSync(fixture)) throw new Error(`Missing E2E fixture: ${fixture}`);
   }

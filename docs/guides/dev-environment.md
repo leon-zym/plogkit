@@ -146,7 +146,9 @@ node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence
 
 `--phase test` 仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
 
-runner 固定使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD，不会修改日常开发设备；Android system image 的 ABI 仍按宿主架构选择。缺少所需 runtime、device type 或 system image 时，runner 会明确失败。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。
+runner 固定使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD，不会修改日常开发设备；Android system image 的 ABI 仍按宿主架构选择。缺少所需 runtime、device type 或 system image 时，runner 会明确失败。iOS runner 在构建或测试前自动验证 Xcode、runtime 和 Maestro 版本；Xcode beta 构建的兼容性尚未充分验证，遇到难以复现的 XCTest 不稳定或构建失败时请切回稳定版 Xcode。Android runner 在 `sys.boot_completed=1` 之后逐项等待 boot animation 停止、设备已 provisioned 和 launcher 可响应。两端均在无前台设备窗口的模式下运行。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。
+
+失败时每个 flow 的 artifact 独立保存，`failure-summary.txt` 记录分类（metro / xctest-driver / system-ui / app-crash / business-assertion）与错误详情；app-crash 或 xctest-driver 失败时额外收集 DiagnosticReports 或 logcat/ANR traces。具体规则见[测试策略](testing-strategy.md)。
 
 完整运行会顺序构建两端、并行准备设备、串行预热，再并行执行两端业务 flow。runner 在成功、失败或中断时只停止本轮拥有的 Metro 和设备实例，不删除专用设备。
 
