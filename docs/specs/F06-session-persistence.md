@@ -1,7 +1,7 @@
 # F06 会话自动保存与恢复
 
 - 状态：已实现
-- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
+- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
 - 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
@@ -94,3 +94,26 @@
 - WHEN 用户主动离开 Editor 且 flush 失败
 - THEN 阻止导航并保留未保存修改，允许用户重试
 - AND 若后台保存失败，同样不丢弃未保存修改
+
+### 需求 3：持久化恢复与非破坏性检查
+
+#### Scenario: 替换持久事实中断后恢复完整版本
+
+- GIVEN 草稿已有一个可读取的持久版本
+- WHEN 保存新版本时进程在旧目标移除后、替换完成前终止
+- THEN 应用下次读取该草稿时恢复旧版本或已经完整提交的新版本
+- AND 不以缺失或部分写入的文档进入 Editor
+
+#### Scenario: 检查活跃草稿不压缩会话资产
+
+- GIVEN 当前草稿有活跃编辑会话，undo history 仍引用持久文档未引用的导入资产
+- WHEN 草稿库普通读取或未来列表检查该草稿
+- THEN 不压缩 catalog 或删除该资产
+- AND 只有草稿成功失活后的明确维护流程可以按最新持久文档执行压缩
+
+#### Scenario: 维护故障不遮蔽有效草稿
+
+- GIVEN 草稿 aggregate 完整可读，但 staging 枚举或遗留文件删除暂时失败
+- WHEN 用户打开、保存或继续编辑该草稿
+- THEN 主 transaction 仍按 aggregate 本身的结果完成
+- AND 后续安全维护入口重试遗留清理
