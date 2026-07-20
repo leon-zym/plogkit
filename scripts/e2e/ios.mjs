@@ -15,6 +15,54 @@ export function validateIosHost() {
   }
 }
 
+export function validateIosEnvironment() {
+  // Record Xcode version and path.
+  const xcodePath = capture("xcode-select", ["-p"], { allowFailure: true });
+  const xcodeVersion = capture("xcodebuild", ["-version"], { allowFailure: true });
+  log("ios", `Xcode: ${xcodePath ?? "unknown"}`);
+  if (xcodeVersion) {
+    for (const line of xcodeVersion.split("\n")) log("ios", `  ${line}`);
+  }
+
+  // Record Maestro version.
+  const maestroVersion = capture("maestro", ["--version"], { allowFailure: true });
+  if (maestroVersion) log("ios", `Maestro: ${maestroVersion}`);
+  else log("ios", "Maestro: not found — install it before running iOS E2E.");
+
+  // Verify required runtime is available.
+  const runtime = requiredRuntime();
+  if (!runtime) {
+    throw new Error(
+      `iOS Simulator runtime ${runtimeIdentifier} is not available. ` +
+        "Install it via Xcode → Settings → Platforms, then retry.",
+    );
+  }
+  log("ios", `Simulator runtime: ${runtime.name} (${runtime.version})`);
+
+  // Verify required device type exists.
+  const deviceType = requiredDeviceType();
+  if (!deviceType) {
+    throw new Error(
+      `Device type "${deviceTypeName}" is not available. ` +
+        "Install the iOS Simulator platform via Xcode → Settings → Platforms.",
+    );
+  }
+
+  // Warn on Xcode beta: React Native build compatibility is not fully verified
+  // with prerelease toolchains (see issue #11 and #23 investigations).
+  if (xcodeVersion && /\bbeta\b/i.test(xcodeVersion)) {
+    log(
+      "ios",
+      "WARNING: Xcode beta toolchain detected. React Native build compatibility " +
+        "with beta Xcode is not fully verified. If you encounter unexpected build " +
+        "failures or XCTest instability, retry with a stable Xcode release " +
+        "(see docs/guides/dev-environment.md).",
+    );
+  }
+
+  log("ios", "iOS environment validation passed.");
+}
+
 function requiredRuntime() {
   const runtimes = JSON.parse(capture("xcrun", ["simctl", "list", "runtimes", "-j"]));
   return runtimes.runtimes.find(

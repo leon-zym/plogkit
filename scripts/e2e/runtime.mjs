@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { connect } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export function log(scope, message) {
@@ -236,7 +236,129 @@ export function warmUpApp(options) {
   });
 }
 
-export function runMaestroSuite(options) {
-  const target = options.flow ? `e2e/flows/${options.flow}.yaml` : "e2e/flows/";
-  return runMaestro({ ...options, kind: "flows", target });
+export async function runMaestroSuite(options) {
+  const { artifactRoot, cleanup, device, flow, root } = options;
+
+  if (flow) {
+    const target = `e2e/flows/${flow}.yaml`;
+    return runMaestro({ artifactRoot, cleanup, device, kind: "flows", root, target });
+  }
+
+  // Isolate each flow in a separate maestro invocation so that a single
+  // XCTest hierarchy failure or driver error cannot cascade and cause
+  // subsequent independent flows to falsely report an app crash.
+  const flowsDir = resolve(root, "e2e", "flows");
+  const flowFiles = readdirSync(flowsDir)
+    .filter((f) => f.endsWith(".yaml"))
+    .sort();
+
+  const failures = [];
+  for (const flowFile of flowFiles) {
+    const flowName = flowFile.replace(/\.yaml$/, "");
+    const target = resolve(flowsDir, flowFile);
+    try {
+      await runMaestro({
+        artifactRoot,
+        cleanup,
+        device,
+        kind: `flows/${flowName}`,
+        root,
+        target,
+      });
+      log(device.platform, `Flow ${flowName} passed.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const category = classifyFailure(message);
+      log(device.platform, `Flow ${flowName} FAILED [${category}]: ${message}`);
+      await collectFailureDiagnostics({
+        artifactRoot,
+        device,
+        error: message,
+        flowName,
+        kind: category,
+      });
+      failures.push({ flow: flowName, error: message, category });
+      // Continue with remaining flows — do not let one failure cascade.
+    }
+  }
+
+  if (failures.length > 0) {
+    const summary = failures
+      .map((f) => `  ${f.flow} [${f.category}]`)
+      .join("\n");
+    throw new Error(
+      `${failures.length}/${flowFiles.length} flows failed:\n${summary}\n` +
+        "See per-flow artifact directories for details.",
+    );
+  }
+}
+
+const APP_CRASH_PATTERNS = /\b(app\s+(stopped|not\s+running|crash)|FATAL\s+EXCEPTION|AndroidRuntime|SIGABRT|SIGSEGV|EXC_CRASH|EXC_BAD_ACCESS)\b/i;
+const XCTEST_DRIVER_PATTERNS = /\b(kAXError|AXError|XCTest|hierarchy\s+(failed|error)|terminateApp|cannot\s+determine\s+UI)\b/i;
+const METRO_FAILURE_PATTERNS = /\b(Metro|packager|ECONNREFUSED|8081|bundling\s+failed)\b/i;
+const SYSTEM_UI_PATTERNS = /\b(System\s+UI|ANR|not\s+responding|device\s+(offline|not\s+found)|simulator\s+(unavailable|failed|error)|emulator\s+(exited|failed))\b/i;
+
+function classifyFailure(message) {
+  if (METRO_FAILURE_PATTERNS.test(message)) return "metro";
+  if (XCTEST_DRIVER_PATTERNS.test(message)) return "xctest-driver";
+  if (SYSTEM_UI_PATTERNS.test(message)) return "system-ui";
+  if (APP_CRASH_PATTERNS.test(message)) return "app-crash";
+  return "business-assertion";
+}
+
+async function collectFailureDiagnostics({ artifactRoot, device, error, flowName, kind }) {
+  const diagDir = join(artifactRoot, device.platform, `flows/${flowName}`);
+  mkdirSync(diagDir, { recursive: true });
+
+  // Always save the failure classification and error message.
+  appendFileSync(join(diagDir, "failure-summary.txt"), `category: ${kind}\nerror: ${error}\n`);
+
+  // Collect platform-specific crash diagnostics.
+  if (kind === "app-crash" || kind === "xctest-driver") {
+    if (device.platform === "ios") {
+      try {
+        const reportsDir = join(
+          homedir(),
+          "Library",
+          "Logs",
+          "DiagnosticReports",
+        );
+        if (existsSync(reportsDir)) {
+          for (const entry of readdirSync(reportsDir)) {
+            if (/\.(ips|crash|diag)$/i.test(entry)) {
+              copyFileSync(join(reportsDir, entry), join(diagDir, entry));
+            }
+          }
+        }
+
+        // Capture the simulator system log if the device is still reachable.
+        const log = capture(
+          "xcrun",
+          ["simctl", "spawn", device.deviceId, "log", "show", "--last", "30s"],
+          { allowFailure: true },
+        );
+        if (log) appendFileSync(join(diagDir, "simulator-system.log"), log);
+      } catch {
+        // Diagnostic collection is best-effort.
+      }
+    } else {
+      try {
+        // Capture logcat buffer for crash analysis.
+        const logcat = capture("adb", ["-s", device.deviceId, "logcat", "-d"], {
+          allowFailure: true,
+        });
+        if (logcat) appendFileSync(join(diagDir, "logcat.txt"), logcat);
+
+        // Capture ANR traces if any.
+        const anr = capture(
+          "adb",
+          ["-s", device.deviceId, "shell", "cat", "/data/anr/traces.txt"],
+          { allowFailure: true },
+        );
+        if (anr) appendFileSync(join(diagDir, "anr-traces.txt"), anr);
+      } catch {
+        // Diagnostic collection is best-effort.
+      }
+    }
+  }
 }

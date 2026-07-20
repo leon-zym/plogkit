@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readdirSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, openSync, readdirSync } from "node:fs";
 import { arch } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -108,10 +108,93 @@ async function waitForBoot(serial) {
   );
 }
 
+async function waitForSystemUi(serial, artifactRoot) {
+  // Boot animation must be done — either "stopped", or the property was
+  // never set (common with -no-boot-anim). Only "running" means still in
+  // progress.
+  await waitUntil(
+    () => {
+      const value = capture("adb", ["-s", serial, "shell", "getprop", "init.svc.bootanim"], {
+        allowFailure: true,
+      });
+      return value !== "running";
+    },
+    30000,
+    `Android device ${serial} boot animation to finish`,
+    2000,
+  );
+
+  // Device must be provisioned (setup wizard completed).
+  await waitUntil(
+    () =>
+      capture(
+        "adb",
+        ["-s", serial, "shell", "settings", "get", "global", "device_provisioned"],
+        { allowFailure: true },
+      ) === "1",
+    30000,
+    `Android device ${serial} to be provisioned`,
+    2000,
+  );
+
+  // Package manager must be able to resolve at least the android system package.
+  await waitUntil(
+    () => {
+      const output = capture("adb", ["-s", serial, "shell", "pm", "path", "android"], {
+        allowFailure: true,
+      });
+      return output !== null && output.length > 0;
+    },
+    30000,
+    `Android device ${serial} package manager to respond`,
+    2000,
+  );
+
+  // Window and accessibility services must be registered — proves System UI
+  // and UI-automation infrastructure are ready for Maestro to interact.
+  await waitUntil(
+    () => {
+      const wm = capture("adb", ["-s", serial, "shell", "service", "check", "window"], {
+        allowFailure: true,
+      });
+      const acc = capture(
+        "adb",
+        ["-s", serial, "shell", "service", "check", "accessibility"],
+        { allowFailure: true },
+      );
+      return wm?.includes("found") && acc?.includes("found");
+    },
+    120000,
+    `Android device ${serial} system services to become ready`,
+    2000,
+  );
+
+  // Save a snapshot of system state for diagnostics.
+  try {
+    const diag = join(artifactRoot, `android-readiness-${serial}.log`);
+    let content = "";
+    for (const [label, cmd] of [
+      ["dumpsys window", ["dumpsys", "window"]],
+      ["dumpsys activity", ["dumpsys", "activity"]],
+      ["service list", ["shell", "service", "list"]],
+      ["getprop", ["shell", "getprop"]],
+    ]) {
+      const out = capture("adb", ["-s", serial, ...cmd], { allowFailure: true });
+      content += `--- ${label} ---\n${out ?? "(failed)"}\n\n`;
+    }
+    appendFileSync(diag, content);
+  } catch {
+    // Diagnostic collection is best-effort; never block readiness on it.
+  }
+
+  log("android", `System UI ready on ${serial}.`);
+}
+
 export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDeviceId }) {
   if (externalDeviceId) {
     await run("adb", ["-s", externalDeviceId, "wait-for-device"], { cleanup });
     await waitForBoot(externalDeviceId);
+    await waitForSystemUi(externalDeviceId, artifactRoot);
     return { platform: "android", deviceId: externalDeviceId };
   }
 
@@ -176,6 +259,7 @@ export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDevi
     2000,
   );
   await waitForBoot(serial);
+  await waitForSystemUi(serial, artifactRoot);
   return { platform: "android", deviceId: serial };
 }
 
