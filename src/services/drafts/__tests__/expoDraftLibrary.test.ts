@@ -3,6 +3,7 @@ import { createExpoDraftRuntimeStorage } from "../expoDraftLibrary";
 
 const mockContents = new Map<string, string>();
 const mockDirectories = new Set<string>();
+let mockFailMoveAfterDestinationRemovalTo: string | null = null;
 
 function mockUri(parent: string | { readonly uri: string }, name?: string): string {
   const base = typeof parent === "string" ? parent : parent.uri;
@@ -59,6 +60,10 @@ jest.mock("expo-file-system", () => {
       if (this.uri === destination.uri) throw new Error("cannot move a file onto itself");
       const content = mockContents.get(this.uri);
       if (content === undefined) throw new Error(`missing ${this.uri}`);
+      if (mockFailMoveAfterDestinationRemovalTo === destination.uri) {
+        mockContents.delete(destination.uri);
+        throw new Error("move failed after destination removal");
+      }
       mockContents.delete(this.uri);
       mockContents.set(destination.uri, content);
       this.uri = destination.uri;
@@ -83,6 +88,7 @@ describe("Expo Draft runtime storage", () => {
   beforeEach(() => {
     mockContents.clear();
     mockDirectories.clear();
+    mockFailMoveAfterDestinationRemovalTo = null;
   });
 
   it("atomically replaces the recent Draft locator more than once", async () => {
@@ -92,5 +98,18 @@ describe("Expo Draft runtime storage", () => {
     await storage.writeRecentDraftId(draftId("second"));
 
     await expect(storage.readRecentDraftId()).resolves.toBe("second");
+  });
+
+  it("recovers the previous recent Draft after replacement removes the destination and fails", async () => {
+    const storage = createExpoDraftRuntimeStorage();
+    await storage.writeRecentDraftId(draftId("first"));
+    mockFailMoveAfterDestinationRemovalTo = "memory://documents/plogkit/recent-draft.json";
+
+    await expect(storage.writeRecentDraftId(draftId("second"))).rejects.toThrow(
+      "move failed after destination removal",
+    );
+    mockFailMoveAfterDestinationRemovalTo = null;
+
+    await expect(createExpoDraftRuntimeStorage().readRecentDraftId()).resolves.toBe("first");
   });
 });

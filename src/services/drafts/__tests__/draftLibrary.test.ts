@@ -13,8 +13,13 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   readonly files = new Map<string, string | Uint8Array>();
   readonly directories = new Set<string>();
   failMoveTo: string | null = null;
+  failMoveAfterDestinationRemovalTo: string | null = null;
+  failMoveAfterCopyTo: string | null = null;
+  failMoveDirectoryAfterPartialTo: string | null = null;
   failEnsureDirectory: string | null = null;
   failFileExists: string | null = null;
+  failReadText: string | null = null;
+  failListDirectories: string | null = null;
 
   async fileExists(uri: string): Promise<boolean> {
     if (this.failFileExists === uri) throw new Error("wrong filesystem node");
@@ -31,6 +36,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   }
 
   async readText(uri: string): Promise<string> {
+    if (this.failReadText === uri) throw new Error("text read temporarily unavailable");
     const value = this.files.get(uri);
     if (typeof value !== "string") throw new Error(`missing text ${uri}`);
     return value;
@@ -50,6 +56,15 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
     if (this.failMoveTo === destinationUri) throw new Error("publication failed");
     const value = this.files.get(sourceUri);
     if (value === undefined) throw new Error(`missing ${sourceUri}`);
+    if (this.failMoveAfterDestinationRemovalTo === destinationUri) {
+      this.files.delete(destinationUri);
+      throw new Error("move failed after destination removal");
+    }
+    if (this.files.has(destinationUri)) throw new Error("destination already exists");
+    if (this.failMoveAfterCopyTo === destinationUri) {
+      this.files.set(destinationUri, value);
+      throw new Error("move copied destination but could not delete source");
+    }
     this.files.delete(sourceUri);
     this.files.set(destinationUri, value);
   }
@@ -57,6 +72,15 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   async moveDirectory(sourceUri: string, destinationUri: string): Promise<void> {
     if (this.failMoveTo === destinationUri) throw new Error("publication failed");
     if (!this.directories.has(sourceUri)) throw new Error(`missing ${sourceUri}`);
+    if (this.failMoveDirectoryAfterPartialTo === destinationUri) {
+      this.directories.add(destinationUri);
+      const partial = [...this.files.entries()].find(([uri]) => uri.startsWith(`${sourceUri}/`));
+      if (partial !== undefined) {
+        const [uri, value] = partial;
+        this.files.set(`${destinationUri}${uri.slice(sourceUri.length)}`, value);
+      }
+      throw new Error("directory move failed after partial copy");
+    }
     this.directories.delete(sourceUri);
     this.directories.add(destinationUri);
     for (const directory of [...this.directories]) {
@@ -88,6 +112,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   }
 
   async listDirectories(uri: string): Promise<readonly string[]> {
+    if (this.failListDirectories === uri) throw new Error("directory enumeration unavailable");
     const prefix = `${uri.replace(/\/$/, "")}/`;
     const children = new Set<string>();
     for (const path of this.directories) {
@@ -96,6 +121,15 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
       if (child !== undefined && child.length > 0) children.add(`${prefix}${child}`);
     }
     return [...children];
+  }
+
+  async listFiles(uri: string): Promise<readonly string[]> {
+    const prefix = `${uri.replace(/\/$/, "")}/`;
+    return [...this.files.keys()].filter((path) => {
+      if (!path.startsWith(prefix)) return false;
+      const relative = path.slice(prefix.length);
+      return relative.length > 0 && !relative.includes("/");
+    });
   }
 }
 
@@ -256,6 +290,22 @@ describe("Draft Library", () => {
     });
   });
 
+  it("removes a partially copied aggregate when directory publication fails", async () => {
+    const { files, library } = setup();
+    files.failMoveDirectoryAfterPartialTo = firstDraftUri;
+
+    await expect(createDraft(library, [candidate("one")])).resolves.toMatchObject({
+      status: "create-failed",
+      message: "directory move failed after partial copy",
+    });
+    files.failMoveDirectoryAfterPartialTo = null;
+
+    await expect(library.read(draftId("draft:1"))).resolves.toEqual({
+      status: "recovery-failed",
+      reason: "draft-not-found",
+    });
+  });
+
   it("returns typed failures when create or ingest staging cannot be initialized", async () => {
     const first = setup();
     first.files.failEnsureDirectory =
@@ -294,6 +344,141 @@ describe("Draft Library", () => {
       status: "recovery-failed",
       reason: "draft-not-found",
     });
+  });
+
+  it("does not let staging enumeration failure mask a valid Draft read or save", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    files.failListDirectories = "memory://library/staging";
+    const restarted = createLibrary();
+
+    await expect(restarted.read(created.draftId)).resolves.toMatchObject({ status: "ready" });
+    await expect(restarted.save(created.draftId, created.document)).resolves.toMatchObject({
+      status: "saved",
+    });
+  });
+
+  it("recovers the previous document after replacement removes the destination and fails", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const documentUri = `${firstDraftUri}/document.json`;
+    files.failMoveAfterDestinationRemovalTo = documentUri;
+    const changed = updateDocument(created.document, {
+      canvas: { ...created.document.canvas, backgroundColor: "#123456" },
+    });
+
+    await expect(library.save(created.draftId, changed)).resolves.toMatchObject({
+      status: "save-failed",
+      reason: "storage-failed",
+    });
+    files.failMoveAfterDestinationRemovalTo = null;
+
+    await expect(createLibrary().read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      document: created.document,
+    });
+  });
+
+  it("does not roll back a valid current document when validation I/O is transient", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const changed = updateDocument(created.document, {
+      canvas: { ...created.document.canvas, backgroundColor: "#abcdef" },
+    });
+    await library.save(created.draftId, changed);
+    const documentUri = `${firstDraftUri}/document.json`;
+    files.files.set(`${documentUri}.backup`, JSON.stringify(created.document));
+    files.failReadText = documentUri;
+
+    await expect(createLibrary().read(created.draftId)).resolves.toEqual({
+      status: "recovery-failed",
+      reason: "document-corrupt",
+    });
+    files.failReadText = null;
+
+    await expect(createLibrary().read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      document: changed,
+    });
+  });
+
+  it("recovers the previous catalog after ingest replacement removes the destination and fails", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    files.failMoveAfterDestinationRemovalTo = `${firstDraftUri}/catalog.json`;
+
+    await expect(library.ingest(created.draftId, [candidate("two")])).resolves.toMatchObject({
+      status: "ingested",
+      imported: [],
+      errors: [{ message: "move failed after destination removal" }],
+    });
+    files.failMoveAfterDestinationRemovalTo = null;
+
+    await expect(createLibrary().read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      assets: { entries: created.assets.entries },
+    });
+  });
+
+  it("keeps published assets when catalog replacement copied the new current before failing", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    files.failMoveAfterCopyTo = `${firstDraftUri}/catalog.json`;
+
+    const result = await library.ingest(created.draftId, [candidate("two")]);
+
+    expect(result).toMatchObject({
+      status: "ingested",
+      imported: [{ image: { id: "provider:item/../2" } }],
+      errors: [],
+    });
+    files.failMoveAfterCopyTo = null;
+    await expect(createLibrary().read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      assets: { entries: ["provider:item/../1", "provider:item/../2"] },
+    });
+  });
+
+  it("serializes reads and inactive maintenance behind an in-flight save for the same Draft", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const changed = updateDocument(created.document, {
+      canvas: { ...created.document.canvas, backgroundColor: "#654321" },
+    });
+    const originalWrite = files.writeText.bind(files);
+    let enteredWrite: (() => void) | undefined;
+    let releaseWrite: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enteredWrite = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let shouldPause = true;
+    files.writeText = async (uri, content) => {
+      await originalWrite(uri, content);
+      if (uri === `${firstDraftUri}/document.json.tmp` && shouldPause) {
+        shouldPause = false;
+        enteredWrite?.();
+        await gate;
+      }
+    };
+
+    const saving = library.save(created.draftId, changed);
+    await entered;
+    const reading = library.read(created.draftId);
+    const maintaining = library.maintainInactive(created.draftId);
+    releaseWrite?.();
+
+    await expect(saving).resolves.toMatchObject({ status: "saved" });
+    await expect(reading).resolves.toMatchObject({ status: "ready", document: changed });
+    await expect(maintaining).resolves.toBeUndefined();
   });
 
   it("reports item staging failure per candidate and continues the ingest batch", async () => {
@@ -590,8 +775,8 @@ describe("Draft Library", () => {
     ).toMatchObject({ usage: "original" });
   });
 
-  it("rolls back candidate files and catalog temp when ingest publication fails", async () => {
-    const { files, library } = setup();
+  it("rolls back candidate files and recovers the catalog when ingest publication fails", async () => {
+    const { files, library, createLibrary } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
     files.failMoveTo = `${firstDraftUri}/catalog.json`;
@@ -604,12 +789,16 @@ describe("Draft Library", () => {
       errors: [{ index: 0, message: "publication failed" }],
       assets: { entries: ["provider:item/../1"] },
     });
-    expect(files.files.has(`${firstDraftUri}/catalog.json.tmp`)).toBe(false);
     expect(
       [...files.files.keys()].some(
         (uri) => uri.startsWith(`${firstDraftUri}/`) && uri.includes("asset-2"),
       ),
     ).toBe(false);
+    files.failMoveTo = null;
+    await expect(createLibrary().read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      assets: { entries: created.assets.entries },
+    });
   });
 
   it("does not alter the immutable original while rebuilding a missing or corrupt preview", async () => {
@@ -640,7 +829,28 @@ describe("Draft Library", () => {
     expect(files.files.get(original.uri)).toBe(originalBytes);
   });
 
-  it("compacts on a same-process safe read from the latest persisted document", async () => {
+  it("recovers a rebuilt preview after replacement removes the destination and fails", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const assetId = created.document.sourceImages[0]!.id;
+    const preview = created.assets.resolve(assetId, "preview");
+    if (preview === null) throw new Error("expected preview descriptor");
+    files.files.set(preview.uri, new Uint8Array([0]));
+    files.failMoveAfterDestinationRemovalTo = preview.uri;
+
+    await expect(library.readPreview(created.draftId, assetId)).resolves.toMatchObject({
+      status: "preview-failed",
+    });
+    files.failMoveAfterDestinationRemovalTo = null;
+
+    await expect(createLibrary().readPreview(created.draftId, assetId)).resolves.toMatchObject({
+      status: "ready",
+      descriptor: { uri: preview.uri },
+    });
+  });
+
+  it("keeps ordinary reads non-destructive and compacts only during explicit inactive maintenance", async () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
@@ -656,8 +866,14 @@ describe("Draft Library", () => {
     });
     await expect(library.save(created.draftId, latest)).resolves.toMatchObject({ status: "saved" });
 
+    const inspected = await library.read(created.draftId);
+    expect(inspected).toMatchObject({ status: "ready", document: latest });
+    if (inspected.status !== "ready") throw new Error("expected inspected Draft");
+    expect(inspected.assets.entries).toContain(removed.id);
+    expect(files.files.has(removedOriginal.uri)).toBe(true);
+
+    await library.maintainInactive(created.draftId);
     const reopened = await library.read(created.draftId);
-    expect(reopened).toMatchObject({ status: "ready", document: latest });
     if (reopened.status !== "ready") throw new Error("expected reopened Draft");
     expect(reopened.assets.entries).toEqual(created.assets.entries);
     expect(files.files.has(removedOriginal.uri)).toBe(false);
@@ -683,13 +899,37 @@ describe("Draft Library", () => {
       await originalRemove(uri);
     };
 
-    const reopened = await createLibrary().read(created.draftId);
+    const restarted = createLibrary();
+    await restarted.maintainInactive(created.draftId);
+    const reopened = await restarted.read(created.draftId);
 
     expect(reopened).toMatchObject({ status: "ready" });
     if (reopened.status !== "ready") throw new Error("expected reopened Draft");
     expect(reopened.assets.entries).not.toContain(removed.id);
     expect(files.files.has(removedOriginal.uri)).toBe(true);
     expect(files.files.has("memory://library/staging/crash-operation/partial")).toBe(false);
+
+    files.removeFile = originalRemove;
+    await restarted.maintainInactive(created.draftId);
+    expect(files.files.has(removedOriginal.uri)).toBe(false);
+  });
+
+  it("sweeps direct-child ingest and preview orphans from a valid inactive Draft", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const orphanUris = [
+      `${firstDraftUri}/assets/orphan.jpg`,
+      `${firstDraftUri}/previews/orphan.jpg.rebuild.tmp`,
+      `${firstDraftUri}/metadata/orphan.json`,
+    ];
+    for (const uri of orphanUris) files.files.set(uri, "orphan");
+    files.files.set(`${firstDraftUri}/assets/nested/leave-alone.jpg`, "outside direct children");
+
+    await library.maintainInactive(created.draftId);
+
+    for (const uri of orphanUris) expect(files.files.has(uri)).toBe(false);
+    expect(files.files.has(`${firstDraftUri}/assets/nested/leave-alone.jpg`)).toBe(true);
   });
 
   it("does not compact a Draft that fails recovery validation", async () => {
@@ -707,13 +947,18 @@ describe("Draft Library", () => {
     });
     await library.save(created.draftId, latest);
     await files.removeFile(liveOriginal.uri);
+    const orphanUri = `${firstDraftUri}/previews/orphan.tmp`;
+    files.files.set(orphanUri, "orphan");
 
-    await expect(createLibrary().read(created.draftId)).resolves.toEqual({
+    const restarted = createLibrary();
+    await restarted.maintainInactive(created.draftId);
+    await expect(restarted.read(created.draftId)).resolves.toEqual({
       status: "recovery-failed",
       reason: "original-missing",
     });
     expect(await files.readText(`${firstDraftUri}/catalog.json`)).toContain(stale.id);
     expect(files.files.has(staleOriginal.uri)).toBe(true);
+    expect(files.files.has(orphanUri)).toBe(true);
   });
 
   it("keeps a valid Draft readable when compaction commit or crash cleanup cannot finish", async () => {
@@ -737,7 +982,10 @@ describe("Draft Library", () => {
     };
     first.files.failMoveTo = `${firstDraftUri}/catalog.json`;
 
-    const reopened = await first.createLibrary().read(created.draftId);
+    const restarted = first.createLibrary();
+    await restarted.maintainInactive(created.draftId);
+    first.files.failMoveTo = null;
+    const reopened = await restarted.read(created.draftId);
 
     expect(reopened).toMatchObject({ status: "ready", document: latest });
     if (reopened.status !== "ready") throw new Error("expected valid Draft");

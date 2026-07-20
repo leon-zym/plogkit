@@ -50,7 +50,9 @@ class MemoryDraftLibrary implements DraftLibrary {
     { document: PlogDocument; assets: AssetCatalogSnapshot }
   >();
   readonly readCalls: DraftId[] = [];
+  readonly maintenanceCalls: DraftId[] = [];
   readonly throwingReads = new Set<DraftId>();
+  readonly throwingMaintenance = new Set<DraftId>();
   readonly saveCalls: { id: DraftId; document: PlogDocument }[] = [];
   readonly readGates = new Map<DraftId, Promise<void>>();
   saveResult: SaveDraftResult | null = null;
@@ -74,6 +76,11 @@ class MemoryDraftLibrary implements DraftLibrary {
     return aggregate === undefined
       ? { status: "recovery-failed", reason: "draft-not-found" }
       : { status: "ready", draftId: id, ...aggregate };
+  }
+
+  async maintainInactive(id: DraftId): Promise<void> {
+    this.maintenanceCalls.push(id);
+    if (this.throwingMaintenance.has(id)) throw new Error("maintenance unavailable");
   }
 
   async save(id: DraftId, document: PlogDocument): Promise<SaveDraftResult> {
@@ -165,13 +172,14 @@ describe("current editing session", () => {
     if (first.status !== "opened" || switched.status !== "opened") return;
     expect(switched.handle).not.toBe(first.handle);
     expect(switched.handle.draftId).toBe(secondDraftId);
-    expect(library.readCalls).toEqual([firstDraftId, secondDraftId, firstDraftId]);
+    expect(library.readCalls).toEqual([firstDraftId, secondDraftId]);
+    expect(library.maintenanceCalls).toEqual([firstDraftId, secondDraftId, firstDraftId]);
   });
 
   it("does not turn best-effort old-Draft compaction failure into a failed switch", async () => {
     const { library, session } = setup();
     await session.open(firstDraftId);
-    library.throwingReads.add(firstDraftId);
+    library.throwingMaintenance.add(firstDraftId);
 
     const switched = await session.open(secondDraftId);
 

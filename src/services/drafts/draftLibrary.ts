@@ -8,6 +8,11 @@ import {
 } from "@/core/document";
 import type { MetadataPolicy } from "@/core/exportPolicy";
 import { extractImageMetadata, type ImageMetadataSidecar } from "@/services/image-import/metadata";
+import {
+  commitPreparedFile,
+  recoverFile,
+  type RecoverableFileState,
+} from "@/services/persistence/recoverableFile";
 
 export type ImportCandidateKind = "image" | "livePhoto" | "unsupported";
 
@@ -41,6 +46,7 @@ export interface DraftLibraryFileAdapter {
   readonly removeFile: (uri: string) => Promise<void>;
   readonly removeDirectory: (uri: string) => Promise<void>;
   readonly listDirectories: (uri: string) => Promise<readonly string[]>;
+  readonly listFiles: (uri: string) => Promise<readonly string[]>;
 }
 
 export interface DraftLibraryPreviewAdapter {
@@ -151,6 +157,8 @@ export interface DraftLibrary {
     candidates: readonly ImportCandidate[],
   ) => Promise<IngestAssetsResult>;
   readonly readPreview: (id: DraftId, assetId: ImportedAssetId) => Promise<ReadPreviewResult>;
+  /** Best-effort compaction and orphan cleanup. Caller must guarantee the Draft is inactive. */
+  readonly maintainInactive: (id: DraftId) => Promise<void>;
 }
 
 interface CatalogEntry {
@@ -215,6 +223,17 @@ function errorMessage(error: unknown): string {
 
 function child(parent: string, name: string): string {
   return `${parent.replace(/\/$/, "")}/${name}`;
+}
+
+function normalizedDirectoryUri(uri: string): string {
+  return uri.replace(/\/$/, "");
+}
+
+function isDirectChild(parent: string, candidate: string): boolean {
+  const prefix = `${parent.replace(/\/$/, "")}/`;
+  if (!candidate.startsWith(prefix)) return false;
+  const relative = candidate.slice(prefix.length);
+  return relative.length > 0 && !relative.includes("/");
 }
 
 function storageDraftName(id: DraftId): string {
@@ -317,6 +336,28 @@ function catalogJson(entries: readonly CatalogEntry[]): string {
   return JSON.stringify({ catalogSchemaVersion: 1, entries });
 }
 
+function textFileState(
+  files: DraftLibraryFileAdapter,
+  currentUri: string,
+  parse: (text: string) => unknown,
+): RecoverableFileState {
+  return {
+    currentUri,
+    backupUri: `${currentUri}.backup`,
+    temporaryUri: `${currentUri}.tmp`,
+    isValid: async (uri) => {
+      if (!(await files.fileExists(uri))) return false;
+      const text = await files.readText(uri);
+      try {
+        parse(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
 function descriptorUri(draftUri: string, entry: CatalogEntry, usage: AssetUsage): string | null {
   if (usage === "original") {
     return child(child(draftUri, "assets"), `${entry.storageKey}.${entry.originalExtension}`);
@@ -365,6 +406,22 @@ export function createDraftLibrary({
   const draftsUri = child(rootUri, "drafts");
   const stagingUri = child(rootUri, "staging");
   let initializePromise: Promise<void> | null = null;
+  const activeStagingOperations = new Set<string>();
+  const draftOperationTails = new Map<DraftId, Promise<void>>();
+
+  const serializeDraftOperation = <T>(id: DraftId, operation: () => Promise<T>): Promise<T> => {
+    const previous = draftOperationTails.get(id) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    draftOperationTails.set(id, tail);
+    void tail.finally(() => {
+      if (draftOperationTails.get(id) === tail) draftOperationTails.delete(id);
+    });
+    return result;
+  };
 
   const safeRemoveFile = async (uri: string): Promise<void> => {
     try {
@@ -396,15 +453,34 @@ export function createDraftLibrary({
         await files.ensureDirectory(rootUri);
         await files.ensureDirectory(draftsUri);
         await files.ensureDirectory(stagingUri);
-        for (const residual of await files.listDirectories(stagingUri)) {
-          await safeRemoveDirectory(residual);
-        }
       } catch (error: unknown) {
         initializePromise = null;
         throw error;
       }
     })();
     return initializePromise;
+  };
+
+  const maintainStaging = async (): Promise<void> => {
+    let residuals: readonly string[];
+    try {
+      residuals = await files.listDirectories(stagingUri);
+    } catch {
+      return;
+    }
+    for (const residual of residuals) {
+      if (!activeStagingOperations.has(normalizedDirectoryUri(residual))) {
+        await safeRemoveDirectory(residual);
+      }
+    }
+  };
+
+  const finishStagingOperation = async (operationUri: string): Promise<void> => {
+    try {
+      await safeRemoveDirectory(operationUri);
+    } finally {
+      activeStagingOperations.delete(normalizedDirectoryUri(operationUri));
+    }
   };
 
   const draftUri = (id: DraftId): string => child(draftsUri, storageDraftName(id));
@@ -472,6 +548,7 @@ export function createDraftLibrary({
       return { status: "invalid", reason: "draft-not-found" };
     }
     try {
+      await recoverFile(files, textFileState(files, documentUri, parseDocumentJson));
       if (!(await files.fileExists(documentUri))) {
         return { status: "invalid", reason: "document-corrupt" };
       }
@@ -479,6 +556,7 @@ export function createDraftLibrary({
       return { status: "invalid", reason: "document-corrupt" };
     }
     try {
+      await recoverFile(files, textFileState(files, catalogUri, parseCatalog));
       if (!(await files.fileExists(catalogUri))) {
         return { status: "invalid", reason: "catalog-corrupt" };
       }
@@ -525,6 +603,7 @@ export function createDraftLibrary({
     } catch {
       return { status: "recovery-failed", reason: "storage-unavailable" };
     }
+    await maintainStaging();
     const validated = await validateAggregate(id);
     if (validated.status === "invalid") {
       return { status: "recovery-failed", reason: validated.reason };
@@ -537,40 +616,69 @@ export function createDraftLibrary({
     };
   };
 
-  const compactBeforeRead = async (id: DraftId): Promise<void> => {
+  const maintainInactiveUnserialized = async (id: DraftId): Promise<void> => {
+    try {
+      await initialize();
+    } catch {
+      return;
+    }
+    await maintainStaging();
     const validated = await validateAggregate(id);
     if (validated.status === "invalid") return;
     const { uri, document, catalog } = validated;
     const catalogUri = child(uri, "catalog.json");
+    const catalogState = textFileState(files, catalogUri, parseCatalog);
     const live = new Set(document.sourceImages.map(({ id: assetId }) => assetId));
     const stale = catalog.entries.filter(({ id: assetId }) => !live.has(assetId));
-    if (stale.length === 0) return;
     const retained = catalog.entries.filter(({ id: assetId }) => live.has(assetId));
-    const temporaryCatalogUri = child(uri, "catalog.json.compact.tmp");
-    try {
-      await files.writeText(temporaryCatalogUri, catalogJson(retained));
-      await files.moveFile(temporaryCatalogUri, catalogUri);
-    } catch {
-      await safeRemoveFile(temporaryCatalogUri);
-      return;
+    if (stale.length > 0) {
+      try {
+        const nextCatalogJson = catalogJson(retained);
+        await recoverFile(files, catalogState);
+        await files.writeText(catalogState.temporaryUri, nextCatalogJson);
+        await commitPreparedFile(
+          files,
+          catalogState,
+          async (currentUri) => (await files.readText(currentUri)) === nextCatalogJson,
+        );
+      } catch {
+        return;
+      }
     }
-    for (const entry of stale) {
-      for (const usage of ["original", "preview", "metadata"] as const) {
-        const orphanUri = descriptorUri(uri, entry, usage);
-        if (orphanUri !== null) await safeRemoveFile(orphanUri);
+
+    const retainedCatalog = parseCatalog(catalogJson(retained));
+    for (const [directoryName, usage] of [
+      ["assets", "original"],
+      ["previews", "preview"],
+      ["metadata", "metadata"],
+    ] as const) {
+      const directoryUri = child(uri, directoryName);
+      const reachable = new Set(
+        retainedCatalog.entries
+          .map((entry) => descriptorUri(uri, entry, usage))
+          .filter((candidate): candidate is string => candidate !== null),
+      );
+      let candidates: readonly string[];
+      try {
+        candidates = await files.listFiles(directoryUri);
+      } catch {
+        continue;
+      }
+      for (const candidate of candidates) {
+        if (isDirectChild(directoryUri, candidate) && !reachable.has(candidate)) {
+          await safeRemoveFile(candidate);
+        }
       }
     }
   };
 
-  const read = async (id: DraftId): Promise<ReadDraftResult> => {
+  const readUnserialized = async (id: DraftId): Promise<ReadDraftResult> => {
     try {
       await initialize();
     } catch {
       return { status: "recovery-failed", reason: "storage-unavailable" };
     }
-    await compactBeforeRead(id);
-    const result = await load(id);
-    return result;
+    return load(id);
   };
 
   const create = async (
@@ -583,7 +691,9 @@ export function createDraftLibrary({
     } catch (error: unknown) {
       return { status: "create-failed", message: errorMessage(error), errors: [] };
     }
+    await maintainStaging();
     const operationUri = child(stagingUri, assertStorageKey(createOperationId()));
+    activeStagingOperations.add(normalizedDirectoryUri(operationUri));
     const itemsUri = child(operationUri, "items");
     const aggregateUri = child(operationUri, "aggregate");
     try {
@@ -594,7 +704,7 @@ export function createDraftLibrary({
       await files.ensureDirectory(child(aggregateUri, "previews"));
       await files.ensureDirectory(child(aggregateUri, "metadata"));
     } catch (error: unknown) {
-      await safeRemoveDirectory(operationUri);
+      await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors: [] };
     }
     const imported: ImportedStagedAsset[] = [];
@@ -654,7 +764,7 @@ export function createDraftLibrary({
       });
     }
     if (imported.length === 0) {
-      await safeRemoveDirectory(operationUri);
+      await finishStagingOperation(operationUri);
       return { status: "not-created", errors };
     }
     const id = createDraftId();
@@ -663,13 +773,15 @@ export function createDraftLibrary({
       options,
     );
     const catalog = parseCatalog(catalogJson(imported.map(({ entry }) => entry)));
+    const publishedUri = draftUri(id);
+    let publicationStarted = false;
     try {
       await files.writeText(child(aggregateUri, "catalog.json"), catalogJson(catalog.entries));
       await files.writeText(child(aggregateUri, "document.json"), JSON.stringify(document));
-      const publishedUri = draftUri(id);
       if (await files.directoryExists(publishedUri)) throw new Error("Draft identity already exists");
+      publicationStarted = true;
       await files.moveDirectory(aggregateUri, publishedUri);
-      await safeRemoveDirectory(operationUri);
+      await finishStagingOperation(operationUri);
       return {
         status: "created",
         draftId: id,
@@ -678,17 +790,22 @@ export function createDraftLibrary({
         errors,
       };
     } catch (error: unknown) {
-      await safeRemoveDirectory(operationUri);
+      if (publicationStarted) await safeRemoveDirectory(publishedUri);
+      await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors };
     }
   };
 
-  const save = async (id: DraftId, document: PlogDocument): Promise<SaveDraftResult> => {
+  const saveUnserialized = async (
+    id: DraftId,
+    document: PlogDocument,
+  ): Promise<SaveDraftResult> => {
     try {
       await initialize();
     } catch (error: unknown) {
       return { status: "save-failed", reason: "storage-failed", message: errorMessage(error) };
     }
+    await maintainStaging();
     const validated = await validateAggregate(id);
     if (validated.status === "invalid") {
       return { status: "save-failed", reason: validated.reason };
@@ -714,18 +831,23 @@ export function createDraftLibrary({
       }
     }
     const uri = draftUri(id);
-    const temporaryUri = child(uri, "document.json.tmp");
+    const state = textFileState(files, child(uri, "document.json"), parseDocumentJson);
     try {
-      await files.writeText(temporaryUri, JSON.stringify(prospective));
-      await files.moveFile(temporaryUri, child(uri, "document.json"));
+      const prospectiveJson = JSON.stringify(prospective);
+      await recoverFile(files, state);
+      await files.writeText(state.temporaryUri, prospectiveJson);
+      await commitPreparedFile(
+        files,
+        state,
+        async (currentUri) => (await files.readText(currentUri)) === prospectiveJson,
+      );
       return { status: "saved", document: prospective };
     } catch (error: unknown) {
-      await safeRemoveFile(temporaryUri);
       return { status: "save-failed", reason: "storage-failed", message: errorMessage(error) };
     }
   };
 
-  const ingest = async (
+  const ingestUnserialized = async (
     id: DraftId,
     candidates: readonly ImportCandidate[],
   ): Promise<IngestAssetsResult> => {
@@ -739,6 +861,7 @@ export function createDraftLibrary({
       };
     }
     const uri = draftUri(id);
+    const catalogState = textFileState(files, child(uri, "catalog.json"), parseCatalog);
     let catalog: Catalog;
     try {
       catalog = parseCatalog(await files.readText(child(uri, "catalog.json")));
@@ -755,10 +878,11 @@ export function createDraftLibrary({
     const usedIds = new Set(catalog.entries.map(({ id: assetId }) => assetId));
     const usedStorageKeys = new Set(catalog.entries.map(({ storageKey }) => storageKey));
     const operationUri = child(stagingUri, assertStorageKey(createOperationId()));
+    activeStagingOperations.add(normalizedDirectoryUri(operationUri));
     try {
       await files.ensureDirectory(operationUri);
     } catch (error: unknown) {
-      await safeRemoveDirectory(operationUri);
+      await finishStagingOperation(operationUri);
       return {
         status: "ingest-failed",
         imported: [],
@@ -798,7 +922,6 @@ export function createDraftLibrary({
         }
 
         const publishedUris: string[] = [];
-        const temporaryCatalogUri = child(uri, "catalog.json.tmp");
         try {
           await files.moveFile(stagedOriginal, publishedOriginal);
           publishedUris.push(publishedOriginal);
@@ -809,14 +932,19 @@ export function createDraftLibrary({
             publishedUris.push(publishedMetadata);
           }
           const nextCatalog = parseCatalog(catalogJson([...catalog.entries, entry]));
-          await files.writeText(temporaryCatalogUri, catalogJson(nextCatalog.entries));
-          await files.moveFile(temporaryCatalogUri, child(uri, "catalog.json"));
+          const nextCatalogJson = catalogJson(nextCatalog.entries);
+          await recoverFile(files, catalogState);
+          await files.writeText(catalogState.temporaryUri, nextCatalogJson);
+          await commitPreparedFile(
+            files,
+            catalogState,
+            async (currentUri) => (await files.readText(currentUri)) === nextCatalogJson,
+          );
           catalog = nextCatalog;
           imported.push({ image: staged.image, sourceKind: entry.sourceKind });
           usedIds.add(entry.id);
           usedStorageKeys.add(entry.storageKey);
         } catch (error: unknown) {
-          await safeRemoveFile(temporaryCatalogUri);
           for (const publishedUri of publishedUris) await safeRemoveFile(publishedUri);
           throw error;
         }
@@ -833,7 +961,7 @@ export function createDraftLibrary({
         message: "image limit is 9",
       });
     }
-    await safeRemoveDirectory(operationUri);
+    await finishStagingOperation(operationUri);
     return {
       status: "ingested",
       imported,
@@ -842,7 +970,7 @@ export function createDraftLibrary({
     };
   };
 
-  const readPreview = async (
+  const readPreviewUnserialized = async (
     id: DraftId,
     assetId: ImportedAssetId,
   ): Promise<ReadPreviewResult> => {
@@ -873,24 +1001,29 @@ export function createDraftLibrary({
     if (previewUri === null) {
       return { status: "preview-failed", reason: "preview-unavailable" };
     }
+    const previewState: RecoverableFileState = {
+      currentUri: previewUri,
+      backupUri: `${previewUri}.backup`,
+      temporaryUri: `${previewUri}.tmp`,
+      isValid: previews.isValid,
+    };
     try {
+      await recoverFile(files, previewState);
       if (!(await previews.isValid(previewUri))) {
-        const temporaryUri = `${previewUri}.${assertStorageKey(createOperationId())}.tmp`;
         try {
-          const size = await previews.generate(originalUri, temporaryUri, 2048);
+          const size = await previews.generate(originalUri, previewState.temporaryUri, 2048);
           if (
             !Number.isInteger(size.width) ||
             !Number.isInteger(size.height) ||
             size.width <= 0 ||
             size.height <= 0 ||
             Math.max(size.width, size.height) > 2048 ||
-            !(await previews.isValid(temporaryUri))
+            !(await previews.isValid(previewState.temporaryUri))
           ) {
             throw new Error("rebuilt preview is invalid");
           }
-          await files.moveFile(temporaryUri, previewUri);
+          await commitPreparedFile(files, previewState, previews.isValid);
         } catch (error: unknown) {
-          await safeRemoveFile(temporaryUri);
           throw error;
         }
       }
@@ -909,5 +1042,22 @@ export function createDraftLibrary({
     }
   };
 
-  return { create, read, save, ingest, readPreview };
+  const read = (id: DraftId): Promise<ReadDraftResult> =>
+    serializeDraftOperation(id, () => readUnserialized(id));
+  const save = (id: DraftId, document: PlogDocument): Promise<SaveDraftResult> =>
+    serializeDraftOperation(id, () => saveUnserialized(id, document));
+  const ingest = (
+    id: DraftId,
+    candidates: readonly ImportCandidate[],
+  ): Promise<IngestAssetsResult> =>
+    serializeDraftOperation(id, () => ingestUnserialized(id, candidates));
+  const readPreview = (
+    id: DraftId,
+    assetId: ImportedAssetId,
+  ): Promise<ReadPreviewResult> =>
+    serializeDraftOperation(id, () => readPreviewUnserialized(id, assetId));
+  const maintainInactive = (id: DraftId): Promise<void> =>
+    serializeDraftOperation(id, () => maintainInactiveUnserialized(id));
+
+  return { create, read, save, ingest, readPreview, maintainInactive };
 }
