@@ -9,6 +9,7 @@ import {
   type DraftLibraryPreviewAdapter,
 } from "./draftLibrary";
 import { createSkiaPreviewGenerator } from "../image-import/skiaPreviewGenerator";
+import { commitPreparedFile, recoverFile } from "../persistence/recoverableFile";
 
 function createExpoDraftFiles(): DraftLibraryFileAdapter {
   return {
@@ -27,7 +28,7 @@ function createExpoDraftFiles(): DraftLibraryFileAdapter {
       await new File(sourceUri).copy(new File(destinationUri), { overwrite: false });
     },
     moveFile: async (sourceUri, destinationUri) => {
-      await new File(sourceUri).move(new File(destinationUri), { overwrite: true });
+      await new File(sourceUri).move(new File(destinationUri), { overwrite: false });
     },
     moveDirectory: async (sourceUri, destinationUri) => {
       await new Directory(sourceUri).move(new Directory(destinationUri), { overwrite: false });
@@ -49,6 +50,15 @@ function createExpoDraftFiles(): DraftLibraryFileAdapter {
             .map((entry) => entry.uri)
         : [];
     },
+    listFiles: async (uri) => {
+      const directory = new Directory(uri);
+      return directory.exists
+        ? directory
+            .list()
+            .filter((entry): entry is File => entry instanceof File)
+            .map((entry) => entry.uri)
+        : [];
+    },
   };
 }
 
@@ -62,10 +72,30 @@ export function createExpoDraftRuntimeStorage(): ExpoDraftRuntimeStorage {
   const root = new Directory(Paths.document, "plogkit");
   const files = createExpoDraftFiles();
   const previews: DraftLibraryPreviewAdapter = createSkiaPreviewGenerator();
+  const recent = new File(root, "recent-draft.json");
+  const recentState = {
+    currentUri: recent.uri,
+    backupUri: `${recent.uri}.backup`,
+    temporaryUri: `${recent.uri}.tmp`,
+    isValid: async (uri: string) => {
+      const file = new File(uri);
+      if (!file.exists) return false;
+      const text = await file.text();
+      let input: unknown;
+      try {
+        input = JSON.parse(text);
+      } catch {
+        return false;
+      }
+      if (typeof input !== "object" || input === null || !("draftId" in input)) return false;
+      const value = (input as { readonly draftId?: unknown }).draftId;
+      return typeof value === "string" && value.length > 0;
+    },
+  };
   return {
     library: createDraftLibrary({ files, previews, rootUri: root.uri }),
     readRecentDraftId: async () => {
-      const recent = new File(root, "recent-draft.json");
+      await recoverFile(files, recentState);
       if (!recent.exists) return null;
       const input: unknown = JSON.parse(await recent.text());
       if (typeof input !== "object" || input === null || !("draftId" in input)) {
@@ -79,10 +109,16 @@ export function createExpoDraftRuntimeStorage(): ExpoDraftRuntimeStorage {
     },
     writeRecentDraftId: async (id) => {
       root.create({ idempotent: true, intermediates: true });
-      const recentTemporary = new File(root, "recent-draft.json.tmp");
+      await recoverFile(files, recentState);
+      const recentTemporary = new File(recentState.temporaryUri);
+      const recentJson = JSON.stringify({ draftId: id });
       recentTemporary.create({ intermediates: true, overwrite: true });
-      recentTemporary.write(JSON.stringify({ draftId: id }));
-      await recentTemporary.move(new File(root, "recent-draft.json"), { overwrite: true });
+      recentTemporary.write(recentJson);
+      await commitPreparedFile(
+        files,
+        recentState,
+        async (currentUri) => (await new File(currentUri).text()) === recentJson,
+      );
     },
   };
 }

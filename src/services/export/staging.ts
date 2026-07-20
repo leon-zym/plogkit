@@ -35,6 +35,10 @@ function child(parent: string, name: string): string {
   return `${parent.replace(/\/$/, "")}/${name}`;
 }
 
+function normalizedDirectoryUri(uri: string): string {
+  return uri.replace(/\/$/, "");
+}
+
 function pathSafeIdentity(value: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
     throw new Error("export operation identity must be path-safe");
@@ -49,35 +53,52 @@ export function createExportStaging({
   createOperationId = nextOperationId,
 }: CreateExportStagingOptions): InitializableExportStaging {
   const root = rootUri.replace(/\/$/, "");
-  const initialization = (async (): Promise<ExportStagingError | null> => {
-    try {
-      await files.ensureDirectory(root);
-      const orphans = await files.listDirectories(root);
-      for (const orphan of orphans) {
-        try {
-          await files.removeDirectory(orphan);
-        } catch {
-          // A later process start retries cleanup without blocking a new export.
-        }
+  let initializationPromise: Promise<void> | null = null;
+  const activeOperations = new Set<string>();
+
+  const ensureRoot = (): Promise<void> => {
+    initializationPromise ??= (async () => {
+      try {
+        await files.ensureDirectory(root);
+      } catch (error: unknown) {
+        initializationPromise = null;
+        throw new ExportStagingError("export staging could not be initialized", { cause: error });
       }
-      return null;
-    } catch (error: unknown) {
-      return new ExportStagingError("export staging could not be initialized", { cause: error });
+    })();
+    return initializationPromise;
+  };
+
+  const sweepOrphans = async (): Promise<void> => {
+    let orphans: readonly string[];
+    try {
+      orphans = await files.listDirectories(root);
+    } catch {
+      return;
     }
-  })();
+    for (const orphan of orphans) {
+      if (activeOperations.has(normalizedDirectoryUri(orphan))) continue;
+      try {
+        await files.removeDirectory(orphan);
+      } catch {
+        // A later process start retries cleanup without blocking a new export.
+      }
+    }
+  };
 
   const initialize = async (): Promise<void> => {
-    const initializationError = await initialization;
-    if (initializationError !== null) throw initializationError;
+    await ensureRoot();
+    await sweepOrphans();
   };
 
   const createOperation = async (): Promise<ExportOperation> => {
     await initialize();
     const id = pathSafeIdentity(createOperationId());
     const directoryUri = child(root, id);
+    activeOperations.add(normalizedDirectoryUri(directoryUri));
     try {
       await files.createDirectory(directoryUri);
     } catch (error: unknown) {
+      activeOperations.delete(normalizedDirectoryUri(directoryUri));
       throw new ExportStagingError("export operation directory could not be created", {
         cause: error,
       });
@@ -108,8 +129,12 @@ export function createExportStaging({
 
     const cleanup = async (): Promise<void> => {
       if (cleaned) return;
-      await files.removeDirectory(directoryUri);
-      cleaned = true;
+      try {
+        await files.removeDirectory(directoryUri);
+        cleaned = true;
+      } finally {
+        activeOperations.delete(normalizedDirectoryUri(directoryUri));
+      }
     };
 
     return Object.freeze({ id, directoryUri, prepareStaticImage, cleanup });

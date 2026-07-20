@@ -42,6 +42,7 @@
 | [0022](0022-draft-aggregate-current-editing-session.md) | 以草稿 aggregate 深化持久化与当前编辑会话                      | 已接受   | —                                                                                                                                             |
 | [0023](0023-export-preset-catalog-and-pipeline.md)      | 深化导出预设 catalog 与导出管线                                | 已接受   | —                                                                                                                                             |
 | [0024](0024-text-block-layout-geometry.md)              | 以实际排版深化文本块布局与交互几何                             | 已接受   | —                                                                                                                                             |
+| [0025](0025-recoverable-draft-persistence-maintenance.md) | 草稿持久化采用可恢复替换与显式非活跃维护                     | 已接受   | —                                                                                                                                             |
 
 ## 决策台账
 
@@ -62,6 +63,6 @@
 | D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                        | 0016                   |
 | D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                         | 0016、0020             |
 | D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                        | 0003、0004、0021       |
-| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开                       | 0003、0006、0021、0022 |
+| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开；持久事实采用可恢复替换 | 0003、0006、0021、0022、0025 |
 | D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos              | 0007、0008、0011、0023 |
 | D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                            | 0003、0005、0011、0024 |

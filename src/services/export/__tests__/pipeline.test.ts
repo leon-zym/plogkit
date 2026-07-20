@@ -280,6 +280,92 @@ describe("ExportPipeline.run", () => {
     expect([...directories]).toEqual(["cache:///export-staging"]);
   });
 
+  it("retries required staging initialization after a transient failure", async () => {
+    const directories = new Set<string>();
+    let ensureAttempts = 0;
+    const staging = createExportStaging({
+      rootUri: "cache:///export-staging",
+      createOperationId: () => "recovered",
+      files: {
+        ensureDirectory: async (uri) => {
+          ensureAttempts += 1;
+          if (ensureAttempts === 1) throw new Error("cache temporarily unavailable");
+          directories.add(uri);
+        },
+        createDirectory: async (uri) => {
+          directories.add(uri);
+        },
+        listDirectories: async () => [],
+        writeBytes: async () => undefined,
+        removeDirectory: async (uri) => {
+          directories.delete(uri);
+        },
+      },
+    });
+
+    await expect(staging.initialize()).rejects.toThrow("export staging could not be initialized");
+    await expect(staging.initialize()).resolves.toBeUndefined();
+    const operation = await staging.createOperation();
+    expect(operation.directoryUri).toBe("cache:///export-staging/recovered");
+  });
+
+  it("does not let orphan enumeration failure block a new export operation", async () => {
+    const directories = new Set<string>();
+    const staging = createExportStaging({
+      rootUri: "cache:///export-staging",
+      createOperationId: () => "current",
+      files: {
+        ensureDirectory: async (uri) => {
+          directories.add(uri);
+        },
+        createDirectory: async (uri) => {
+          directories.add(uri);
+        },
+        listDirectories: async () => {
+          throw new Error("enumeration unavailable");
+        },
+        writeBytes: async () => undefined,
+        removeDirectory: async (uri) => {
+          directories.delete(uri);
+        },
+      },
+    });
+
+    const operation = await staging.createOperation();
+
+    expect(operation.directoryUri).toBe("cache:///export-staging/current");
+    expect(directories.has(operation.directoryUri)).toBe(true);
+  });
+
+  it("does not sweep an active operation when enumeration normalizes its directory URI", async () => {
+    const root = "cache:///export-staging";
+    const operationUri = `${root}/current`;
+    const directories = new Set<string>();
+    const staging = createExportStaging({
+      rootUri: root,
+      createOperationId: () => "current",
+      files: {
+        ensureDirectory: async (uri) => {
+          directories.add(uri);
+        },
+        createDirectory: async (uri) => {
+          directories.add(`${uri}/`);
+        },
+        listDirectories: async () =>
+          [...directories].filter((uri) => uri.replace(/\/$/, "") !== root),
+        writeBytes: async () => undefined,
+        removeDirectory: async (uri) => {
+          directories.delete(uri);
+        },
+      },
+    });
+    await staging.createOperation();
+
+    await staging.initialize();
+
+    expect(directories.has(`${operationUri}/`)).toBe(true);
+  });
+
   it.each([
     ["asset-unavailable", "assets"],
     ["render-failed", "render"],

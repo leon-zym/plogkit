@@ -1,7 +1,7 @@
 # F04 导出与压缩预设
 
 - 状态：已实现
-- 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)
+- 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
 - 实施跟踪：[Issue #12](https://github.com/leon-zym/plogkit/issues/12)、[Issue #16](https://github.com/leon-zym/plogkit/issues/16)
 
 ## 概述
@@ -117,6 +117,20 @@
 - GIVEN 一次导出被用户取消或以预期错误失败
 - WHEN 用户继续使用或重新启动 PlogKit
 - THEN 应用内没有可继续使用的最终导出副本或导出历史
+
+#### Scenario: 临时初始化失败后可以重试
+
+- GIVEN 导出 cache staging 的必需目录初始化发生瞬时失败
+- WHEN 用户在同一进程内再次发起导出且存储已恢复
+- THEN pipeline 可以创建新的 operation 并继续导出
+- AND 上一次初始化失败不永久毒化本进程
+
+#### Scenario: 遗留枚举失败不阻止新导出
+
+- GIVEN 导出 staging root 可写，但遗留 operation 枚举或删除暂时失败
+- WHEN 用户发起新导出
+- THEN 新 operation 仍可创建并完成
+- AND 后续冷启动或安全初始化再次尝试清理遗留目录
 
 ## 开放问题
 

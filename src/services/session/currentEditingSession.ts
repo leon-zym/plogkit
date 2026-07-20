@@ -391,6 +391,11 @@ export function createCurrentEditingSession({
         }
       }
 
+      try {
+        await library.maintainInactive(id);
+      } catch {
+        // Maintenance is best effort and the target read remains authoritative.
+      }
       const loaded = await library.read(id);
       if (loaded.status === "recovery-failed") {
         return { status: "open-failed", reason: loaded.reason };
@@ -409,7 +414,7 @@ export function createCurrentEditingSession({
         previous.state.active = false;
         clearAutosaveTimer(previous.state);
         try {
-          await library.read(previous.state.draftId);
+          await library.maintainInactive(previous.state.draftId);
         } catch {
           // Compaction is best effort after the new active session is already established.
         }

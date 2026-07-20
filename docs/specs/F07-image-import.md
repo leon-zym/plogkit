@@ -1,7 +1,7 @@
 # F07 图片导入与资产管理
 
 - 状态：已实现
-- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
+- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
 - 实施跟踪：[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
@@ -82,6 +82,28 @@
 - GIVEN 一个已保存的编辑会话
 - WHEN 用户在系统相册中删除了原始照片后重新打开应用
 - THEN 会话恢复正常，编辑与导出不受影响（使用沙盒拷贝）
+
+### 需求 4：孤立文件恢复性清理
+
+#### Scenario: 删除失败后由后续维护重试
+
+- GIVEN 非活跃草稿已成功提交移除无引用资产的 catalog，但对应文件删除失败
+- WHEN 后续对该非活跃草稿执行维护
+- THEN 当前 catalog 无法到达的 owned 直属文件被再次清理
+- AND 仍被 catalog 引用的原图、预览与 metadata 保留
+
+#### Scenario: 导入或预览中断残留被清理
+
+- GIVEN 导入在 catalog 提交前终止，或预览重建在替换前终止
+- WHEN 后续对完整且非活跃的草稿执行维护
+- THEN 未被当前 catalog 到达的发布文件与临时文件被清理
+
+#### Scenario: 损坏 catalog 禁止破坏性清扫
+
+- GIVEN 草稿 catalog 损坏或持久文档引用无法安全验证
+- WHEN 草稿库尝试维护该草稿
+- THEN 不执行资产可达性清扫
+- AND 草稿继续以 typed recovery failure 报告损坏
 
 ## 已解决与后续问题
 

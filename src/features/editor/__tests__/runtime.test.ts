@@ -55,6 +55,7 @@ describe("editor Draft integration", () => {
     const initialAssets = snapshot("memory://before");
     const rebuiltAssets = snapshot("memory://after");
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(async (_id, next) => ({ status: "saved" as const, document: next })),
@@ -114,6 +115,7 @@ describe("editor Draft integration", () => {
       };
     });
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(async (_id, next) => ({ status: "saved" as const, document: next })),
@@ -170,6 +172,7 @@ describe("editor Draft integration", () => {
         assets: rebuiltAssets,
       });
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(async (_id, next) => ({ status: "saved" as const, document: next })),
@@ -208,6 +211,7 @@ describe("editor Draft integration", () => {
 
   it("returns no-draft when there is no recent Draft to prepare", async () => {
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(),
@@ -233,6 +237,7 @@ describe("editor Draft integration", () => {
       async () => ({ status: "not-created", errors: [] }),
     );
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create,
       ingest: jest.fn(),
       save: jest.fn(),
@@ -259,6 +264,7 @@ describe("editor Draft integration", () => {
 
   it("returns picker cancellation without loading settings or creating a Draft", async () => {
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(),
@@ -289,6 +295,7 @@ describe("editor Draft integration", () => {
     const created = createdDraft();
     const calls: string[] = [];
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(async () => created),
       ingest: jest.fn(),
       save: jest.fn(),
@@ -331,6 +338,7 @@ describe("editor Draft integration", () => {
   it("forwards typed flush failures without discarding the open session", async () => {
     const document = createDocument([{ id: testImageId, width: 100, height: 100 }]);
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(),
       ingest: jest.fn(),
       save: jest.fn(async () => ({
@@ -385,6 +393,7 @@ describe("editor Draft integration", () => {
     ]);
     const created = createdDraft();
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(async () => {
         events.push("create");
         return created;
@@ -457,6 +466,7 @@ describe("editor Draft integration", () => {
         : ({ status: "saved", document } as const),
     );
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create,
       ingest: jest.fn(),
       save,
@@ -529,6 +539,7 @@ describe("editor Draft integration", () => {
       };
     });
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(async () => created),
       ingest: jest.fn(),
       save: jest.fn(async (_id, document) => ({
@@ -572,6 +583,7 @@ describe("editor Draft integration", () => {
     ]);
     const created = createdDraft();
     const library: DraftLibrary = {
+      maintainInactive: jest.fn(async () => undefined),
       create: jest.fn(async () => created),
       ingest: jest.fn(),
       save: jest.fn(async (_id, document) => ({
