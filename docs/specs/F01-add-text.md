@@ -2,7 +2,7 @@
 
 - 状态：已实现
 - 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0005](../adr/0005-text-editing-model.md)、[ADR 0024](../adr/0024-text-block-layout-geometry.md)
-- 实施跟踪：[Issue #13](https://github.com/leon-zym/plogkit/issues/13)
+- 实施跟踪：[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)
 
 ## 概述
 
@@ -46,9 +46,26 @@
 
 #### Scenario: 长段中文自动换行
 
+- 状态：已实现（[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 用户在输入面板输入超过画布宽度的连续中文长段（≥100 字）
 - WHEN 用户确认提交
 - THEN 文本在文本块宽度内自动换行渲染，无字符截断或溢出画布
+
+#### Scenario: 显式换行
+
+- 状态：已实现（[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
+- GIVEN 用户在输入面板输入含显式换行符的文本（如 `第一行\n第二行\n第三行`）
+- WHEN 用户确认提交
+- THEN 画布上按换行符位置断行渲染
+- AND 选中后拖动时命中区域覆盖所有实际行
+
+#### Scenario: 中文与 emoji 及 fallback 字形混排
+
+- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
+- GIVEN 用户在输入面板输入含中文、emoji 和符号的混合文本（如 `🏖️ 周末海边 ☀️ 美好时光 😊`）
+- WHEN 用户确认提交
+- THEN 在 iOS 和 Android 上文本均完整渲染，emoji 不丢失、不截断
+- AND 点击选中后编辑或拖动行为与纯中文文本一致
 
 ### 需求 3：样式调整
 
@@ -76,7 +93,7 @@
 
 #### Scenario: 实际排版几何与命中一致
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
+- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 画布上有中文换行、显式换行或右对齐的可见文本块
 - WHEN 用户点击其可见字形附近并拖动
 - THEN 对应文本块被选中并随手势移动
@@ -84,7 +101,7 @@
 
 #### Scenario: 小文本兼顾触达与准确选中框
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
+- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 画布上有一个可见范围小于 44×44pt 的文本块
 - WHEN 用户点击围绕该文本的最小 44×44pt 触达区域
 - THEN 该文本块可以被选中

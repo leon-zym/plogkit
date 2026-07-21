@@ -1,0 +1,73 @@
+appId: com.leonzym.plogkit
+name: Right-aligned small text uses an extended touch target
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: editor-tool-text
+- assertVisible: Add text
+- tapOn:
+    id: text-input
+- setClipboard: 右
+- pasteText
+- runFlow: ../subflows/dismiss-keyboard.yaml
+- assertVisible:
+    id: text-input
+    text: 右
+- scrollUntilVisible:
+    element:
+      id: text-preset-caption
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: text-preset-caption
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: text-preset-caption
+- swipe:
+    start: 50%, 90%
+    end: 50%, 50%
+    duration: 500
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: text-alignment-right
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: text-alignment-right
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: text-alignment-right
+- runFlow: ../subflows/scroll-and-apply-text-edits.yaml
+# Re-enter the persisted session so no text starts selected. This makes the
+# negative hit assertion independent from the editor's post-create selection.
+- runFlow: ../subflows/reenter-session-unselected.yaml
+- assertVisible:
+    id: canvas-text-hit-0-.*
+# Empty space on the same line must not select a mistakenly full-width hit box.
+- tapOn:
+    id: document-canvas
+    point: 50%, 5%
+- assertNotVisible:
+    id: canvas-text-selection-.*
+# A caption-size single glyph is narrower than 44pt. This fixed canvas point
+# is inside the expanded target's left edge but outside the visible glyph.
+- tapOn:
+    id: document-canvas
+    point: 89%, 5%
+- assertVisible:
+    id: canvas-text-hit-0-.*
+    selected: true
+- assertVisible:
+    id: canvas-text-selection-.*
+- swipe:
+    from:
+      id: canvas-text-hit-0-.*
+    direction: LEFT
+    duration: 500
+- tapOn:
+    id: editor-undo
+- assertVisible:
+    id: canvas-text-hit-0-.*

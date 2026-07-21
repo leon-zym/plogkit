@@ -13,6 +13,7 @@ import {
 import { colors } from "@/ui/theme";
 
 interface DraggableTextHitProps {
+  readonly index: number;
   readonly geometry: TextLayoutGeometry;
   readonly projected: ProjectedTextLayoutGeometry;
   readonly scale: number;
@@ -23,6 +24,7 @@ interface DraggableTextHitProps {
 }
 
 function DraggableTextHit({
+  index,
   geometry,
   projected,
   scale,
@@ -81,7 +83,7 @@ function DraggableTextHit({
           },
           animatedStyle,
         ]}
-        testID={`canvas-text-${geometry.id}`}
+        testID={`canvas-text-hit-${index}-${geometry.id}`}
       >
         {selected ? (
           <View
@@ -136,6 +138,7 @@ export function TextGestureOverlay({
         }
         return (
           <DraggableTextHit
+            index={index}
             accessibilityLabel={accessibilityLabel(index)}
             geometry={source}
             key={item.id}

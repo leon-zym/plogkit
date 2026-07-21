@@ -1,5 +1,5 @@
 appId: com.leonzym.plogkit
-name: Add and style a text element
+name: Chinese emoji and fallback glyphs remain selectable and draggable
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -7,31 +7,13 @@ name: Add and style a text element
 - assertVisible: Add text
 - tapOn:
     id: text-input
-- inputText: Morning note
+- setClipboard: "🏖️ 周末海边 ☀️ 美好时光 😊"
+- pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-preset-headline
-    direction: DOWN
-    centerElement: true
-- waitForAnimationToEnd
-- tapOn:
-    id: text-preset-headline
-- swipe:
-    start: 50%, 90%
-    end: 50%, 50%
-    duration: 500
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-alignment-center
-    direction: DOWN
-    visibilityPercentage: 60
-- tapOn:
-    id: text-alignment-center
+- assertVisible:
+    id: text-input
+    text: "🏖️ 周末海边 ☀️ 美好时光 😊"
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: Morning note
 - assertVisible:
     id: canvas-text-hit-0-.*
 - runFlow: ../subflows/reenter-session-unselected.yaml
@@ -42,6 +24,8 @@ name: Add and style a text element
 - assertVisible:
     id: canvas-text-hit-0-.*
     selected: true
+- assertVisible:
+    id: canvas-text-selection-.*
 - swipe:
     from:
       id: canvas-text-hit-0-.*
@@ -49,6 +33,5 @@ name: Add and style a text element
     duration: 500
 - tapOn:
     id: editor-undo
-- assertVisible: Morning note
 - assertVisible:
     id: canvas-text-hit-0-.*

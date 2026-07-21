@@ -1,0 +1,16 @@
+appId: com.leonzym.plogkit
+---
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: ${OPTION_ID}
+          text: radio button, checked
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: ${OPTION_ID}
+          checked: true

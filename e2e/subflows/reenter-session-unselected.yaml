@@ -1,0 +1,13 @@
+appId: com.leonzym.plogkit
+---
+- tapOn:
+    id: editor-back
+- assertVisible:
+    id: resume-session
+- tapOn:
+    id: resume-session
+- assertVisible:
+    id: editor-screen
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: canvas-text-selection-.*
