@@ -25,6 +25,22 @@ editing, AI generation, and cloud features.
 - Code, comments, commit messages, and this file: English.
 - App UI strings: zh + en through the i18n layer; never hardcode copy.
 
+## Documentation Discipline
+
+- Treat long-lived docs as contracts, not work logs. Do not copy issue/PR
+  background, incident evidence, root-cause narratives, patch mechanics, or
+  transient diagnostics into AGENTS.md, specs, guides, or ADRs. Distill only
+  the context needed to understand the durable contract.
+- Update a long-lived document only when its contract changes: ADRs record
+  durable decisions and trade-offs; specs record user-observable acceptance;
+  guides record current prerequisites, commands, and operating procedures;
+  AGENTS.md contains terse, enforceable agent rules. Keep implementation details
+  in code/tests and investigation history in issues, PRs, or artifacts.
+- Give each drift-prone fact one canonical owner. Other documents should link to
+  it or provide only the terse local context they need. When touching duplicated
+  guidance, consolidate it in scope; create a follow-up only when the remaining
+  duplication poses a concrete drift risk.
+
 ## Architecture Map
 
 - `src/core/` — pure TypeScript, no React/RN imports: document model & schema
@@ -60,8 +76,9 @@ editing, AI generation, and cloud features.
 - Git: Conventional Commits in English (`feat:`, `fix:`, `docs:`, `test:`,
   `refactor:`, `chore:`). After scaffold, all changes go through branch + PR
   with green CI (ADR 0016). Run `pnpm verify` before committing.
-- Run full dual-platform E2E before a PR that changes native configuration,
-  system UI integration, persistence, export, or a critical user flow.
+- Run the affected platform's full E2E for system-UI or platform-specific
+  behavior changes. Run full dual-platform E2E for native configuration,
+  persistence, export, or a critical cross-platform flow.
 
 ## Code Style
 
@@ -73,26 +90,25 @@ editing, AI generation, and cloud features.
 
 ## Testing Rules (details: docs/guides/testing-strategy.md)
 
-- Five layers: static checks → jest-expo unit/component → headless Skia
-  goldens → Maestro E2E on iOS and Android simulated devices → GitHub Actions.
+- Four verification layers: static checks → unit/component → headless Skia
+  goldens → Maestro E2E. GitHub Actions executes these layers as CI gates.
 - BDD as methodology, no Cucumber/Gherkin tooling. Test names describe behavior.
 - Golden updates require visually inspecting rendered output/diff images first;
   never bulk-update goldens blindly. Goldens use bundled fonts only. Always
   `dispose()` Skia surfaces/images in headless code.
 - Keep Maestro business flows cross-platform. Isolate system UI differences in
   platform subflows; do not duplicate complete flows.
+- Test non-trivial pure E2E runner logic with Node's built-in runner; validate
+  Maestro flow behavior on the affected target platform or platforms.
 - When E2E fails without a diagnosed cause, rerun the failing flow unchanged;
   never add retries, sleeps, or longer timeouts merely to suppress flakiness.
-- E2E state assertions read autosaved draft state from the app sandbox via
-  `simctl` or `adb`. Export E2E asserts a new system Photos/MediaStore resource;
-  pixel, format, dimensions, and metadata belong to backend contract/headless
-  tests. Seed photos with `simctl addmedia` on iOS and `adb` plus MediaStore
-  scanning on Android. Do not add test-only backdoors into app code.
+- E2E state assertions may read autosaved draft state from the app sandbox.
+  Export E2E asserts a new system Photos/MediaStore resource; pixel, format,
+  dimensions, and metadata belong to backend contract/headless tests. Do not
+  add test-only backdoors into app code.
 
 ## Hard Boundaries
 
-- Keep documents concise and within their defined roles; do not add redundant,
-  conflicting, temporary, or unprofessional content.
 - Never add: filters, beauty/retouch, AI generation, cloud sync, accounts,
   telemetry, watermarks, or any network calls. The app is local-first.
 - Treat the "out of scope" lists in `docs/product/` as hard limits; do not

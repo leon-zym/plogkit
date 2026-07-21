@@ -13,11 +13,12 @@
     "lint": "expo lint",
     "check": "pnpm typecheck && pnpm lint",
     "test": "jest",
+    "test:e2e-runner": "node --test scripts/e2e/*.test.mjs",
     "test:render": "jest --config jest.render.config.js --runInBand",
     "e2e": "node scripts/e2e/run.mjs all",
     "e2e:ios": "node scripts/e2e/run.mjs ios",
     "e2e:android": "node scripts/e2e/run.mjs android",
-    "verify": "pnpm check && pnpm test && pnpm test:render"
+    "verify": "pnpm check && pnpm test:e2e-runner && pnpm test && pnpm test:render"
   },
   "dependencies": {
     "@shopify/react-native-skia": "2.6.2",

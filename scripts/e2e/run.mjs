@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  assertAndroidDeviceReady,
   androidBuildArtifact,
   buildAndroid,
   captureAndroidPhotoResources,
@@ -18,6 +19,7 @@ import {
   validateIosEnvironment,
   validateIosHost,
 } from "./ios.mjs";
+import { prepareAndWarmDevices } from "./orchestration.mjs";
 import {
   assertMetroPortAvailable,
   createArtifactRoot,
@@ -27,6 +29,7 @@ import {
   run,
   runMaestroSuite,
   startMetro,
+  validateMaestroVersion,
   waitUntil,
   warmUpApp,
 } from "./runtime.mjs";
@@ -71,6 +74,11 @@ function parseArguments(argv) {
   }
   if (target === "all" && deviceId) {
     throw new Error("--device requires a single platform target.");
+  }
+  if (target === "ios" && deviceId) {
+    throw new Error(
+      "--device is supported only for Android; iOS E2E always erases its dedicated simulator.",
+    );
   }
   if (flow === "all" || flow === "") flow = null;
   if (flow && !/^[a-z0-9-]+(?:\.yaml)?$/.test(flow)) {
@@ -137,7 +145,7 @@ async function build(platforms, cleanup) {
 
 async function prepareDevice(platform, { artifactRoot, cleanup, deviceId }) {
   return platform === "ios"
-    ? prepareIosDevice({ cleanup, externalDeviceId: deviceId })
+    ? prepareIosDevice({ cleanup })
     : prepareAndroidDevice({ artifactRoot, cleanup, externalDeviceId: deviceId });
 }
 
@@ -179,15 +187,18 @@ async function runSuiteWithExportAssertion(options) {
 async function test(platforms, { artifactRoot, cleanup, deviceId, flow }) {
   await assertMetroPortAvailable();
   log("setup", `Preparing ${platforms.join(" + ")} test devices.`);
-  const devices = await Promise.all(
-    platforms.map((platform) => prepareDevice(platform, { artifactRoot, cleanup, deviceId })),
-  );
-  await Promise.all(devices.map((device) => installAndSeed(device, cleanup)));
-  await startMetro({ artifactRoot, cleanup, root });
-
-  for (const device of devices) {
-    await warmUpApp({ artifactRoot, cleanup, device, root });
-  }
+  const devices = await prepareAndWarmDevices({
+    artifactRoot,
+    assertAndroidDeviceReady,
+    cleanup,
+    deviceId,
+    installAndSeed,
+    platforms,
+    prepareDevice,
+    root,
+    startMetro,
+    warmUpApp,
+  });
 
   const results = await Promise.allSettled(
     devices.map((device) =>
@@ -210,6 +221,7 @@ const artifactRoot = createArtifactRoot();
 installSignalHandlers(cleanup);
 
 try {
+  validateMaestroVersion();
   validate(options);
   log("setup", `Running ${options.target} E2E ${options.phase} phase; artifacts: ${artifactRoot}`);
   if (options.phase === "all" || options.phase === "build") {

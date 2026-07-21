@@ -51,7 +51,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Maestro CLI
         run: |
-          export MAESTRO_VERSION=2.6.1
+          export MAESTRO_VERSION=2.7.0
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
       - name: Build iOS development app
@@ -97,7 +97,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Maestro CLI
         run: |
-          export MAESTRO_VERSION=2.6.1
+          export MAESTRO_VERSION=2.7.0
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
       - name: Build Android development app
