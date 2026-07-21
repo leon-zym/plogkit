@@ -81,6 +81,8 @@ editing, AI generation, and cloud features.
   `dispose()` Skia surfaces/images in headless code.
 - Keep Maestro business flows cross-platform. Isolate system UI differences in
   platform subflows; do not duplicate complete flows.
+- Unit-test non-trivial E2E runner orchestration, readiness, timeouts, and failure
+  classification in Node; verify Maestro YAML behavior only on both target platforms.
 - When E2E fails without a diagnosed cause, rerun the failing flow unchanged;
   never add retries, sleeps, or longer timeouts merely to suppress flakiness.
 - E2E state assertions read autosaved draft state from the app sandbox via

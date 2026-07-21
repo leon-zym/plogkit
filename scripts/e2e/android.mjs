@@ -3,10 +3,55 @@ import { appendFileSync, closeSync, existsSync, openSync, readdirSync } from "no
 import { arch } from "node:os";
 import { join, resolve } from "node:path";
 
-import { capture, log, run, waitUntil } from "./runtime.mjs";
+import { capture, collectFailureDiagnostics, log, run, waitUntil } from "./runtime.mjs";
 
 const avdName = "PlogKit_E2E";
 const appPath = "android/app/build/outputs/apk/debug/app-debug.apk";
+const readinessProbeTimeoutMs = 15000;
+const readinessHierarchyPath = "/sdcard/plogkit-e2e-window.xml";
+
+function captureReadinessProbe(serial, args) {
+  return capture("adb", ["-s", serial, ...args], {
+    allowFailure: true,
+    timeoutMs: readinessProbeTimeoutMs,
+  });
+}
+
+export function recordAndroidReadinessSnapshot({ artifactRoot, deviceId: serial, stage }) {
+  try {
+    let content = `=== ${stage} state snapshot ===\n`;
+    for (const [label, args] of [
+      ["boot completed", ["shell", "getprop", "sys.boot_completed"]],
+      ["boot animation", ["shell", "getprop", "init.svc.bootanim"]],
+      ["device provisioned", ["shell", "settings", "get", "global", "device_provisioned"]],
+      ["package manager", ["shell", "pm", "path", "android"]],
+      ["service check window", ["shell", "service", "check", "window"]],
+      ["service check accessibility", ["shell", "service", "check", "accessibility"]],
+      ["dumpsys window", ["shell", "dumpsys", "window"]],
+      ["dumpsys activity", ["shell", "dumpsys", "activity"]],
+      ["service list", ["shell", "service", "list"]],
+      ["getprop", ["shell", "getprop"]],
+    ]) {
+      const output = captureReadinessProbe(serial, args);
+      content += `--- ${label} ---\n${output ?? "(failed)"}\n\n`;
+    }
+    const hierarchyDump = captureReadinessProbe(serial, [
+      "shell",
+      "uiautomator",
+      "dump",
+      readinessHierarchyPath,
+    ]);
+    const hierarchy = hierarchyDump
+      ? captureReadinessProbe(serial, ["exec-out", "cat", readinessHierarchyPath])
+      : null;
+    content +=
+      `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
+      `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`;
+    appendFileSync(join(artifactRoot, `android-readiness-${serial}.log`), content);
+  } catch {
+    // Readiness diagnostics are best-effort and must preserve the original failure.
+  }
+}
 
 function androidHome() {
   const value = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT;
@@ -98,26 +143,46 @@ export async function buildAndroid({ cleanup, root, workers }) {
 
 async function waitForBoot(serial) {
   await waitUntil(
-    () =>
-      capture("adb", ["-s", serial, "shell", "getprop", "sys.boot_completed"], {
-        allowFailure: true,
-      }) === "1",
+    () => captureReadinessProbe(serial, ["shell", "getprop", "sys.boot_completed"]) === "1",
     180000,
     `Android device ${serial} to finish booting`,
     2000,
   );
 }
 
-async function waitForSystemUi(serial, artifactRoot) {
+const SYSTEM_UI_ANR_PATTERN =
+  /(System UI isn['’]t responding|Application Not Responding:\s*System UI|AppNotRespondingDialog|android:id\/aerr_(?:close|wait))/i;
+
+export function isAndroidServiceAvailable(output) {
+  return output !== null && /^Service(?:\s+\S+:)?\s+found$/im.test(output);
+}
+
+export function androidEmulatorArguments() {
+  return [
+    "-avd",
+    avdName,
+    "-wipe-data",
+    "-no-snapshot",
+    "-no-boot-anim",
+    "-no-window",
+    "-gpu",
+    "host",
+    "-no-audio",
+    "-camera-back",
+    "none",
+    "-camera-front",
+    "none",
+  ];
+}
+
+async function waitForSystemUi(serial, artifactRoot, stage) {
   // Boot animation must be done — either "stopped", or the property was
   // never set (common with -no-boot-anim). Only "running" means still in
   // progress.
   await waitUntil(
     () => {
-      const value = capture("adb", ["-s", serial, "shell", "getprop", "init.svc.bootanim"], {
-        allowFailure: true,
-      });
-      return value !== "running";
+      const value = captureReadinessProbe(serial, ["shell", "getprop", "init.svc.bootanim"]);
+      return value !== null && value !== "running";
     },
     30000,
     `Android device ${serial} boot animation to finish`,
@@ -127,11 +192,13 @@ async function waitForSystemUi(serial, artifactRoot) {
   // Device must be provisioned (setup wizard completed).
   await waitUntil(
     () =>
-      capture(
-        "adb",
-        ["-s", serial, "shell", "settings", "get", "global", "device_provisioned"],
-        { allowFailure: true },
-      ) === "1",
+      captureReadinessProbe(serial, [
+        "shell",
+        "settings",
+        "get",
+        "global",
+        "device_provisioned",
+      ]) === "1",
     30000,
     `Android device ${serial} to be provisioned`,
     2000,
@@ -140,9 +207,7 @@ async function waitForSystemUi(serial, artifactRoot) {
   // Package manager must be able to resolve at least the android system package.
   await waitUntil(
     () => {
-      const output = capture("adb", ["-s", serial, "shell", "pm", "path", "android"], {
-        allowFailure: true,
-      });
+      const output = captureReadinessProbe(serial, ["shell", "pm", "path", "android"]);
       return output !== null && output.length > 0;
     },
     30000,
@@ -150,36 +215,96 @@ async function waitForSystemUi(serial, artifactRoot) {
     2000,
   );
 
-  // Window and accessibility services must be registered — proves System UI
-  // and UI-automation infrastructure are ready for Maestro to interact.
+  // Window and accessibility services must be registered before the
+  // functional launcher and hierarchy probes below can be meaningful.
   await waitUntil(
     () => {
-      const wm = capture("adb", ["-s", serial, "shell", "service", "check", "window"], {
-        allowFailure: true,
-      });
-      const acc = capture(
-        "adb",
-        ["-s", serial, "shell", "service", "check", "accessibility"],
-        { allowFailure: true },
-      );
-      return wm?.includes("found") && acc?.includes("found");
+      const wm = captureReadinessProbe(serial, ["shell", "service", "check", "window"]);
+      const acc = captureReadinessProbe(serial, ["shell", "service", "check", "accessibility"]);
+      return isAndroidServiceAvailable(wm) && isAndroidServiceAvailable(acc);
     },
     120000,
     `Android device ${serial} system services to become ready`,
     2000,
   );
 
+  // Exercise the same launcher and accessibility surfaces Maestro depends on.
+  // A registered Binder service alone does not prove that either surface can
+  // respond, and an ANR dialog must fail readiness rather than be dismissed.
+  const home = await waitUntil(
+    () => {
+      const output = captureReadinessProbe(serial, [
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-a",
+        "android.intent.action.MAIN",
+        "-c",
+        "android.intent.category.HOME",
+      ]);
+      return output && /^Status:\s*ok$/im.test(output) && !/\bFallbackHome\b/.test(output)
+        ? output
+        : false;
+    },
+    120000,
+    `Android device ${serial} launcher to replace FallbackHome`,
+    2000,
+  );
+  let hierarchyDump = null;
+  let hierarchy = null;
+  let hierarchyError = null;
+  try {
+    hierarchy = await waitUntil(
+      () => {
+        hierarchyDump = captureReadinessProbe(serial, [
+          "shell",
+          "uiautomator",
+          "dump",
+          readinessHierarchyPath,
+        ]);
+        return hierarchyDump
+          ? captureReadinessProbe(serial, ["exec-out", "cat", readinessHierarchyPath])
+          : false;
+      },
+      120000,
+      `Android device ${serial} UI hierarchy to respond`,
+      2000,
+    );
+  } catch (error) {
+    hierarchyError = error;
+  }
+  const windowState = captureReadinessProbe(serial, ["shell", "dumpsys", "window"]);
+
+  const diag = join(artifactRoot, `android-readiness-${serial}.log`);
+  appendFileSync(
+    diag,
+    `=== ${stage} ===\n--- launcher probe ---\n${home ?? "(failed)"}\n\n` +
+      `--- dumpsys window ---\n${windowState ?? "(failed)"}\n\n` +
+      `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
+      `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`,
+  );
+
+  const functionalEvidence = `${windowState ?? ""}\n${hierarchy ?? ""}`;
+  if (SYSTEM_UI_ANR_PATTERN.test(functionalEvidence)) {
+    throw new Error(`Android System UI ANR dialog detected on ${serial}.`);
+  }
+  if (!hierarchy) {
+    throw new Error(`Android UI hierarchy did not respond on ${serial}.`, {
+      cause: hierarchyError,
+    });
+  }
+
   // Save a snapshot of system state for diagnostics.
   try {
-    const diag = join(artifactRoot, `android-readiness-${serial}.log`);
     let content = "";
     for (const [label, cmd] of [
-      ["dumpsys window", ["dumpsys", "window"]],
-      ["dumpsys activity", ["dumpsys", "activity"]],
+      ["dumpsys window", ["shell", "dumpsys", "window"]],
+      ["dumpsys activity", ["shell", "dumpsys", "activity"]],
       ["service list", ["shell", "service", "list"]],
       ["getprop", ["shell", "getprop"]],
     ]) {
-      const out = capture("adb", ["-s", serial, ...cmd], { allowFailure: true });
+      const out = captureReadinessProbe(serial, cmd);
       content += `--- ${label} ---\n${out ?? "(failed)"}\n\n`;
     }
     appendFileSync(diag, content);
@@ -190,12 +315,29 @@ async function waitForSystemUi(serial, artifactRoot) {
   log("android", `System UI ready on ${serial}.`);
 }
 
+export async function assertAndroidDeviceReady({ artifactRoot, device, stage = "readiness" }) {
+  try {
+    await waitForSystemUi(device.deviceId, artifactRoot, stage);
+  } catch (error) {
+    recordAndroidReadinessSnapshot({ artifactRoot, deviceId: device.deviceId, stage });
+    const message = error instanceof Error ? error.message : String(error);
+    await collectFailureDiagnostics({
+      diagnosticDirectory: join(artifactRoot, "android", `readiness-${stage}`),
+      device,
+      error: message,
+      kind: "system-ui",
+    });
+    throw error;
+  }
+}
+
 export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDeviceId }) {
   if (externalDeviceId) {
     await run("adb", ["-s", externalDeviceId, "wait-for-device"], { cleanup });
     await waitForBoot(externalDeviceId);
-    await waitForSystemUi(externalDeviceId, artifactRoot);
-    return { platform: "android", deviceId: externalDeviceId };
+    const device = { platform: "android", deviceId: externalDeviceId };
+    await assertAndroidDeviceReady({ artifactRoot, device, stage: "boot" });
+    return device;
   }
 
   const home = androidHome();
@@ -213,16 +355,7 @@ export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDevi
   const logFd = openSync(emulatorLog, "w");
   const emulatorProcess = spawn(
     emulator,
-    [
-      "-avd",
-      avdName,
-      "-wipe-data",
-      "-no-snapshot",
-      "-no-boot-anim",
-      "-no-window",
-      "-camera-back",
-      "none",
-    ],
+    androidEmulatorArguments(),
     { detached: false, stdio: ["ignore", logFd, logFd] },
   );
   emulatorProcess.once("error", (error) => {
@@ -259,8 +392,9 @@ export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDevi
     2000,
   );
   await waitForBoot(serial);
-  await waitForSystemUi(serial, artifactRoot);
-  return { platform: "android", deviceId: serial };
+  const device = { platform: "android", deviceId: serial };
+  await assertAndroidDeviceReady({ artifactRoot, device, stage: "boot" });
+  return device;
 }
 
 export async function installAndSeedAndroid({ cleanup, device, fixtures, root }) {

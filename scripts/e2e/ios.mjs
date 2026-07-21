@@ -82,13 +82,6 @@ function findDevice(deviceTypeIdentifier) {
   );
 }
 
-function findDeviceById(deviceId) {
-  const result = JSON.parse(capture("xcrun", ["simctl", "list", "devices", "available", "-j"]));
-  return Object.values(result.devices)
-    .flat()
-    .find((device) => device.udid === deviceId);
-}
-
 function ensureDedicatedDevice() {
   const runtime = requiredRuntime();
   const deviceType = requiredDeviceType();
@@ -129,9 +122,8 @@ export async function buildIos({ cleanup, root, workers }) {
   await run("xcodebuild", args, { cleanup, cwd: root });
 }
 
-export async function prepareIosDevice({ cleanup, externalDeviceId }) {
-  const device = externalDeviceId ? findDeviceById(externalDeviceId) : ensureDedicatedDevice();
-  if (!device) throw new Error(`iOS Simulator is unavailable: ${externalDeviceId}`);
+export async function prepareIosDevice({ cleanup }) {
+  const device = ensureDedicatedDevice();
 
   if (device.state === "Booted") {
     capture("xcrun", ["simctl", "shutdown", device.udid], { allowFailure: true });
@@ -139,12 +131,10 @@ export async function prepareIosDevice({ cleanup, externalDeviceId }) {
   capture("xcrun", ["simctl", "erase", device.udid]);
   capture("xcrun", ["simctl", "boot", device.udid]);
 
-  if (!externalDeviceId) {
-    cleanup.add(async () => {
-      log("ios", "Shutting down the dedicated simulator.");
-      capture("xcrun", ["simctl", "shutdown", device.udid], { allowFailure: true });
-    });
-  }
+  cleanup.add(async () => {
+    log("ios", "Shutting down the dedicated simulator.");
+    capture("xcrun", ["simctl", "shutdown", device.udid], { allowFailure: true });
+  });
   await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], { cleanup });
   return { platform: "ios", deviceId: device.udid };
 }
