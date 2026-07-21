@@ -1,6 +1,6 @@
 # 开发环境
 
-本文说明在 macOS 上开发 PlogKit 所需的工具，以及 development build、Metro 和模拟器的常用工作流。项目基于 Expo SDK 57、React Native 0.86 和 Continuous Native Generation（CNG）；版本选择以 `package.json`、Expo 配置和 CI 为准。
+本文说明在 macOS 上开发 PlogKit 所需的工具，以及 development build、Metro 和模拟器的常用工作流。项目基于 Expo SDK 57、React Native 0.86 和 Continuous Native Generation（CNG）。依赖版本以 `package.json` 和 lockfile 为准，宿主工具的当前基线见本页和 CI 配置。
 
 ## 环境要求
 
@@ -15,10 +15,11 @@
 ```bash
 export MAESTRO_VERSION=2.7.0
 curl -fsSL "https://get.maestro.mobile.dev" | bash
+export PATH="${PATH}:${HOME}/.maestro/bin"
 maestro --version
 ```
 
-E2E runner 在构建或测试前校验 Maestro 版本；缺失或低于 2.7.0 时立即报告环境错误，高于 CI 基线时提示偏差并继续，不会自动安装、升级或降级。升级最低版本或 CI 基线时必须在同一次变更中同步文档、CI 安装版本和 E2E flow。
+E2E runner 在构建或测试前校验 Maestro 版本；缺失或低于 2.7.0 时立即报告环境错误，高于 CI 基线时提示偏差并继续，不会自动安装、升级或降级。升级最低版本或 CI 基线时必须在同一次变更中同步文档与 CI 安装版本，并在双端验证现有 flow。
 
 安装项目依赖：
 
@@ -29,7 +30,7 @@ pnpm install
 ### iOS
 
 - macOS 和完整安装的 Xcode。
-- 至少一个可用的 iOS Simulator runtime。
+- 普通开发至少需要一个兼容的 iOS Simulator runtime；项目 E2E 还需要下文指定的 runtime 和设备类型。
 - CocoaPods。
 
 用以下命令确认当前选择的 Xcode：
@@ -43,7 +44,7 @@ xcodebuild -version
 
 ### Android
 
-- Android Studio。
+- Android Studio，或等价的 Android SDK command-line tools 安装。
 - JDK 17。
 - Android SDK Command-line Tools、Platform Tools 和 Android Emulator。
 - Android SDK Platform 36，以及与本机架构匹配的模拟器 system image。
@@ -117,7 +118,7 @@ pnpm ios
 pnpm android
 ```
 
-Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直接使用 `localhost`。这两个地址通过 `app.json` 中 `expo-dev-client` 的平台级 `defaultLaunchURL` 编译进 development build。E2E 清除 App 数据后，Android 使用该默认地址，iOS 则在启动时显式传入同一地址，避免 SDK 57 的冷启动 fallback 竞态。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
+Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直接使用 `localhost`。真机开发时应让设备和开发机处于可互通网络，并通过 Expo CLI 提供的 development build URL 连接，不应沿用模拟器专用地址。
 
 ## 验证
 
@@ -156,17 +157,11 @@ node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence
 
 `--phase test` 仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
 
-runner 固定使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD，不会修改日常开发设备；Android system image 的 ABI 仍按宿主架构选择。缺少所需 runtime、device type 或 system image 时，runner 会明确失败。runner 在构建或测试前自动验证 Maestro 不低于 2.7.0，并提示本地版本是否偏离 CI 基线；iOS 还会验证 Xcode 和 runtime。Xcode beta 构建的兼容性尚未充分验证，遇到难以复现的 XCTest 不稳定或构建失败时请切回稳定版 Xcode。runner 自建专用 Android 模拟器时在无窗口模式下显式使用宿主 GPU，避免高分辨率 API 36 AVD 回退到软件 `lavapipe` 后在冷启动阶段拖慢 System UI；CI 传入由 workflow 管理的外部模拟器，不改变其图形后端。boot 后确认 boot animation 停止、设备已 provisioned、真实 launcher 已替换临时 `FallbackHome`、UI hierarchy 可响应且没有 System UI ANR 对话框，安装 App 与注入照片后、warmup 前再次检查。两端均不显示前台设备窗口。每次运行前擦除目标设备并注入一组 fixture，因此测试状态和照片不会跨次累积。
+runner 默认使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD。缺少所需 runtime、device type 或 system image 时，测试会在业务 flow 前失败。每次测试擦除专用设备并注入 fixture，不使用或修改日常开发设备。失败 artifact 的目录会打印到终端；readiness、flow 隔离和诊断要求见[测试策略](testing-strategy.md)。
 
-失败时每个 flow 的 artifact 独立保存，`failure-summary.txt` 结合 Maestro process output、manifest 和 hierarchy 记录分类（metro / xctest-driver / system-ui / app-crash / business-assertion）与错误详情；app-crash、xctest-driver 或 system-ui 失败时额外收集 DiagnosticReports、simulator log 或 Android logcat/ANR traces。具体规则见[测试策略](testing-strategy.md)。
+E2E 独占本机 IPv4 端口 8081；端口已被占用时立即失败，不复用或终止未知进程。日常真机开发仍使用支持 LAN 的 `pnpm start`。
 
-完整运行会顺序构建两端；测试阶段串行完成每个平台的设备准备、安装与预热，再并行执行两端业务 flow。runner 在成功、失败或中断时只停止本轮拥有的 Metro 和设备实例，不删除专用设备。
-
-E2E Metro 仅监听本机 IPv4。8081 已被占用时 runner 会立即失败，且不会复用或终止未知进程。日常真机开发仍使用支持 LAN 的 `pnpm start`。
-
-一次双端 clean E2E 通常需要 15–25 分钟；首次下载或解析原生依赖可能更久。它适合手动验收、定时测试以及原生配置、系统 UI 或关键用户流程变更后的验证，不适合作为每次保存或提交的即时反馈。
-
-GitHub Actions 为 draft PR 的每次提交运行 `pnpm verify`；PR 转为 ready 后并行执行 iOS Simulator Debug 和 Android arm64 Debug 原生集成编译，正式 PR 的后续提交会重新运行三项检查。每周一北京时间 02:30 的定时任务并行运行双端完整 E2E；手动任务可选择平台和 flow，且同一分支上的多次手动任务不会互相取消。测试层级和适用场景见[测试策略](testing-strategy.md)，E2E 编排决策见 [ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)，CI 生命周期和 `main` 门禁见 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
+CI 触发条件和验证时机见[测试策略](testing-strategy.md)。E2E 编排决策见 [ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)，CI 生命周期和 `main` 门禁见 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
 ## 发布构建边界
 
