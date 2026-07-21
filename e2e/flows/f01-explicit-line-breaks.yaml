@@ -1,5 +1,5 @@
 appId: com.leonzym.plogkit
-name: Add and style a text element
+name: Explicit Chinese line breaks remain selectable and draggable
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -7,48 +7,40 @@ name: Add and style a text element
 - assertVisible: Add text
 - tapOn:
     id: text-input
-- inputText: Morning note
+- setClipboard: |-
+    第一行
+    第二行
+    第三行
+- pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-preset-headline
-    direction: DOWN
-    centerElement: true
-- waitForAnimationToEnd
-- tapOn:
-    id: text-preset-headline
-- swipe:
-    start: 50%, 90%
-    end: 50%, 50%
-    duration: 500
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-alignment-center
-    direction: DOWN
-    visibilityPercentage: 60
-- tapOn:
-    id: text-alignment-center
+- assertVisible:
+    id: text-input
+    text: |-
+      第一行
+      第二行
+      第三行
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: Morning note
 - assertVisible:
     id: canvas-text-hit-0-.*
 - runFlow: ../subflows/reenter-session-unselected.yaml
 - assertVisible:
     id: canvas-text-hit-0-.*
+# The third line has a deterministic canvas position. A first-line-only hit
+# region cannot make this coordinate move with itself.
 - tapOn:
-    id: canvas-text-hit-0-.*
+    id: document-canvas
+    point: 14%, 11%
 - assertVisible:
     id: canvas-text-hit-0-.*
     selected: true
+- assertVisible:
+    id: canvas-text-selection-.*
 - swipe:
     from:
       id: canvas-text-hit-0-.*
-    direction: RIGHT
+    direction: LEFT
     duration: 500
 - tapOn:
     id: editor-undo
-- assertVisible: Morning note
 - assertVisible:
     id: canvas-text-hit-0-.*

@@ -1,0 +1,13 @@
+appId: com.leonzym.plogkit
+---
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: dismiss-text-keyboard
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard

@@ -70,7 +70,7 @@ describe("TextGestureOverlay", () => {
       />,
     );
 
-    expect(view.getByTestId("canvas-text-lower")).toHaveStyle({
+    expect(view.getByTestId("canvas-text-hit-0-lower")).toHaveStyle({
       left: 35,
       top: 83.5,
       width: 44,
@@ -83,6 +83,6 @@ describe("TextGestureOverlay", () => {
       width: 10,
       height: 5,
     });
-    expect(view.getByTestId("canvas-text-upper")).toHaveStyle({ zIndex: 1 });
+    expect(view.getByTestId("canvas-text-hit-1-upper")).toHaveStyle({ zIndex: 1 });
   });
 });
