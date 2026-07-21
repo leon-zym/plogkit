@@ -39,31 +39,36 @@
 | [0019](0019-cross-platform-maestro-e2e.md)                | Maestro E2E 扩展到 iOS 与 Android 模拟设备                     | 部分修订 | [0020](0020-ci-lifecycle-and-main-ruleset.md)                                                                                                                                          |
 | [0020](0020-ci-lifecycle-and-main-ruleset.md)             | CI 生命周期与 main 分支门禁                                    | 已接受   | —                                                                                                                                                                                      |
 | [0021](0021-edit-commit-module.md)                        | 以类型化编辑意图深化编辑提交模块                               | 已接受   | —                                                                                                                                                                                      |
-| [0022](0022-draft-aggregate-current-editing-session.md)   | 以草稿 aggregate 深化持久化与当前编辑会话                      | 已接受   | —                                                                                                                                                                                      |
+| [0022](0022-draft-aggregate-current-editing-session.md)   | 以草稿 aggregate 深化持久化与当前编辑会话                      | 部分修订 | [0029](0029-draft-library-pre-release-baseline-reset.md)、[0030](0030-draft-library-enumeration-snapshot.md)                                                                           |
 | [0023](0023-export-preset-catalog-and-pipeline.md)        | 深化导出预设 catalog 与导出管线                                | 已接受   | —                                                                                                                                                                                      |
 | [0024](0024-text-block-layout-geometry.md)                | 以实际排版深化文本块布局与交互几何                             | 已接受   | —                                                                                                                                                                                      |
-| [0025](0025-recoverable-draft-persistence-maintenance.md) | 草稿持久化采用可恢复替换与显式非活跃维护                       | 已接受   | —                                                                                                                                                                                      |
+| [0025](0025-recoverable-draft-persistence-maintenance.md) | 草稿持久化采用可恢复替换与显式非活跃维护                       | 部分修订 | [0030](0030-draft-library-enumeration-snapshot.md)                                                                                                                                     |
 | [0026](0026-test-runners-by-runtime.md)                   | 验证层级与测试运行器边界                                       | 已接受   | —                                                                                                                                                                                      |
+| [0027](0027-draft-root-record.md)                         | 草稿身份、元数据与统一文档共用可恢复根记录                     | 已接受   | —                                                                                                                                                                                      |
+| [0028](0028-draft-deletion-tombstone.md)                  | 草稿删除先提交待删除标记再异步清理                             | 已接受   | —                                                                                                                                                                                      |
+| [0029](0029-draft-library-pre-release-baseline-reset.md)  | 草稿库产品化再次建立发布前持久化基线                           | 已接受   | —                                                                                                                                                                                      |
+| [0030](0030-draft-library-enumeration-snapshot.md)        | 草稿库以冷启动枚举构建进程内权威快照                           | 已接受   | —                                                                                                                                                                                      |
 
 ## 决策台账
 
 决策编号（D 编号）与 ADR 的对应关系：
 
-| 台账 | 内容                                                                                                    | 对应 ADR                     |
-| ---- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| D01  | iOS 先行，跨端纪律 + CI 编译检查                                                                        | 0002                         |
-| D02  | 导出预设数据驱动；元数据默认剥离；当前导出 SDR 静态图、Live Photo 取静帧                                | 0008、0009、0023             |
-| D03  | Share Extension 进 v1.1，预留外部图片入口                                                               | 0017                         |
-| D04  | Expo SDK 57 + CNG + dev client + pnpm                                                                   | 0002                         |
-| D05  | UI 中英双语，i18n 从第一天建立                                                                          | 0014                         |
-| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                                                          | 0012、0019                   |
-| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                                                              | 0015                         |
-| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                                                            | 0013                         |
-| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                                                | 0014                         |
-| D10  | 技术默认包（Zustand、Expo Router、按运行时选择测试运行器、导出上限等）；当前 SDR/sRGB，广色域后续重评估 | 0004、0007、0011、0018、0026 |
-| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                                          | 0016                         |
-| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                                           | 0016、0020                   |
-| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                                          | 0003、0004、0021             |
-| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开；持久事实采用可恢复替换                 | 0003、0006、0021、0022、0025 |
-| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos                                | 0007、0008、0011、0023       |
-| D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                                              | 0003、0005、0011、0024       |
+| 台账 | 内容                                                                                                          | 对应 ADR                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| D01  | iOS 先行，跨端纪律 + CI 编译检查                                                                              | 0002                                     |
+| D02  | 导出预设数据驱动；元数据默认剥离；当前导出 SDR 静态图、Live Photo 取静帧                                      | 0008、0009、0023                         |
+| D03  | Share Extension 进 v1.1，预留外部图片入口                                                                     | 0017                                     |
+| D04  | Expo SDK 57 + CNG + dev client + pnpm                                                                         | 0002                                     |
+| D05  | UI 中英双语，i18n 从第一天建立                                                                                | 0014                                     |
+| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                                                                | 0012、0019                               |
+| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                                                                    | 0015                                     |
+| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                                                                  | 0013                                     |
+| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                                                      | 0014                                     |
+| D10  | 技术默认包（Zustand、Expo Router、按运行时选择测试运行器、导出上限等）；当前 SDR/sRGB，广色域后续重评估       | 0004、0007、0011、0018、0026             |
+| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                                                | 0016                                     |
+| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                                                 | 0016、0020                               |
+| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                                                | 0003、0004、0021                         |
+| D14  | 草稿库拥有持久化草稿 aggregate；当前编辑会话按 DraftId 原子打开；冷启动枚举构建进程内快照并采用可恢复持久事实 | 0003、0006、0021、0022、0025、0027、0030 |
+| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos                                      | 0007、0008、0011、0023                   |
+| D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                                                    | 0003、0005、0011、0024                   |
+| D17  | 草稿删除以可恢复待删除标记为 commit point，物理清理异步收敛                                                   | 0022、0025、0028                         |

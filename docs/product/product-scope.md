@@ -99,7 +99,7 @@ PlogKit 已完成 MVP 阶段，当前处于发布前迭代阶段。MVP 是已经
 - 意外退出不立即销毁当前项目。
 - 导出不压平唯一可编辑副本。
 
-这不等于已经交付本地草稿库。草稿库与历史草稿导航是已确认的后续方向，由 [Issue #9](https://github.com/leon-zym/plogkit/issues/9) 跟踪。
+这不等于已经交付本地草稿库。草稿库与历史草稿导航已形成可执行的 [F08 规格](../specs/F08-draft-library.md)，由 [Issue #9](https://github.com/leon-zym/plogkit/issues/9) 跟踪实施。
 
 ## 7. 导出后继续编辑
 
@@ -107,7 +107,7 @@ PlogKit 已完成 MVP 阶段，当前处于发布前迭代阶段。MVP 是已经
 
 ## 已确认的后续方向
 
-- 本地草稿库与历史草稿继续编辑（[Issue #9](https://github.com/leon-zym/plogkit/issues/9)）。
+- 本地草稿库与历史草稿继续编辑（[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)）。
 - 更细化的社交平台导出预设。
 - 拼贴风自由画布。
 - Share Extension（见 [ADR 0017](../adr/0017-share-extension-deferred.md)）。
