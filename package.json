@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "check": "pnpm typecheck && pnpm lint",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:e2e-runner": "node --test scripts/e2e/*.test.mjs",
     "test:render": "jest --config jest.render.config.js --runInBand",
     "e2e": "node scripts/e2e/run.mjs all",
