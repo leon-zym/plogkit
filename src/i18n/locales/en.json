@@ -13,6 +13,7 @@
   "home": {
     "eyebrow": "PLOG / LOCAL",
     "title": "PlogKit",
+    "libraryTitle": "Make the next page yours.",
     "tagline": "Photos, words, and layouts ready to post.",
     "description": "Choose up to nine photos. Everything stays on this device.",
     "choosePhotos": "Choose photos",
@@ -21,7 +22,39 @@
     "importing": "Preparing photos…",
     "importPartial": "Some photos could not be imported. The completed photos are ready.",
     "importFailed": "We couldn't prepare those photos. Try choosing them again.",
-    "recoveryFailed": "The previous draft could not be opened safely. Choose photos to start again."
+    "recoveryFailed": "The previous draft could not be opened safely. Choose photos to start again.",
+    "menu": "Draft Library menu",
+    "drafts": "Drafts",
+    "loadingDrafts": "Loading your Draft Library…",
+    "storageFailed": "Draft Library unavailable",
+    "storageFailedDescription": "We couldn't reliably read local storage. Try again before changing any drafts.",
+    "openFailed": "This draft could not be opened. Your current editing session is unchanged.",
+    "deleteFailed": "This draft was not deleted. Check device storage and try again.",
+    "settingsFailed": "The display preference could not be saved.",
+    "displayMode": "Display style",
+    "display": {
+      "square": "Square",
+      "original": "Original ratio"
+    },
+    "deleteDraft": "Delete draft",
+    "openDraft": "Open draft",
+    "deleteTitle": "Delete this draft?",
+    "deleteDescription": "This permanently removes the draft and its local photos from PlogKit.",
+    "corruptTitle": "Draft is damaged",
+    "corruptDescription": "This draft cannot be opened safely. You can permanently delete it.",
+    "draftPosition": "Draft {{position}} of {{total}}.",
+    "draftUpdated": "Edited {{time}}.",
+    "draftPhotoCount_one": "{{count}} photo.",
+    "draftPhotoCount_other": "{{count}} photos.",
+    "draftStatus": {
+      "ready": "Ready.",
+      "generating": "Thumbnail is being prepared.",
+      "corrupt": "Draft is damaged."
+    },
+    "draftActions": {
+      "ready": "Tap to open; long press to delete.",
+      "corrupt": "Tap to delete."
+    }
   },
   "settings": {
     "title": "Settings",

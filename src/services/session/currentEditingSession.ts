@@ -17,12 +17,14 @@ import type {
   DraftImportError,
   DraftLibrary,
   DraftRecoveryFailure,
+  DeleteDraftResult,
   ImportCandidate,
   IngestedAsset,
 } from "@/services/drafts/draftLibrary";
 
 export interface CurrentEditingSessionHandle {
   readonly draftId: DraftId;
+  readonly contentRevision: number;
   readonly editing: EditCommitModule;
   readonly assets: AssetCatalogSnapshot;
   readonly preparePreviews: () => Promise<PrepareSessionPreviewsResult>;
@@ -80,9 +82,19 @@ export type FlushCurrentEditingSessionResult =
       readonly message?: string;
     };
 
+export type DeleteCurrentEditingSessionResult =
+  | { readonly status: "deleted" }
+  | {
+      readonly status: "delete-failed";
+      readonly reason: DraftRecoveryFailure | "storage-failed" | "flush-failed" | "busy";
+      readonly message?: string;
+    }
+  | { readonly status: "delete-unknown"; readonly message?: string };
+
 export interface CurrentEditingSession {
   readonly open: (id: DraftId) => Promise<OpenCurrentEditingSessionResult>;
   readonly flush: () => Promise<FlushCurrentEditingSessionResult>;
+  readonly delete: (id: DraftId) => Promise<DeleteCurrentEditingSessionResult>;
 }
 
 export interface CreateCurrentEditingSessionOptions {
@@ -99,13 +111,17 @@ interface SessionState {
   readonly draftId: DraftId;
   active: boolean;
   assets: AssetCatalogSnapshot;
+  contentRevision: number;
   revision: number;
   dirtyRevision: number;
   dirtyDocument: PlogDocument | null;
   timer: ReturnType<typeof setTimeout> | null;
   saveLoop: Promise<FlushCurrentEditingSessionResult> | null;
   assetOperation: boolean;
+  assetOperationCompletion: Promise<void> | null;
+  finishAssetOperation: (() => void) | null;
   switching: boolean;
+  deletion: "none" | "in-progress" | "unknown";
 }
 
 function createStableAssetAccess(state: SessionState): AssetCatalogSnapshot {
@@ -130,11 +146,31 @@ export function createCurrentEditingSession({
     readonly id: DraftId;
     readonly promise: Promise<OpenCurrentEditingSessionResult>;
   } | null = null;
+  let deleting: {
+    readonly id: DraftId;
+    readonly promise: Promise<DeleteCurrentEditingSessionResult>;
+  } | null = null;
 
   const clearAutosaveTimer = (state: SessionState): void => {
     if (state.timer === null) return;
     clearTimeout(state.timer);
     state.timer = null;
+  };
+
+  const startAssetOperation = (state: SessionState): void => {
+    let finish!: () => void;
+    state.assetOperation = true;
+    state.assetOperationCompletion = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    state.finishAssetOperation = finish;
+  };
+
+  const finishAssetOperation = (state: SessionState): void => {
+    state.assetOperation = false;
+    state.assetOperationCompletion = null;
+    state.finishAssetOperation?.();
+    state.finishAssetOperation = null;
   };
 
   const runSaveLoop = async (
@@ -151,6 +187,7 @@ export function createCurrentEditingSession({
           ...(result.message === undefined ? {} : { message: result.message }),
         };
       }
+      state.contentRevision = result.contentRevision;
       if (state.dirtyRevision === revision) {
         state.dirtyDocument = null;
       }
@@ -188,18 +225,23 @@ export function createCurrentEditingSession({
     id: DraftId,
     document: PlogDocument,
     assets: AssetCatalogSnapshot,
+    contentRevision: number,
   ): ActiveSession => {
     const state: SessionState = {
       draftId: id,
       active: true,
       assets,
+      contentRevision,
       revision: 0,
       dirtyRevision: 0,
       dirtyDocument: null,
       timer: null,
       saveLoop: null,
       assetOperation: false,
+      assetOperationCompletion: null,
+      finishAssetOperation: null,
       switching: false,
+      deletion: "none",
     };
     const editController = createSessionEditCommitController({
       initialDocument: document,
@@ -210,14 +252,16 @@ export function createCurrentEditingSession({
       read: editController.editing.read,
       subscribe: editController.editing.subscribe,
       dispatch: (message: EditMessage): EditResult =>
-        state.active
+        state.active && state.deletion === "none"
           ? editController.editing.dispatch(message)
           : { status: "unavailable", reason: "session-inactive" },
     });
     const preparePreviews = async (): Promise<PrepareSessionPreviewsResult> => {
       if (!state.active) return { status: "session-inactive" };
-      if (state.assetOperation || state.switching) return { status: "busy" };
-      state.assetOperation = true;
+      if (state.assetOperation || state.switching || state.deletion !== "none") {
+        return { status: "busy" };
+      }
+      startAssetOperation(state);
       try {
         for (const image of editing.read().document.sourceImages) {
           const result = await library.readPreview(id, image.id);
@@ -232,7 +276,7 @@ export function createCurrentEditingSession({
         }
         return { status: "prepared" };
       } finally {
-        state.assetOperation = false;
+        finishAssetOperation(state);
       }
     };
     const beginAssetOperation = (): SessionAssetMutationResult | null => {
@@ -244,10 +288,10 @@ export function createCurrentEditingSession({
           commit: null,
         };
       }
-      if (state.assetOperation || state.switching) {
+      if (state.assetOperation || state.switching || state.deletion !== "none") {
         return { status: "busy", imported: [], errors: [], commit: null };
       }
-      state.assetOperation = true;
+      startAssetOperation(state);
       return null;
     };
     const addImages = async (
@@ -302,7 +346,7 @@ export function createCurrentEditingSession({
           commit,
         };
       } finally {
-        state.assetOperation = false;
+        finishAssetOperation(state);
       }
     };
     const replaceImage = async (
@@ -353,11 +397,14 @@ export function createCurrentEditingSession({
           commit,
         };
       } finally {
-        state.assetOperation = false;
+        finishAssetOperation(state);
       }
     };
     const handle = Object.freeze({
       draftId: id,
+      get contentRevision() {
+        return state.contentRevision;
+      },
       editing,
       assets: createStableAssetAccess(state),
       preparePreviews,
@@ -369,7 +416,11 @@ export function createCurrentEditingSession({
 
   const flush = async (): Promise<FlushCurrentEditingSessionResult> => {
     if (active === null) return { status: "flushed" };
-    if (active.state.assetOperation || active.state.switching) {
+    if (
+      active.state.assetOperation ||
+      active.state.switching ||
+      active.state.deletion !== "none"
+    ) {
       return { status: "flush-failed", reason: "busy" };
     }
     return drain(active.state);
@@ -378,7 +429,7 @@ export function createCurrentEditingSession({
   const performOpen = async (id: DraftId): Promise<OpenCurrentEditingSessionResult> => {
     const previous = active;
     if (previous !== null) {
-      if (previous.state.assetOperation) {
+      if (previous.state.assetOperation || previous.state.deletion !== "none") {
         return { status: "open-failed", reason: "busy" };
       }
       previous.state.switching = true;
@@ -408,7 +459,7 @@ export function createCurrentEditingSession({
         }
       }
 
-      const next = createActive(id, loaded.document, loaded.assets);
+      const next = createActive(id, loaded.document, loaded.assets, loaded.contentRevision);
       active = next;
       if (previous !== null) {
         previous.state.active = false;
@@ -426,7 +477,7 @@ export function createCurrentEditingSession({
   };
 
   const open = (id: DraftId): Promise<OpenCurrentEditingSessionResult> => {
-    if (active?.state.draftId === id) {
+    if (active?.state.draftId === id && active.state.deletion === "none") {
       return Promise.resolve({ status: "opened", handle: active.handle });
     }
     if (opening !== null) {
@@ -441,5 +492,78 @@ export function createCurrentEditingSession({
     return promise;
   };
 
-  return { open, flush };
+  const mapDeleteResult = (
+    result: DeleteDraftResult,
+  ): DeleteCurrentEditingSessionResult => {
+    if (result.status === "deleted") return result;
+    if (result.status === "delete-unknown") {
+      return {
+        status: "delete-unknown",
+        ...(result.message === undefined ? {} : { message: result.message }),
+      };
+    }
+    return {
+      status: "delete-failed",
+      reason: result.reason,
+      ...(result.message === undefined ? {} : { message: result.message }),
+    };
+  };
+
+  const performDelete = async (id: DraftId): Promise<DeleteCurrentEditingSessionResult> => {
+    const current = active;
+    if (current === null || current.state.draftId !== id) {
+      return mapDeleteResult(await library.deleteDraft(id));
+    }
+    const state = current.state;
+    if (state.deletion === "in-progress") {
+      return { status: "delete-failed", reason: "busy" };
+    }
+
+    if (state.deletion === "none") {
+      state.deletion = "in-progress";
+      clearAutosaveTimer(state);
+      const assetOperationCompletion = state.assetOperationCompletion;
+      if (assetOperationCompletion !== null) await assetOperationCompletion;
+      const flushed = await drain(state);
+      if (flushed.status === "flush-failed") {
+        state.deletion = "none";
+        return {
+          status: "delete-failed",
+          reason: "flush-failed",
+          ...(flushed.message === undefined ? {} : { message: flushed.message }),
+        };
+      }
+    }
+
+    const result = await library.deleteDraft(id);
+    if (result.status === "delete-unknown") {
+      state.deletion = "unknown";
+      return mapDeleteResult(result);
+    }
+    if (result.status === "delete-failed") {
+      state.deletion = "none";
+      return mapDeleteResult(result);
+    }
+
+    state.active = false;
+    state.deletion = "unknown";
+    clearAutosaveTimer(state);
+    if (active?.state === state) active = null;
+    return { status: "deleted" };
+  };
+
+  const deleteDraft = (id: DraftId): Promise<DeleteCurrentEditingSessionResult> => {
+    if (deleting !== null) {
+      return deleting.id === id
+        ? deleting.promise
+        : Promise.resolve({ status: "delete-failed", reason: "busy" });
+    }
+    const promise = performDelete(id).finally(() => {
+      if (deleting?.promise === promise) deleting = null;
+    });
+    deleting = { id, promise };
+    return promise;
+  };
+
+  return { open, flush, delete: deleteDraft };
 }

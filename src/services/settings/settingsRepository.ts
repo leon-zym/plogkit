@@ -1,10 +1,13 @@
 import type { MetadataPolicy } from "@/core/exportPolicy";
 
-export const APP_SETTINGS_SCHEMA_VERSION = 1;
+export const APP_SETTINGS_SCHEMA_VERSION = 2;
+
+export type DraftThumbnailDisplay = "square" | "original";
 
 export interface AppSettings {
   readonly schemaVersion: typeof APP_SETTINGS_SCHEMA_VERSION;
   readonly defaultMetadataPolicy: MetadataPolicy;
+  readonly draftThumbnailDisplay: DraftThumbnailDisplay;
 }
 
 export interface SettingsFileAdapter {
@@ -22,6 +25,7 @@ export function createDefaultAppSettings(): AppSettings {
   return {
     schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
     defaultMetadataPolicy: "strip",
+    draftThumbnailDisplay: "square",
   };
 }
 
@@ -36,9 +40,13 @@ export function parseAppSettings(input: unknown): AppSettings {
   if (record.defaultMetadataPolicy !== "strip" && record.defaultMetadataPolicy !== "retain-basic") {
     throw new Error("default metadata policy is not supported");
   }
+  if (record.draftThumbnailDisplay !== "square" && record.draftThumbnailDisplay !== "original") {
+    throw new Error("Draft thumbnail display is not supported");
+  }
   return {
     schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
     defaultMetadataPolicy: record.defaultMetadataPolicy,
+    draftThumbnailDisplay: record.draftThumbnailDisplay,
   };
 }
 

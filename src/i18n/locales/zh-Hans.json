@@ -13,6 +13,7 @@
   "home": {
     "eyebrow": "PLOG / 本地",
     "title": "PlogKit",
+    "libraryTitle": "开始整理下一篇。",
     "tagline": "把照片、文字与排版整理好，再发布。",
     "description": "一次选择最多 9 张照片，所有内容只保存在本机。",
     "choosePhotos": "选择照片",
@@ -21,7 +22,38 @@
     "importing": "正在准备照片…",
     "importPartial": "部分照片未能导入，已完成的照片可以继续编辑。",
     "importFailed": "无法准备这些照片，请重新选择。",
-    "recoveryFailed": "无法安全打开上次草稿。你可以重新选择照片开始编辑。"
+    "recoveryFailed": "无法安全打开上次草稿。你可以重新选择照片开始编辑。",
+    "menu": "草稿库菜单",
+    "drafts": "草稿",
+    "loadingDrafts": "正在加载草稿库…",
+    "storageFailed": "无法读取草稿库",
+    "storageFailedDescription": "当前无法可靠读取本地存储，请重试后再修改草稿。",
+    "openFailed": "无法打开该草稿，当前编辑会话未受影响。",
+    "deleteFailed": "未能删除该草稿，请检查设备存储后重试。",
+    "settingsFailed": "无法保存显示方式。",
+    "displayMode": "显示方式",
+    "display": {
+      "square": "正方形",
+      "original": "原始比例"
+    },
+    "deleteDraft": "删除草稿",
+    "openDraft": "打开草稿",
+    "deleteTitle": "删除这个草稿？",
+    "deleteDescription": "草稿及其在 PlogKit 中保存的本地照片将被永久移除。",
+    "corruptTitle": "草稿已损坏",
+    "corruptDescription": "该草稿无法安全打开，你可以将它永久删除。",
+    "draftPosition": "第 {{position}} 个草稿，共 {{total}} 个。",
+    "draftUpdated": "最近编辑于 {{time}}。",
+    "draftPhotoCount": "{{count}} 张照片。",
+    "draftStatus": {
+      "ready": "状态正常。",
+      "generating": "正在生成缩略图。",
+      "corrupt": "草稿已损坏。"
+    },
+    "draftActions": {
+      "ready": "轻点打开，长按删除。",
+      "corrupt": "轻点删除。"
+    }
   },
   "settings": {
     "title": "设置",

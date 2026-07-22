@@ -1,4 +1,3 @@
-import { draftId } from "../draftLibrary";
 import { createExpoDraftRuntimeStorage } from "../expoDraftLibrary";
 
 const mockContents = new Map<string, string>();
@@ -84,6 +83,13 @@ jest.mock("../../image-import/skiaPreviewGenerator", () => ({
   }),
 }));
 
+jest.mock("../expoDraftThumbnailAdapter", () => ({
+  createExpoDraftThumbnailAdapter: () => ({
+    generate: jest.fn(),
+    inspect: jest.fn(),
+  }),
+}));
+
 describe("Expo Draft runtime storage", () => {
   beforeEach(() => {
     mockContents.clear();
@@ -91,25 +97,13 @@ describe("Expo Draft runtime storage", () => {
     mockFailMoveAfterDestinationRemovalTo = null;
   });
 
-  it("atomically replaces the recent Draft locator more than once", async () => {
+  it("exposes only the Draft Library and installs an empty reliable snapshot", async () => {
     const storage = createExpoDraftRuntimeStorage();
 
-    await storage.writeRecentDraftId(draftId("first"));
-    await storage.writeRecentDraftId(draftId("second"));
-
-    await expect(storage.readRecentDraftId()).resolves.toBe("second");
-  });
-
-  it("recovers the previous recent Draft after replacement removes the destination and fails", async () => {
-    const storage = createExpoDraftRuntimeStorage();
-    await storage.writeRecentDraftId(draftId("first"));
-    mockFailMoveAfterDestinationRemovalTo = "memory://documents/plogkit/recent-draft.json";
-
-    await expect(storage.writeRecentDraftId(draftId("second"))).rejects.toThrow(
-      "move failed after destination removal",
+    expect(Object.keys(storage)).toEqual(["library"]);
+    await expect(storage.library.load()).resolves.toEqual({ status: "ready", entries: [] });
+    expect([...mockContents.keys()]).not.toContain(
+      "memory://documents/plogkit/recent-draft.json",
     );
-    mockFailMoveAfterDestinationRemovalTo = null;
-
-    await expect(createExpoDraftRuntimeStorage().readRecentDraftId()).resolves.toBe("first");
   });
 });

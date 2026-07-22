@@ -24,7 +24,11 @@ describe("settings repository", () => {
     const memory = createMemoryFiles();
     const repository = createSettingsRepository(memory.files, "settings.json");
 
-    await expect(repository.load()).resolves.toEqual(createDefaultAppSettings());
+    await expect(repository.load()).resolves.toEqual({
+      schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+      defaultMetadataPolicy: "strip",
+      draftThumbnailDisplay: "square",
+    });
   });
 
   it("falls back to defaults when saved settings are invalid", async () => {
@@ -40,6 +44,7 @@ describe("settings repository", () => {
     const settings: AppSettings = {
       schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
       defaultMetadataPolicy: "retain-basic",
+      draftThumbnailDisplay: "original",
     };
 
     await repository.save(settings);
@@ -49,8 +54,22 @@ describe("settings repository", () => {
   });
 
   it("rejects unsupported schemas", () => {
-    expect(() => parseAppSettings({ schemaVersion: 2, defaultMetadataPolicy: "strip" })).toThrow(
-      "settings schema is not supported",
-    );
+    expect(() =>
+      parseAppSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION + 1,
+        defaultMetadataPolicy: "strip",
+        draftThumbnailDisplay: "square",
+      }),
+    ).toThrow("settings schema is not supported");
+  });
+
+  it("rejects an unsupported global Draft thumbnail display mode", () => {
+    expect(() =>
+      parseAppSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        defaultMetadataPolicy: "strip",
+        draftThumbnailDisplay: "stretch",
+      }),
+    ).toThrow("Draft thumbnail display is not supported");
   });
 });

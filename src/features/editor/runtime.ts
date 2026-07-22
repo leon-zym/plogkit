@@ -1,4 +1,3 @@
-import type { PlogDocument } from "@/core/document";
 import type { EditCommitModule } from "@/core/editing";
 import type { MetadataPolicy } from "@/core/exportPolicy";
 import type {
@@ -6,19 +5,20 @@ import type {
   CreateDraftResult,
   DraftId,
   DraftLibrary,
+  DraftLibraryState,
+  DraftThumbnailPair,
   DraftRecoveryFailure,
   ImportCandidate,
 } from "@/services/drafts/draftLibrary";
 import type {
   CurrentEditingSession,
   CurrentEditingSessionHandle,
+  DeleteCurrentEditingSessionResult,
   FlushCurrentEditingSessionResult,
 } from "@/services/session/currentEditingSession";
 
 export interface DraftRuntimeStorage {
   readonly library: DraftLibrary;
-  readonly readRecentDraftId: () => Promise<DraftId | null>;
-  readonly writeRecentDraftId: (id: DraftId) => Promise<void>;
 }
 
 export interface EditorRuntimeDependencies {
@@ -28,16 +28,15 @@ export interface EditorRuntimeDependencies {
   readonly loadMetadataPolicy: () => Promise<MetadataPolicy>;
 }
 
-export type RestoreDraftResult =
-  | { readonly status: "none" }
-  | { readonly status: "restored"; readonly draftId: DraftId; readonly document: PlogDocument }
+export type OpenDraftResult =
   | {
-      readonly status: "recovery-failed";
-      readonly reason:
-        | DraftRecoveryFailure
-        | "locator-corrupt"
-        | "session-busy"
-        | "flush-failed";
+      readonly status: "opened";
+      readonly draftId: DraftId;
+      readonly contentRevision: number;
+    }
+  | {
+      readonly status: "open-failed";
+      readonly reason: DraftRecoveryFailure | "flush-failed" | "busy";
     };
 
 export interface PreparedEditor {
@@ -56,24 +55,33 @@ export type PrepareEditorResult =
     }
   | {
       readonly status: "unavailable";
-      readonly reason:
-        | DraftRecoveryFailure
-        | "locator-corrupt"
-        | "session-busy"
-        | "flush-failed"
-        | "busy"
-        | "session-inactive";
+      readonly reason: DraftRecoveryFailure | "flush-failed" | "busy" | "session-inactive";
     };
 
 export class EditorRuntime {
   private readonly dependencies: EditorRuntimeDependencies;
   private handle: CurrentEditingSessionHandle | null = null;
-  private restorePromise: Promise<RestoreDraftResult> | null = null;
   private preparePromise: Promise<PrepareEditorResult> | null = null;
   private importErrors = 0;
 
   constructor(dependencies: EditorRuntimeDependencies) {
     this.dependencies = dependencies;
+  }
+
+  loadDraftLibrary(): Promise<DraftLibraryState> {
+    return this.dependencies.storage.library.load();
+  }
+
+  getDraftLibraryState(): DraftLibraryState {
+    return this.dependencies.storage.library.getState();
+  }
+
+  subscribeDraftLibrary(listener: () => void): () => void {
+    return this.dependencies.storage.library.subscribe(listener);
+  }
+
+  reportThumbnailLoadFailure(id: DraftId, pair: DraftThumbnailPair): void {
+    this.dependencies.storage.library.reportThumbnailLoadFailure(id, pair);
   }
 
   takeImportErrorCount(): number {
@@ -82,52 +90,23 @@ export class EditorRuntime {
     return count;
   }
 
-  async restore(): Promise<RestoreDraftResult> {
-    if (this.handle !== null) {
-      return {
-        status: "restored",
-        draftId: this.handle.draftId,
-        document: this.handle.editing.read().document,
-      };
-    }
-    this.restorePromise ??= (async () => {
-      let id: DraftId | null;
-      try {
-        id = await this.dependencies.storage.readRecentDraftId();
-      } catch {
-        return { status: "recovery-failed", reason: "locator-corrupt" } as const;
-      }
-      if (id === null) return { status: "none" } as const;
-      const result = await this.dependencies.session.open(id);
-      if (result.status === "open-failed") {
-        const reason = result.reason === "busy" ? "session-busy" : result.reason;
-        return { status: "recovery-failed", reason } as const;
-      }
-      this.handle = result.handle;
-      return {
-        status: "restored",
-        draftId: id,
-        document: result.handle.editing.read().document,
-      } as const;
-    })();
-    try {
-      return await this.restorePromise;
-    } finally {
-      this.restorePromise = null;
-    }
+  async openDraft(id: DraftId): Promise<OpenDraftResult> {
+    const result = await this.dependencies.session.open(id);
+    if (result.status === "open-failed") return result;
+    this.handle = result.handle;
+    return {
+      status: "opened",
+      draftId: id,
+      contentRevision: result.handle.contentRevision,
+    };
   }
 
   prepareEditor(): Promise<PrepareEditorResult> {
     if (this.preparePromise !== null) return this.preparePromise;
     this.preparePromise = (async () => {
       try {
-        const restored = await this.restore();
-        if (restored.status === "none") return { status: "no-draft" };
-        if (restored.status === "recovery-failed") {
-          return { status: "unavailable", reason: restored.reason };
-        }
         const handle = this.handle;
-        if (handle === null) return { status: "unavailable", reason: "session-inactive" };
+        if (handle === null) return { status: "no-draft" };
         const previews = await handle.preparePreviews();
         if (previews.status === "preview-failed") {
           return {
@@ -157,21 +136,8 @@ export class EditorRuntime {
     }
     const result = await this.dependencies.storage.library.create(candidates, { metadataPolicy });
     if (result.status !== "created") return result;
-    const previousDraftId = this.handle?.draftId ?? null;
-    await this.dependencies.storage.writeRecentDraftId(result.draftId);
-    let opened: Awaited<ReturnType<CurrentEditingSession["open"]>>;
-    try {
-      opened = await this.dependencies.session.open(result.draftId);
-    } catch (error) {
-      if (previousDraftId !== null) {
-        await this.dependencies.storage.writeRecentDraftId(previousDraftId);
-      }
-      throw error;
-    }
+    const opened = await this.dependencies.session.open(result.draftId);
     if (opened.status === "open-failed") {
-      if (previousDraftId !== null) {
-        await this.dependencies.storage.writeRecentDraftId(previousDraftId);
-      }
       throw new Error(`created Draft could not become current: ${opened.reason}`);
     }
     this.handle = opened.handle;
@@ -179,7 +145,13 @@ export class EditorRuntime {
     return result;
   }
 
-  async flush(): Promise<FlushCurrentEditingSessionResult> {
+  async deleteDraft(id: DraftId): Promise<DeleteCurrentEditingSessionResult> {
+    const result = await this.dependencies.session.delete(id);
+    if (result.status === "deleted" && this.handle?.draftId === id) this.handle = null;
+    return result;
+  }
+
+  flush(): Promise<FlushCurrentEditingSessionResult> {
     return this.dependencies.session.flush();
   }
 }
