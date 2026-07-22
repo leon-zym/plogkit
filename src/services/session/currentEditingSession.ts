@@ -477,13 +477,13 @@ export function createCurrentEditingSession({
     if (deletions.has(id)) {
       return Promise.resolve({ status: "open-failed", reason: "busy" });
     }
-    if (active?.state.draftId === id && active.state.deletion === "none") {
-      return Promise.resolve({ status: "opened", handle: active.handle });
-    }
     if (opening !== null) {
       return opening.id === id
         ? opening.promise
         : Promise.resolve({ status: "open-failed", reason: "busy" });
+    }
+    if (active?.state.draftId === id && active.state.deletion === "none") {
+      return Promise.resolve({ status: "opened", handle: active.handle });
     }
     const promise = performOpen(id).finally(() => {
       if (opening?.promise === promise) opening = null;

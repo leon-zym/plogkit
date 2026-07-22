@@ -382,6 +382,27 @@ describe("current editing session", () => {
     expect(library.readCalls).toEqual([]);
   });
 
+  it("rejects a stale idempotent open while switching to another Draft", async () => {
+    const { library, session } = setup();
+    await session.open(firstDraftId);
+    let releaseRead: (() => void) | undefined;
+    library.readGates.set(secondDraftId, new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    }));
+
+    const switching = session.open(secondDraftId);
+
+    await expect(session.open(firstDraftId)).resolves.toEqual({
+      status: "open-failed",
+      reason: "busy",
+    });
+    releaseRead?.();
+    await expect(switching).resolves.toMatchObject({
+      status: "opened",
+      handle: { draftId: secondDraftId },
+    });
+  });
+
   it("keeps low-cost open independent from preview decoding", async () => {
     const { library, session } = setup();
     const readPreview = jest.spyOn(library, "readPreview");
