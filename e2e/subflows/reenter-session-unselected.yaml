@@ -2,10 +2,12 @@ appId: com.leonzym.plogkit
 ---
 - tapOn:
     id: editor-back
-- assertVisible:
-    id: resume-session
+- extendedWaitUntil:
+    visible:
+      id: draft-item-0
+    timeout: 10000
 - tapOn:
-    id: resume-session
+    id: draft-item-0
 - assertVisible:
     id: editor-screen
 - waitForAnimationToEnd

@@ -1,0 +1,86 @@
+appId: com.leonzym.plogkit
+name: Browse, switch, configure, and delete local Drafts
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: background-color-c9d3c2
+- tapOn:
+    id: editor-back
+- extendedWaitUntil:
+    visible:
+      id: draft-item-0
+    timeout: 10000
+- tapOn:
+    id: home-menu
+- tapOn:
+    id: display-original
+- tapOn:
+    id: home-menu
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: display-original
+- tapOn:
+    id: close-home-menu
+- tapOn:
+    id: choose-photos
+- runFlow:
+    when:
+      platform: iOS
+    file: ../subflows/select-two-photos-ios.yaml
+- runFlow:
+    when:
+      platform: Android
+    file: ../subflows/select-two-photos-android.yaml
+- extendedWaitUntil:
+    visible:
+      id: editor-screen
+    timeout: 30000
+- tapOn:
+    id: background-color-e8d8bd
+- tapOn:
+    id: editor-back
+- extendedWaitUntil:
+    visible:
+      id: draft-item-1
+    timeout: 10000
+- tapOn:
+    id: draft-item-1
+- extendedWaitUntil:
+    visible:
+      id: editor-screen
+    timeout: 10000
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: background-color-c9d3c2
+- tapOn:
+    id: editor-back
+- extendedWaitUntil:
+    visible:
+      id: draft-item-1
+    timeout: 10000
+- longPressOn:
+    id: draft-item-1
+- tapOn:
+    id: delete-draft-action
+- tapOn:
+    id: confirm-delete
+- extendedWaitUntil:
+    notVisible:
+      id: draft-item-1
+    timeout: 10000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: draft-item-0
+    timeout: 30000
+- assertNotVisible:
+    id: draft-item-1
+- tapOn:
+    id: home-menu
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: display-original

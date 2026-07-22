@@ -5,6 +5,8 @@ name: Global metadata default stays local and independent
 - assertVisible:
     id: home-screen
 - tapOn:
+    id: home-menu
+- tapOn:
     id: open-settings
 - assertVisible:
     id: settings-screen

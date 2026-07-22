@@ -1,6 +1,6 @@
 # F08 本地草稿库
 
-- 状态：已确认
+- 状态：已实现
 - 关联：[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0031](../adr/0031-draft-publication-record.md)、[ADR 0032](../adr/0032-draft-library-load-barrier.md)、[ADR 0033](../adr/0033-per-draft-deletion-marker.md)、[ADR 0034](../adr/0034-draft-content-revision.md)、[ADR 0035](../adr/0035-draft-thumbnail-generation.md)
 - 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
@@ -32,7 +32,7 @@
 
 #### Scenario: 首页同时展示新建入口与草稿库
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户启动应用
 - THEN 首页上方立即展示 Banner 与“选择照片”按钮
 - AND 应用不自动进入 Editor，也不展示“继续上次编辑”快捷入口
@@ -41,7 +41,7 @@
 
 #### Scenario: 空草稿库不重复新建入口
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 设备本地没有草稿
 - WHEN 草稿库完成冷启动读取
 - THEN Banner 仍展示“选择照片”按钮
@@ -49,7 +49,7 @@
 
 #### Scenario: 从首页创建草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户位于首页
 - WHEN 用户点击 Banner 中的“选择照片”并至少成功导入一张照片
 - THEN 应用成功创建新草稿后进入该草稿的 Editor
@@ -60,7 +60,7 @@
 
 #### Scenario: 创建新草稿不覆盖已有草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿库已有一个可正常打开的草稿
 - WHEN 用户从首页成功创建另一个草稿
 - THEN 新草稿进入 Editor
@@ -68,7 +68,7 @@
 
 #### Scenario: 创建失败不留下可见草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户开始创建一个草稿
 - WHEN 创建在成功提交前失败或进程终止
 - THEN 本次未完成创建不会在当前进程或下次启动时显示为正常或损坏草稿
@@ -78,7 +78,7 @@
 
 #### Scenario: 以纯缩略图 Grid 展示草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿库包含多个草稿
 - WHEN 首页展示 Grid
 - THEN 手机每行展示 3 个无边框正方形 item，item 之间保留小间距
@@ -88,7 +88,7 @@
 
 #### Scenario: 按最近编辑时间排序
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 多个草稿均有最近编辑时间
 - WHEN 首页展示草稿
 - THEN 草稿按最近编辑时间倒序排列
@@ -96,7 +96,7 @@
 
 #### Scenario: 新内容修订更新排序时间
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 一个已有草稿
 - WHEN 普通编辑、成功撤销或成功重做形成不同的统一文档并保存成功
 - THEN 最近编辑时间与新内容修订一同提交
@@ -105,7 +105,7 @@
 
 #### Scenario: 非编辑活动不改变排序
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 一个已有草稿
 - WHEN 用户只打开或浏览草稿、返回首页、导出、重建缩略图或执行维护
 - THEN 草稿的最近编辑时间不变
@@ -113,7 +113,7 @@
 
 #### Scenario: 缺少最近编辑时间的条目置顶
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 一个损坏草稿无法取得可信的最近编辑时间
 - WHEN 首页展示草稿
 - THEN 该条目排在所有具有最近编辑时间的草稿之前
@@ -121,7 +121,7 @@
 
 #### Scenario: 冷启动只安装完整可靠结果
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 应用进程刚启动
 - WHEN 草稿库加载
 - THEN 完整、排序稳定且已区分正常与损坏条目的结果就绪前，Grid 持续展示加载状态
@@ -129,7 +129,7 @@
 
 #### Scenario: 加载与创建并发不丢失草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 冷启动读取尚未完成，用户已经开始选择照片
 - WHEN 至少一张照片导入成功
 - THEN 应用在可靠草稿库状态就绪后完成创建
@@ -137,7 +137,7 @@
 
 #### Scenario: 同进程返回首页不重复加载
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿库已经在当前进程成功加载
 - WHEN 创建、保存或删除成功后用户返回首页
 - THEN 首页立即反映最新草稿、顺序或删除结果
@@ -147,7 +147,7 @@
 
 #### Scenario: 为完整构图提供两种缩略图表示
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿产生新的已保存内容修订
 - WHEN 应用异步生成草稿缩略图
 - THEN 生成适合正方形裁切铺满的表示与保持作品原始比例的表示
@@ -156,7 +156,7 @@
 
 #### Scenario: 两种缩略图按同一内容修订切换
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 新内容修订的两种缩略图正在生成
 - WHEN 只有其中一种完成，或草稿再次形成更新内容
 - THEN Grid 不混合展示不同内容修订的两种缩略图
@@ -164,7 +164,7 @@
 
 #### Scenario: 切换全局显示方式
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿库已有可用缩略图
 - WHEN 用户点击首页的菜单图标并展开“显示方式”
 - THEN 菜单提供“正方形”和“原始比例”两个选项
@@ -175,7 +175,7 @@
 
 #### Scenario: 最新缩略图尚不可用时降级
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿完整可读，但最新内容修订的缩略图尚未生成或生成失败
 - WHEN Grid 展示该草稿
 - THEN 有旧的完整缩略图对时继续显示旧图，不展示过期或损坏警告
@@ -186,7 +186,7 @@
 
 #### Scenario: 点击正常草稿进入编辑
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN Grid 中有多个正常草稿
 - WHEN 用户点击其中一个 item
 - THEN 应用打开用户所选草稿并进入 Editor
@@ -194,7 +194,7 @@
 
 #### Scenario: 同进程重新打开同一草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户从 Editor 返回首页时只保存、没有切换或删除当前草稿
 - WHEN 用户再次点击同一草稿
 - THEN 应用复用当前编辑会话
@@ -202,7 +202,7 @@
 
 #### Scenario: 打开其他草稿失败
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 当前有一个活跃编辑会话
 - WHEN 用户打开另一草稿，但当前保存或目标读取失败
 - THEN 应用不进入目标 Editor
@@ -210,7 +210,7 @@
 
 #### Scenario: 返回首页按内容修订处理滚动位置
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户从 Grid 中打开一个草稿
 - WHEN 该草稿形成新的已保存内容修订后返回首页
 - THEN Grid 滚动到顶部并展示最新编辑的草稿
@@ -221,7 +221,7 @@
 
 #### Scenario: 长按并确认删除正常草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN Grid 中有一个正常草稿
 - WHEN 用户长按 item
 - THEN 应用打开包含“删除草稿”的操作菜单
@@ -231,7 +231,7 @@
 
 #### Scenario: 删除当前编辑会话绑定的草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户返回首页后，目标草稿仍绑定当前编辑会话
 - WHEN 用户确认删除该草稿
 - THEN 应用阻止该会话产生新的编辑与自动保存，并先保存最新文档
@@ -240,7 +240,7 @@
 
 #### Scenario: 删除当前草稿前保存失败
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 当前草稿仍有未成功保存的修改
 - WHEN 用户确认删除，但保存失败
 - THEN 删除不提交，草稿保持完整可见
@@ -248,7 +248,7 @@
 
 #### Scenario: 无法确认删除结果
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户已经确认删除一个草稿
 - WHEN 存储故障使应用无法判断删除是否成功
 - THEN 首页显示页面级存储失败提示与“重试”按钮，不展示猜测的列表结果
@@ -256,7 +256,7 @@
 
 #### Scenario: 删除后的物理清理中断不使草稿重新出现
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 应用已经确认删除成功
 - WHEN 物理文件清理失败或进程终止
 - THEN 删除结果保持成立，草稿不会重新出现在 Grid 中且不能重新打开
@@ -266,7 +266,7 @@
 
 #### Scenario: 可恢复保存中断不误报损坏
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 草稿保存曾在替换过程中终止
 - WHEN 用户下次进入草稿库
 - THEN 应用恢复到中断前或已经完整提交的新版本
@@ -274,7 +274,7 @@
 
 #### Scenario: 已确认损坏的单个草稿不阻塞列表
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 一个草稿已经被可靠确认无法安全打开，其他草稿正常
 - WHEN 首页完成加载
 - THEN 正常草稿和该损坏草稿同时出现在可靠 Grid 中
@@ -282,7 +282,7 @@
 
 #### Scenario: 在 Grid 中展示损坏草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 一个草稿经过自动恢复后仍无法安全打开
 - WHEN Grid 展示该条目
 - THEN 有旧草稿缩略图时继续使用旧图，否则使用损坏占位图
@@ -291,7 +291,7 @@
 
 #### Scenario: 点击损坏草稿只允许删除
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN Grid 中有一个损坏草稿
 - WHEN 用户点击该 item
 - THEN 应用提示“草稿已损坏”并询问是否删除
@@ -299,7 +299,7 @@
 
 #### Scenario: 无法可靠读取任一必需事实时整体失败
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 应用无法枚举草稿库，或任一草稿的必需事实因 I/O 故障无法可靠判定
 - WHEN 首页加载草稿库
 - THEN 应用显示页面级读取失败提示与“重试”按钮
@@ -309,7 +309,7 @@
 
 #### Scenario: 纯缩略图 item 仍可被辅助技术区分和操作
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN Grid 不显示可见 metadata 或常驻操作按钮
 - WHEN 辅助技术聚焦一个正常或损坏 item
 - THEN 本地化无障碍信息包含当前位置与总数、可用时的最近编辑时间、照片数量，以及正常、正在生成缩略图或损坏状态
