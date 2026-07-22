@@ -1,7 +1,7 @@
 # F06 会话自动保存与恢复
 
 - 状态：已实现
-- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
+- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[ADR 0027](../adr/0027-draft-root-record.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](../adr/0030-draft-library-enumeration-snapshot.md)
 - 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
@@ -12,12 +12,12 @@
 
 - 每次文档提交点触发自动保存调度。
 - 按 `DraftId` 幂等打开，切换时先保存当前草稿再原子切换。
-- 文档带 `schemaVersion`。本次产品发布前 baseline reset 不保留旧数据；此后升级恢复迁移纪律。
+- 文档带 `schemaVersion`。草稿库产品化按 ADR 0029 再次建立发布前 baseline，不保留旧数据；此后升级恢复迁移纪律。
 
 ## 非目标
 
-- 当前版本不包含草稿列表的命名、排序、缩略图、删除交互，云备份与跨设备同步。
-- 与 Issue #9 关联的草稿库导航场景是已确认的后续能力，不属于当前版本验收；Issue #14/#15 只建立其依赖的 aggregate 与 session seam。
+- 草稿库 Grid、排序、缩略图、删除和损坏条目交互由 [F08](F08-draft-library.md) 验收，不在本 feature 重复。
+- 云备份与跨设备同步不属于当前范围。
 
 ## 需求与场景
 
@@ -42,19 +42,13 @@
 - THEN 应用进入 Editor 并展示草稿内容
 - AND 预览缺失或损坏时自动重建，可选拍摄信息缺失时仍可编辑
 
-#### Scenario: 进程终止后恢复当前会话
-
-- GIVEN 当前编辑会话的最新编辑已持久化，应用被系统或用户强制终止
-- WHEN 用户重新启动应用并选择“继续编辑”
-- THEN 应用进入 Editor，画布内容与终止前一致
-
 #### Scenario: 从草稿库继续终止前的草稿
 
 - 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
 - GIVEN 当前草稿的最新编辑已持久化，应用被系统或用户强制终止
 - WHEN 用户重新启动应用
 - THEN 应用先展示草稿库，且该草稿仍可被发现，不自动进入 Editor
-- WHEN 用户打开该草稿，或使用“继续上次编辑”快捷入口
+- WHEN 用户从 Grid 打开该草稿
 - THEN 应用进入 Editor，画布内容与终止前一致
 - AND 新的当前编辑会话不保留上个进程的 undo/redo history
 
@@ -70,8 +64,8 @@
 - 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
 - GIVEN 当前草稿有一个活跃会话
 - WHEN 用户打开另一个草稿
-- THEN 应用先保存当前最新修改，确认目标草稿可用后再显示它
-- AND 保存或打开失败时继续显示原草稿
+- THEN 应用先保存当前最新修改，确认目标草稿可用后再进入其 Editor
+- AND 保存或打开失败时不进入目标 Editor，原当前编辑会话保持不变
 
 #### Scenario: 后台切换不丢失
 
@@ -85,7 +79,7 @@
 - GIVEN 用户正在编辑一个草稿
 - WHEN 用户返回草稿库后再次打开同一 `DraftId`
 - THEN 返回时只 flush 而不结束当前编辑会话
-- AND 同进程内的 undo/redo history 保留；切换草稿或进程终止才结束会话
+- AND 同进程内的 undo/redo history 保留；切换草稿、删除所绑定的草稿或进程终止才结束会话
 
 #### Scenario: 主动离开时 flush 失败
 

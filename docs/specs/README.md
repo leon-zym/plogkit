@@ -21,3 +21,4 @@
 | [F05](F05-undo-redo.md)           | 撤销与重做         | 已实现 |
 | [F06](F06-session-persistence.md) | 会话自动保存与恢复 | 已实现 |
 | [F07](F07-image-import.md)        | 图片导入与资产管理 | 已实现 |
+| [F08](F08-draft-library.md)       | 本地草稿库         | 已确认 |
