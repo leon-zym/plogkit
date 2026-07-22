@@ -38,6 +38,19 @@ describe("settings repository", () => {
     await expect(repository.load()).resolves.toEqual(createDefaultAppSettings());
   });
 
+  it("migrates the v1 metadata default and adds the square Draft display mode", async () => {
+    const memory = createMemoryFiles(
+      '{"schemaVersion":1,"defaultMetadataPolicy":"retain-basic"}',
+    );
+    const repository = createSettingsRepository(memory.files, "settings.json");
+
+    await expect(repository.load()).resolves.toEqual({
+      schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+      defaultMetadataPolicy: "retain-basic",
+      draftThumbnailDisplay: "square",
+    });
+  });
+
   it("persists the global metadata default independently", async () => {
     const memory = createMemoryFiles();
     const repository = createSettingsRepository(memory.files, "settings.json");
