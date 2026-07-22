@@ -59,6 +59,7 @@ export default function HomeScreen() {
     editorRuntime.getDraftLibraryState(),
   );
   const [settings, setSettings] = useState<AppSettings>(createDefaultAppSettings());
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [actionTarget, setActionTarget] = useState<DraftListEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
@@ -103,7 +104,10 @@ export default function HomeScreen() {
     });
     void editorRuntime.loadDraftLibrary().then(install);
     void settingsRuntime.load().then((loaded) => {
-      if (active) setSettings(loaded);
+      if (active) {
+        setSettings(loaded);
+        setSettingsLoaded(true);
+      }
     });
     return () => {
       active = false;
@@ -170,6 +174,7 @@ export default function HomeScreen() {
   };
 
   const saveDisplay = async (display: DraftThumbnailDisplay) => {
+    if (!settingsLoaded) return;
     const next: AppSettings = {
       ...settings,
       schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
@@ -409,10 +414,18 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityLabel={t(`home.display.${display}`)}
                 accessibilityRole="radio"
-                accessibilityState={{ checked: settings.draftThumbnailDisplay === display }}
+                accessibilityState={{
+                  checked: settings.draftThumbnailDisplay === display,
+                  disabled: !settingsLoaded,
+                }}
+                disabled={!settingsLoaded}
                 key={display}
                 onPress={() => void saveDisplay(display)}
-                style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  !settingsLoaded && styles.disabledMenuRow,
+                  pressed && settingsLoaded && styles.pressed,
+                ]}
                 testID={`display-${display}`}
               >
                 <Text style={styles.menuRowText}>{t(`home.display.${display}`)}</Text>
@@ -637,6 +650,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.s3,
     borderRadius: radii.r12,
   },
+  disabledMenuRow: { opacity: 0.5 },
   menuRowText: { ...typography.body, color: colors.ink },
   menuCheck: { color: colors.accent, fontSize: 18 },
   menuArrow: { color: colors.inkMuted, fontSize: 26 },

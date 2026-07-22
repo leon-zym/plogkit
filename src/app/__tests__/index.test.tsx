@@ -187,6 +187,44 @@ describe("Home Draft Library", () => {
     });
   });
 
+  it("waits for loaded settings before saving the global display mode", async () => {
+    state = readyState();
+    let resolveSettings: ((value: {
+      schemaVersion: 2;
+      defaultMetadataPolicy: "retain-basic";
+      draftThumbnailDisplay: "square";
+    }) => void) | undefined;
+    settings.load.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSettings = resolve;
+    }));
+    const view = await render(<HomeScreen />);
+
+    await act(async () => fireEvent.press(view.getByTestId("home-menu")));
+    const original = view.getByTestId("display-original");
+    expect(original.props.accessibilityState).toEqual(expect.objectContaining({
+      checked: false,
+      disabled: true,
+    }));
+    await act(async () => fireEvent.press(original));
+    expect(settings.save).not.toHaveBeenCalled();
+
+    await act(async () => resolveSettings?.({
+      schemaVersion: 2,
+      defaultMetadataPolicy: "retain-basic",
+      draftThumbnailDisplay: "square",
+    }));
+    await waitFor(() => expect(
+      view.getByTestId("display-original").props.accessibilityState,
+    ).toEqual(expect.objectContaining({ checked: false, disabled: false })));
+    await act(async () => fireEvent.press(view.getByTestId("display-original")));
+
+    expect(settings.save).toHaveBeenCalledWith({
+      schemaVersion: 2,
+      defaultMetadataPolicy: "retain-basic",
+      draftThumbnailDisplay: "original",
+    });
+  });
+
   it("scrolls to the top only when the opened Draft returns with a new content revision", async () => {
     const scrollToOffset = jest.spyOn(FlatList.prototype, "scrollToOffset");
     state = readyState();
