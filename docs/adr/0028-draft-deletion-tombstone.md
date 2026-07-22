@@ -1,7 +1,8 @@
 # ADR 0028：草稿删除先提交待删除标记再异步清理
 
-- 状态：已接受（2026-07-22）
-- 关联：ADR 0022、0025、0027、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #10](https://github.com/leon-zym/plogkit/issues/10)
+- 状态：部分修订（2026-07-22 接受；见 [ADR 0033](0033-per-draft-deletion-marker.md)）
+- 修订：ADR 0022、0025
+- 关联：ADR 0027、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #10](https://github.com/leon-zym/plogkit/issues/10)
 
 ## 背景
 

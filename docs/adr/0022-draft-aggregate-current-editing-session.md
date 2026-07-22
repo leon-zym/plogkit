@@ -1,6 +1,6 @@
 # ADR 0022：以草稿 aggregate 深化持久化与当前编辑会话
 
-- 状态：部分修订（2026-07-16 接受；见 [ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)）
+- 状态：部分修订（2026-07-16 接受；见 [ADR 0028](0028-draft-deletion-tombstone.md)、[ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)、[ADR 0031](0031-draft-publication-record.md)、[ADR 0033](0033-per-draft-deletion-marker.md)）
 - 修订：ADR 0003、0006
 - 关联：ADR 0004、0021、[F06](../specs/F06-session-persistence.md)、[F07](../specs/F07-image-import.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 

@@ -1,8 +1,8 @@
 # F07 图片导入与资产管理
 
 - 状态：已实现
-- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
-- 实施跟踪：[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
+- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0017](../adr/0017-share-extension-deferred.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[ADR 0031](../adr/0031-draft-publication-record.md)
+- 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
 
