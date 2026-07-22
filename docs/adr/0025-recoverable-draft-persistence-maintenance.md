@@ -1,6 +1,6 @@
 # ADR 0025：草稿持久化采用可恢复替换与显式非活跃维护
 
-- 状态：部分修订（2026-07-20 接受；见 [ADR 0030](0030-draft-library-enumeration-snapshot.md)）
+- 状态：部分修订（2026-07-20 接受；见 [ADR 0028](0028-draft-deletion-tombstone.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)、[ADR 0031](0031-draft-publication-record.md)）
 - 关联：ADR 0022、0023、[F04](../specs/F04-export.md)、[F06](../specs/F06-session-persistence.md)、[F07](../specs/F07-image-import.md)、[Issue #10](https://github.com/leon-zym/plogkit/issues/10)
 
 ## 背景

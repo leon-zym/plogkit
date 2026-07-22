@@ -1,12 +1,12 @@
 # F06 会话自动保存与恢复
 
 - 状态：已实现
-- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[ADR 0027](../adr/0027-draft-root-record.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](../adr/0030-draft-library-enumeration-snapshot.md)
+- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[ADR 0027](../adr/0027-draft-root-record.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0033](../adr/0033-per-draft-deletion-marker.md)、[ADR 0034](../adr/0034-draft-content-revision.md)
 - 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
 
-当前编辑会话绑定一个 `DraftId`，自动保存其统一文档，并在打开、切换、返回草稿库或进入后台时保持明确的 flush 与 dirty/retry 语义。
+当前编辑会话绑定一个 `DraftId`，自动保存其草稿根记录，并在打开、切换、返回草稿库或进入后台时保持明确的 flush 与 dirty/retry 语义。
 
 ## 范围
 
@@ -31,6 +31,14 @@
 - THEN 当前 `DraftId` 的持久化统一文档反映最新文档状态
 
 （注：当可见界面不足以证明持久化结果时，持久化草稿文件可作为 E2E 状态断言的观测点，见 [ADR 0011](../adr/0011-testing-strategy.md)。）
+
+#### Scenario: 不同内容与排序时间作为同一修订提交
+
+- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- GIVEN 当前草稿已有一个成功保存的内容修订
+- WHEN 不同的统一文档保存成功
+- THEN 文档、内容修订号与最近编辑时间作为同一个完整根记录提交
+- AND 相同文档重复保存或保存失败不增加修订号，也不改变最近编辑时间
 
 ### 需求 2：打开与切换
 

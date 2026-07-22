@@ -1,6 +1,6 @@
 # ADR 0030：草稿库以冷启动枚举构建进程内权威快照
 
-- 状态：已接受（2026-07-22）
+- 状态：部分修订（2026-07-22 接受；见 [ADR 0031](0031-draft-publication-record.md)、[ADR 0032](0032-draft-library-load-barrier.md)）
 - 修订：ADR 0022、0025
 - 关联：ADR 0027、0028、0029、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
