@@ -300,6 +300,9 @@ export default function HomeScreen() {
     );
   };
 
+  const showStorageFailure =
+    unknownDeletion !== null || libraryState.status === "storage-failed";
+
   const banner = (
     <View style={styles.banner}>
       <View style={styles.bannerTopline}>
@@ -337,14 +340,13 @@ export default function HomeScreen() {
       ) : null}
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionTitle}>{t("home.drafts")}</Text>
-        {libraryState.status === "ready" ? (
+        {!showStorageFailure && libraryState.status === "ready" ? (
           <Text style={styles.sectionCount}>{libraryState.entries.length}</Text>
         ) : null}
       </View>
     </View>
   );
 
-  const showStorageFailure = unknownDeletion !== null || libraryState.status === "storage-failed";
   const entries = !showStorageFailure && libraryState.status === "ready" ? libraryState.entries : [];
 
   return (

@@ -459,6 +459,30 @@ describe("Draft Library", () => {
     });
   });
 
+  it("does not let a failing state observer change a committed save result", async () => {
+    const { library, setNow } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    const unsubscribe = library.subscribe(() => {
+      throw new Error("observer failed");
+    });
+    setNow("2026-07-22T09:00:00.000Z");
+
+    await expect(
+      library.save(
+        created.draftId,
+        updateDocument(created.document, {
+          canvas: { ...created.document.canvas, backgroundColor: "#445566" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "saved", contentRevision: 2 });
+    expect(library.getState()).toMatchObject({
+      status: "ready",
+      entries: [{ status: "ready", contentRevision: 2 }],
+    });
+    unsubscribe();
+  });
+
   it("switches square and original thumbnails only as one revision-matched pair", async () => {
     const { files, library, setNow, setThumbnailGenerate, thumbnailSizes } = setup();
     const created = await createDraft(library, [candidate("one")]);
@@ -618,6 +642,27 @@ describe("Draft Library", () => {
         (uri) => uri.includes("/thumbnails/") && uri.endsWith(".jpg"),
       ),
     ).toEqual(generatedBeforeFailure);
+  });
+
+  it("drops an old thumbnail pair when a corrupt Draft cannot decode it", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    await files.writeText(`${firstDraftUri}/draft.json`, "not-json");
+    const restarted = createLibrary();
+    const loaded = await restarted.load();
+    const entry = loaded.status === "ready" ? loaded.entries[0] : undefined;
+    if (entry?.status !== "corrupt" || entry.thumbnail === null) {
+      throw new Error("expected a corrupt Draft with its old thumbnail pair");
+    }
+
+    restarted.reportThumbnailLoadFailure(created.draftId, entry.thumbnail);
+
+    expect(restarted.getState()).toMatchObject({
+      status: "ready",
+      entries: [{ status: "corrupt", thumbnail: null }],
+    });
   });
 
   it("separates proven corruption from retryable page-level storage failure", async () => {

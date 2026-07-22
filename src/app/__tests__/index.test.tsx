@@ -117,8 +117,12 @@ describe("Home Draft Library", () => {
   });
 
   it("shows the creation Banner immediately while the reliable Grid is loading", async () => {
+    let finishLoading!: (next: DraftLibraryState) => void;
     runtime.loadDraftLibrary.mockImplementation(
-      () => new Promise<DraftLibraryState>(() => undefined),
+      () =>
+        new Promise<DraftLibraryState>((resolve) => {
+          finishLoading = resolve;
+        }),
     );
 
     const view = await render(<HomeScreen />);
@@ -127,6 +131,7 @@ describe("Home Draft Library", () => {
     expect(view.getByTestId("home-loading")).toBeTruthy();
     expect(view.queryByTestId("resume-session")).toBeNull();
     expect(view.queryByTestId("draft-item-0")).toBeNull();
+    await act(async () => finishLoading({ status: "loading" }));
     view.unmount();
   });
 
@@ -239,12 +244,14 @@ describe("Home Draft Library", () => {
       .mockResolvedValueOnce({ status: "deleted" });
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("draft-item-0")).toBeTruthy());
+    expect(view.getByText("2")).toBeTruthy();
     await act(async () => fireEvent(view.getByTestId("draft-item-0"), "longPress"));
     await act(async () => fireEvent.press(view.getByTestId("delete-draft-action")));
     await act(async () => fireEvent.press(view.getByTestId("confirm-delete")));
 
     expect(view.getByTestId("home-storage-failed")).toBeTruthy();
     expect(view.queryByTestId("draft-item-0")).toBeNull();
+    expect(view.queryByText("2")).toBeNull();
     await act(async () => fireEvent.press(view.getByTestId("retry-draft-deletion")));
     expect(runtime.deleteDraft).toHaveBeenNthCalledWith(2, firstId);
   });

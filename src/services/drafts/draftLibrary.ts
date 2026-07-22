@@ -768,7 +768,13 @@ export function createDraftLibrary({
 
   const publishState = (next: DraftLibraryState): DraftLibraryState => {
     state = next;
-    for (const listener of listeners) listener();
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch {
+        // Observers cannot change an already established storage result.
+      }
+    }
     return next;
   };
 
@@ -1967,15 +1973,25 @@ export function createDraftLibrary({
 
   const reportThumbnailLoadFailure = (id: DraftId, pair: DraftThumbnailPair): void => {
     if (state.status !== "ready") return;
-    const entry = state.entries.find(
-      (candidate): candidate is Extract<DraftListEntry, { status: "ready" }> =>
-        candidate.status === "ready" && candidate.draftId === id,
-    );
+    const entry = state.entries.find((candidate) => candidate.draftId === id);
     if (
       entry?.thumbnail === null ||
       entry?.thumbnail.squareUri !== pair.squareUri ||
       entry.thumbnail.originalUri !== pair.originalUri
     ) {
+      return;
+    }
+    if (entry.status === "corrupt") {
+      updateReadyEntries((entries) =>
+        entries.map((candidate) =>
+          candidate.draftId === id &&
+          candidate.status === "corrupt" &&
+          candidate.thumbnail?.squareUri === pair.squareUri &&
+          candidate.thumbnail.originalUri === pair.originalUri
+            ? Object.freeze({ ...candidate, thumbnail: null })
+            : candidate,
+        ),
+      );
       return;
     }
     const canSchedule =
