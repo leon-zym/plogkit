@@ -49,6 +49,7 @@
     "draftStatus": {
       "ready": "Ready.",
       "generating": "Thumbnail is being prepared.",
+      "unavailable": "Thumbnail is unavailable.",
       "corrupt": "Draft is damaged."
     },
     "draftActions": {

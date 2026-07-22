@@ -148,6 +148,27 @@ describe("Home Draft Library", () => {
     expect(mockPush).toHaveBeenCalledWith("/editor");
   });
 
+  it("announces an unavailable thumbnail without claiming the Draft is ready", async () => {
+    const ready = readyState();
+    const first = ready.status === "ready" ? ready.entries[0] : undefined;
+    if (first?.status !== "ready") throw new Error("expected a ready Draft");
+    state = {
+      status: "ready",
+      entries: [
+        { ...first, thumbnail: null, thumbnailStatus: "unavailable" },
+        ...(ready.status === "ready" ? ready.entries.slice(1) : []),
+      ],
+    };
+
+    const view = await render(<HomeScreen />);
+    await waitFor(() => expect(view.getByTestId("draft-item-0")).toBeTruthy());
+
+    expect(view.getByTestId("draft-item-0").props.accessibilityLabel).toContain(
+      "Thumbnail is unavailable",
+    );
+    expect(view.getByTestId("draft-item-0").props.accessibilityLabel).not.toContain("Ready");
+  });
+
   it("persists one global display mode and switches the whole Grid to contain", async () => {
     state = readyState();
     const view = await render(<HomeScreen />);

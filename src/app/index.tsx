@@ -208,7 +208,9 @@ export default function HomeScreen() {
         ? t("home.draftStatus.corrupt")
         : entry.thumbnailStatus === "generating"
           ? t("home.draftStatus.generating")
-          : t("home.draftStatus.ready"),
+          : entry.thumbnailStatus === "unavailable"
+            ? t("home.draftStatus.unavailable")
+            : t("home.draftStatus.ready"),
     );
     parts.push(
       entry.status === "corrupt"

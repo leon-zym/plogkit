@@ -761,6 +761,9 @@ export function createDraftLibrary({
   const attemptedThumbnailRevisions = new Map<DraftId, Set<number>>();
   let state: DraftLibraryState = Object.freeze({ status: "uninitialized" });
   let loadPromise: Promise<DraftLibraryState> | null = null;
+  const pendingReadyUpdates: ((
+    entries: readonly DraftListEntry[],
+  ) => readonly DraftListEntry[])[] = [];
   const listeners = new Set<() => void>();
 
   const publishState = (next: DraftLibraryState): DraftLibraryState => {
@@ -770,9 +773,11 @@ export function createDraftLibrary({
   };
 
   const installReadyEntries = (entries: readonly DraftListEntry[]): DraftLibraryState => {
+    let updated = entries;
+    for (const update of pendingReadyUpdates.splice(0)) updated = update(updated);
     const ready = Object.freeze({
       status: "ready" as const,
-      entries: sortDraftEntries(entries),
+      entries: sortDraftEntries(updated),
     });
     return publishState(ready);
   };
@@ -781,7 +786,8 @@ export function createDraftLibrary({
     update: (entries: readonly DraftListEntry[]) => readonly DraftListEntry[],
   ): void => {
     if (state.status !== "ready") {
-      throw new Error("Draft Library mutation requires a reliable snapshot");
+      pendingReadyUpdates.push(update);
+      return;
     }
     installReadyEntries(update(state.entries));
   };
@@ -1181,16 +1187,12 @@ export function createDraftLibrary({
     revision: number,
     succeeded: boolean,
   ): void => {
-    if (state.status !== "ready") return;
-    const entry = state.entries.find(
-      (candidate): candidate is Extract<DraftListEntry, { status: "ready" }> =>
-        candidate.status === "ready" && candidate.draftId === id,
-    );
-    if (entry === undefined || entry.contentRevision !== revision) return;
     if (succeeded) return;
     updateReadyEntries((entries) =>
       entries.map((candidate) =>
-        candidate.draftId === id && candidate.status === "ready"
+        candidate.draftId === id &&
+        candidate.status === "ready" &&
+        candidate.contentRevision === revision
           ? Object.freeze({
               ...candidate,
               thumbnailStatus: candidate.thumbnail === null ? "unavailable" : "ready",
@@ -1266,15 +1268,15 @@ export function createDraftLibrary({
         squareUri,
         originalUri,
       });
-      if (state.status === "ready") {
-        updateReadyEntries((entries) =>
-          entries.map((entry) =>
-            entry.draftId === request.id && entry.status === "ready"
-              ? Object.freeze({ ...entry, thumbnail: pair, thumbnailStatus: "ready" })
-              : entry,
-          ),
-        );
-      }
+      updateReadyEntries((entries) =>
+        entries.map((entry) =>
+          entry.draftId === request.id &&
+          entry.status === "ready" &&
+          entry.contentRevision >= pair.contentRevision
+            ? Object.freeze({ ...entry, thumbnail: pair, thumbnailStatus: "ready" })
+            : entry,
+        ),
+      );
       return true;
     });
   };
@@ -1464,62 +1466,70 @@ export function createDraftLibrary({
     });
     const catalog = parseCatalog(catalogJson(imported.map(({ entry }) => entry)));
     const publishedUri = draftUri(id);
-    let publicationStarted = false;
-    let publicationCommitted = false;
-    let publicationOutcomeUnknown = false;
     try {
       await files.writeText(child(aggregateUri, "catalog.json"), catalogJson(catalog.entries));
       await files.writeText(child(aggregateUri, "draft.json"), draftRootJson(root));
-      if (confirmedDeletedIds.has(id) || (await files.directoryExists(publishedUri))) {
-        throw new Error("Draft identity already exists");
-      }
-      publicationStarted = true;
-      await files.moveDirectory(aggregateUri, publishedUri);
-      const validated = await validateAggregate(id);
-      if (validated.status !== "valid") {
-        throw new Error(`published Draft failed validation: ${validated.reason}`);
-      }
-      const publicationUri = child(publishedUri, "publication.json");
-      let publicationWriteError: unknown = null;
-      try {
-        await files.writeText(publicationUri, publicationJson(id));
-      } catch (error: unknown) {
-        publicationWriteError = error;
-      }
-      let publication: "valid" | "absent" | "invalid";
-      try {
-        publication = await inspectPublication(id, publishedUri);
-      } catch (error: unknown) {
-        publicationOutcomeUnknown = true;
-        throw error;
-      }
-      if (publication !== "valid") {
-        throw publicationWriteError ?? new Error("Draft publication did not commit");
-      }
-      publicationCommitted = true;
-      updateReadyEntries((entries) => [
-        ...entries.filter((entry) => entry.draftId !== id),
-        readyListEntry(root),
-      ]);
-      queueThumbnail({ id, root, catalog, uri: publishedUri });
-      await finishStagingOperation(operationUri);
-      return {
-        status: "created",
-        draftId: id,
-        document,
-        metadata,
-        contentRevision: 1,
-        assets: createCatalogSnapshot(id, publishedUri, catalog),
-        errors,
-      };
     } catch (error: unknown) {
-      if (publicationStarted && !publicationCommitted && !publicationOutcomeUnknown) {
-        await safeRemoveDirectory(publishedUri);
-      }
-      if (publicationOutcomeUnknown) installStorageFailure(error);
       await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors };
     }
+    return serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
+      let publicationStarted = false;
+      let publicationCommitted = false;
+      let publicationOutcomeUnknown = false;
+      try {
+        if (confirmedDeletedIds.has(id) || (await files.directoryExists(publishedUri))) {
+          throw new Error("Draft identity already exists");
+        }
+        publicationStarted = true;
+        await files.moveDirectory(aggregateUri, publishedUri);
+        const validated = await validateAggregate(id);
+        if (validated.status !== "valid") {
+          throw new Error(`published Draft failed validation: ${validated.reason}`);
+        }
+        const publicationUri = child(publishedUri, "publication.json");
+        let publicationWriteError: unknown = null;
+        try {
+          await files.writeText(publicationUri, publicationJson(id));
+        } catch (error: unknown) {
+          publicationWriteError = error;
+        }
+        let publication: "valid" | "absent" | "invalid";
+        try {
+          publication = await inspectPublication(id, publishedUri);
+        } catch (error: unknown) {
+          publicationOutcomeUnknown = true;
+          throw error;
+        }
+        if (publication !== "valid") {
+          throw publicationWriteError ?? new Error("Draft publication did not commit");
+        }
+        publicationCommitted = true;
+        updateReadyEntries((entries) =>
+          entries.some((entry) => entry.draftId === id)
+            ? entries
+            : [...entries, readyListEntry(root)],
+        );
+        queueThumbnail({ id, root, catalog, uri: publishedUri });
+        await finishStagingOperation(operationUri);
+        return {
+          status: "created",
+          draftId: id,
+          document,
+          metadata,
+          contentRevision: 1,
+          assets: createCatalogSnapshot(id, publishedUri, catalog),
+          errors,
+        };
+      } catch (error: unknown) {
+        if (publicationStarted && !publicationCommitted && !publicationOutcomeUnknown) {
+          await safeRemoveDirectory(publishedUri);
+        }
+        if (publicationOutcomeUnknown) installStorageFailure(error);
+        await finishStagingOperation(operationUri);
+        return { status: "create-failed", message: errorMessage(error), errors };
+      }
+    });
   };
 
   const saveUnserialized = async (
@@ -1607,6 +1617,12 @@ export function createDraftLibrary({
       );
       updateReadyEntries((entries) => {
         const previous = entries.find((entry) => entry.draftId === id);
+        if (
+          previous?.status === "ready" &&
+          previous.contentRevision >= nextRoot.contentRevision
+        ) {
+          return entries;
+        }
         return [
           ...entries.filter((entry) => entry.draftId !== id),
           readyListEntry(
@@ -1962,14 +1978,20 @@ export function createDraftLibrary({
     ) {
       return;
     }
+    const canSchedule =
+      attemptedThumbnailRevisions.get(id)?.has(entry.contentRevision) !== true;
     updateReadyEntries((entries) =>
       entries.map((candidate) =>
         candidate.draftId === id && candidate.status === "ready"
-          ? Object.freeze({ ...candidate, thumbnail: null, thumbnailStatus: "generating" })
+          ? Object.freeze({
+              ...candidate,
+              thumbnail: null,
+              thumbnailStatus: canSchedule ? "generating" : "unavailable",
+            })
           : candidate,
       ),
     );
-    void scheduleThumbnailFromDisk(id);
+    if (canSchedule) void scheduleThumbnailFromDisk(id);
   };
 
   const inspectDraftForList = async (

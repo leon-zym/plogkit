@@ -146,10 +146,7 @@ export function createCurrentEditingSession({
     readonly id: DraftId;
     readonly promise: Promise<OpenCurrentEditingSessionResult>;
   } | null = null;
-  let deleting: {
-    readonly id: DraftId;
-    readonly promise: Promise<DeleteCurrentEditingSessionResult>;
-  } | null = null;
+  const deletions = new Map<DraftId, Promise<DeleteCurrentEditingSessionResult>>();
 
   const clearAutosaveTimer = (state: SessionState): void => {
     if (state.timer === null) return;
@@ -477,6 +474,9 @@ export function createCurrentEditingSession({
   };
 
   const open = (id: DraftId): Promise<OpenCurrentEditingSessionResult> => {
+    if (deletions.has(id)) {
+      return Promise.resolve({ status: "open-failed", reason: "busy" });
+    }
     if (active?.state.draftId === id && active.state.deletion === "none") {
       return Promise.resolve({ status: "opened", handle: active.handle });
     }
@@ -515,7 +515,7 @@ export function createCurrentEditingSession({
       return mapDeleteResult(await library.deleteDraft(id));
     }
     const state = current.state;
-    if (state.deletion === "in-progress") {
+    if (state.switching || state.deletion === "in-progress") {
       return { status: "delete-failed", reason: "busy" };
     }
 
@@ -541,8 +541,20 @@ export function createCurrentEditingSession({
       return mapDeleteResult(result);
     }
     if (result.status === "delete-failed") {
-      state.deletion = "none";
-      return mapDeleteResult(result);
+      try {
+        const verified = await library.read(id);
+        if (verified.status === "ready") {
+          state.deletion = "none";
+          return mapDeleteResult(result);
+        }
+      } catch {
+        // Keep the lifecycle barrier when the aggregate cannot be proven intact.
+      }
+      state.deletion = "unknown";
+      return {
+        status: "delete-unknown",
+        ...(result.message === undefined ? {} : { message: result.message }),
+      };
     }
 
     state.active = false;
@@ -553,15 +565,15 @@ export function createCurrentEditingSession({
   };
 
   const deleteDraft = (id: DraftId): Promise<DeleteCurrentEditingSessionResult> => {
-    if (deleting !== null) {
-      return deleting.id === id
-        ? deleting.promise
-        : Promise.resolve({ status: "delete-failed", reason: "busy" });
+    const existing = deletions.get(id);
+    if (existing !== undefined) return existing;
+    if (opening?.id === id) {
+      return Promise.resolve({ status: "delete-failed", reason: "busy" });
     }
     const promise = performDelete(id).finally(() => {
-      if (deleting?.promise === promise) deleting = null;
+      if (deletions.get(id) === promise) deletions.delete(id);
     });
-    deleting = { id, promise };
+    deletions.set(id, promise);
     return promise;
   };
 

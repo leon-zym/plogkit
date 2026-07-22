@@ -48,6 +48,7 @@
     "draftStatus": {
       "ready": "状态正常。",
       "generating": "正在生成缩略图。",
+      "unavailable": "缩略图暂不可用。",
       "corrupt": "草稿已损坏。"
     },
     "draftActions": {

@@ -301,6 +301,73 @@ describe("current editing session", () => {
     await expect(second.session.delete(firstDraftId)).resolves.toEqual({ status: "deleted" });
   });
 
+  it("restores a failed deletion only after proving the current Draft remains intact", async () => {
+    const intact = setup();
+    const intactOpened = await intact.session.open(firstDraftId);
+    if (intactOpened.status !== "opened") throw new Error("expected an open session");
+    intact.library.deleteResult = { status: "delete-failed", reason: "storage-failed" };
+
+    await expect(intact.session.delete(firstDraftId)).resolves.toEqual({
+      status: "delete-failed",
+      reason: "storage-failed",
+    });
+    expect(intact.library.readCalls).toEqual([firstDraftId, firstDraftId]);
+    expect(
+      intactOpened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#123456"),
+      }),
+    ).toMatchObject({ status: "changed" });
+
+    const unverified = setup();
+    const unverifiedOpened = await unverified.session.open(firstDraftId);
+    if (unverifiedOpened.status !== "opened") throw new Error("expected an open session");
+    unverified.library.deleteResult = { status: "delete-failed", reason: "storage-failed" };
+    unverified.library.aggregates.delete(firstDraftId);
+
+    await expect(unverified.session.delete(firstDraftId)).resolves.toMatchObject({
+      status: "delete-unknown",
+    });
+    expect(
+      unverifiedOpened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#654321"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
+  });
+
+  it("shares same-Draft deletion while allowing a different Draft to delete concurrently", async () => {
+    const { library, session } = setup();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const deleteDraft = library.deleteDraft.bind(library);
+    jest.spyOn(library, "deleteDraft").mockImplementation(async (id) => {
+      if (id === firstDraftId) {
+        markFirstStarted();
+        await firstGate;
+      }
+      return deleteDraft(id);
+    });
+
+    const first = session.delete(firstDraftId);
+    const duplicate = session.delete(firstDraftId);
+    await firstStarted;
+    const second = session.delete(secondDraftId);
+
+    expect(duplicate).toBe(first);
+    await expect(second).resolves.toEqual({ status: "deleted" });
+    expect(library.deleteCalls).toEqual([secondDraftId]);
+    releaseFirst();
+    await expect(first).resolves.toEqual({ status: "deleted" });
+    expect(library.deleteCalls).toEqual([secondDraftId, firstDraftId]);
+  });
+
   it("returns the same handle for an idempotent open without reading the active Draft", async () => {
     const { library, session } = setup();
     const first = await session.open(firstDraftId);
@@ -380,6 +447,50 @@ describe("current editing session", () => {
     expect(await duplicate).toBe(await first);
     expect(competing).toEqual({ status: "open-failed", reason: "busy" });
     expect(library.readCalls).toEqual([firstDraftId]);
+  });
+
+  it("rejects deletion while a Draft open is still validating", async () => {
+    const { library, session } = setup();
+    let releaseRead: (() => void) | undefined;
+    library.readGates.set(
+      firstDraftId,
+      new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      }),
+    );
+
+    const opening = session.open(firstDraftId);
+    await expect(session.delete(firstDraftId)).resolves.toEqual({
+      status: "delete-failed",
+      reason: "busy",
+    });
+    releaseRead?.();
+
+    await expect(opening).resolves.toMatchObject({ status: "opened" });
+    expect(library.deleteCalls).toEqual([]);
+  });
+
+  it("rejects opening while a Draft deletion is unresolved", async () => {
+    const { library, session } = setup();
+    let releaseDelete: (() => void) | undefined;
+    const deletionGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const deleteDraft = library.deleteDraft.bind(library);
+    jest.spyOn(library, "deleteDraft").mockImplementation(async (id) => {
+      await deletionGate;
+      return deleteDraft(id);
+    });
+
+    const deleting = session.delete(firstDraftId);
+    await expect(session.open(firstDraftId)).resolves.toEqual({
+      status: "open-failed",
+      reason: "busy",
+    });
+    releaseDelete?.();
+
+    await expect(deleting).resolves.toEqual({ status: "deleted" });
+    expect(library.readCalls).toEqual([]);
   });
 
   it("does not let a stale handle schedule persistence after a successful switch", async () => {

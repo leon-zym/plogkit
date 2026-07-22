@@ -5,6 +5,7 @@ import {
   draftId,
   type DraftLibraryFileAdapter,
   type DraftLibrary,
+  type DraftId,
   type DraftLibraryPreviewAdapter,
   type DraftThumbnailAdapter,
   type ImportCandidate,
@@ -199,6 +200,7 @@ function setup() {
   let operationSequence = 0;
   let thumbnailSequence = 0;
   let draftSequence = 0;
+  let createDraftIdentity = () => draftId(`draft:${++draftSequence}`);
   let now = "2026-07-22T08:00:00.000Z";
   const createLibrary = () =>
     createDraftLibrary({
@@ -210,7 +212,7 @@ function setup() {
       createStorageKey: () => `asset-${++storageSequence}`,
       createOperationId: () => `operation-${++operationSequence}`,
       createThumbnailGenerationId: () => `thumbnail-${++thumbnailSequence}`,
-      createDraftId: () => draftId(`draft:${++draftSequence}`),
+      createDraftId: () => createDraftIdentity(),
       now: () => now,
     });
   return {
@@ -222,6 +224,9 @@ function setup() {
     getDraftSequence: () => draftSequence,
     setNow: (value: string) => {
       now = value;
+    },
+    setCreateDraftId: (create: () => DraftId) => {
+      createDraftIdentity = create;
     },
     setThumbnailGenerate: (generate: DraftThumbnailAdapter["generate"]) => {
       thumbnailGenerate = generate;
@@ -327,6 +332,42 @@ describe("Draft Library", () => {
     await expect(createLibrary().load()).resolves.toMatchObject({
       status: "ready",
       entries: [{ status: "ready", draftId: "draft:1", contentRevision: 1 }],
+    });
+  });
+
+  it("serializes colliding creation publication without removing the winning Draft", async () => {
+    const { files, library, createLibrary, setCreateDraftId } = setup();
+    setCreateDraftId(() => draftId("draft:1"));
+    let releaseStaging!: () => void;
+    const stagingGate = new Promise<void>((resolve) => {
+      releaseStaging = resolve;
+    });
+    let markBothStaged!: () => void;
+    const bothStaged = new Promise<void>((resolve) => {
+      markBothStaged = resolve;
+    });
+    const stagedRoots = new Set<string>();
+    const originalWrite = files.writeText.bind(files);
+    files.writeText = async (uri, content) => {
+      await originalWrite(uri, content);
+      if (uri.includes("/staging/") && uri.endsWith("/aggregate/draft.json")) {
+        stagedRoots.add(uri);
+        if (stagedRoots.size === 2) markBothStaged();
+        await stagingGate;
+      }
+    };
+
+    const first = createDraft(library, [candidate("one")]);
+    const second = createDraft(library, [candidate("two")]);
+    await bothStaged;
+    releaseStaging();
+    const results = await Promise.all([first, second]);
+
+    expect(results.map(({ status }) => status).sort()).toEqual(["create-failed", "created"]);
+    expect(files.directories.has(firstDraftUri)).toBe(true);
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [{ status: "ready", draftId: "draft:1" }],
     });
   });
 
@@ -550,6 +591,33 @@ describe("Draft Library", () => {
       throw new Error("expected rebuilt pair");
     }
     expect(state.entries[0].thumbnail.squareUri).not.toBe(failedPair.squareUri);
+  });
+
+  it("settles a visible pair failure after this process already attempted the revision", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const loaded = library.getState();
+    if (loaded.status !== "ready" || loaded.entries[0]?.thumbnail === null) {
+      throw new Error("expected a committed pair");
+    }
+    const failedPair = loaded.entries[0].thumbnail;
+    const generatedBeforeFailure = [...files.files.keys()].filter(
+      (uri) => uri.includes("/thumbnails/") && uri.endsWith(".jpg"),
+    );
+
+    library.reportThumbnailLoadFailure(created.draftId, failedPair);
+    await settleBackgroundWork();
+
+    expect(library.getState()).toMatchObject({
+      entries: [{ thumbnail: null, thumbnailStatus: "unavailable" }],
+    });
+    expect(
+      [...files.files.keys()].filter(
+        (uri) => uri.includes("/thumbnails/") && uri.endsWith(".jpg"),
+      ),
+    ).toEqual(generatedBeforeFailure);
   });
 
   it("separates proven corruption from retryable page-level storage failure", async () => {
@@ -974,6 +1042,212 @@ describe("Draft Library", () => {
       { status: "saved", contentRevision: 2 },
       { status: "saved", contentRevision: 2 },
     ]);
+  });
+
+  it("returns a committed save when another Draft installs a storage failure", async () => {
+    const { files, library, createLibrary } = setup();
+    const first = await createDraft(library, [candidate("one")]);
+    const second = await createDraft(library, [candidate("two")]);
+    if (first.status !== "created" || second.status !== "created") {
+      throw new Error("expected two created Drafts");
+    }
+    const firstRoot = `${firstDraftUri}/draft.json`;
+    const secondOriginal = second.assets.resolve(second.document.sourceImages[0]!.id, "original");
+    if (secondOriginal === null) throw new Error("expected second original");
+    const secondRoot = `${secondOriginal.uri.split("/assets/", 1)[0]}/draft.json`;
+    let releaseCommittedRead!: () => void;
+    const committedReadGate = new Promise<void>((resolve) => {
+      releaseCommittedRead = resolve;
+    });
+    let markCommittedRead!: () => void;
+    const committedRead = new Promise<void>((resolve) => {
+      markCommittedRead = resolve;
+    });
+    const originalRead = files.readText.bind(files);
+    let pauseCommittedRead = true;
+    files.readText = async (uri) => {
+      const value = await originalRead(uri);
+      if (
+        pauseCommittedRead &&
+        uri === firstRoot &&
+        JSON.parse(value).contentRevision === 2
+      ) {
+        pauseCommittedRead = false;
+        markCommittedRead();
+        await committedReadGate;
+      }
+      return value;
+    };
+
+    const saving = library.save(
+      first.draftId,
+      updateDocument(first.document, {
+        canvas: { ...first.document.canvas, backgroundColor: "#111111" },
+      }),
+    );
+    await committedRead;
+    files.failReadText = secondRoot;
+    await expect(
+      library.save(
+        second.draftId,
+        updateDocument(second.document, {
+          canvas: { ...second.document.canvas, backgroundColor: "#222222" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "save-failed", reason: "storage-failed" });
+    files.failReadText = null;
+    releaseCommittedRead();
+
+    await expect(saving).resolves.toMatchObject({ status: "saved", contentRevision: 2 });
+    expect(library.getState()).toMatchObject({ status: "storage-failed" });
+    await settleBackgroundWork();
+    await expect(library.load()).resolves.toMatchObject({
+      status: "ready",
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          draftId: first.draftId,
+          contentRevision: 2,
+          thumbnailStatus: "ready",
+          thumbnail: expect.objectContaining({ contentRevision: 2 }),
+        }),
+      ]),
+    });
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [{ draftId: first.draftId, contentRevision: 2 }, { draftId: second.draftId }],
+    });
+  });
+
+  it("returns a committed deletion when another Draft installs a storage failure", async () => {
+    const { files, library, createLibrary } = setup();
+    const first = await createDraft(library, [candidate("one")]);
+    const second = await createDraft(library, [candidate("two")]);
+    if (first.status !== "created" || second.status !== "created") {
+      throw new Error("expected two created Drafts");
+    }
+    const markerUri = `${firstDraftUri.replace("/drafts/", "/deletions/")}.json`;
+    const secondOriginal = second.assets.resolve(second.document.sourceImages[0]!.id, "original");
+    if (secondOriginal === null) throw new Error("expected second original");
+    const secondRoot = `${secondOriginal.uri.split("/assets/", 1)[0]}/draft.json`;
+    let releaseMarkerRead!: () => void;
+    const markerReadGate = new Promise<void>((resolve) => {
+      releaseMarkerRead = resolve;
+    });
+    let markMarkerRead!: () => void;
+    const markerRead = new Promise<void>((resolve) => {
+      markMarkerRead = resolve;
+    });
+    const originalRead = files.readText.bind(files);
+    let pauseMarkerRead = true;
+    files.readText = async (uri) => {
+      const value = await originalRead(uri);
+      if (pauseMarkerRead && uri === markerUri) {
+        pauseMarkerRead = false;
+        markMarkerRead();
+        await markerReadGate;
+      }
+      return value;
+    };
+
+    const deleting = library.deleteDraft(first.draftId);
+    await markerRead;
+    files.failReadText = secondRoot;
+    await expect(
+      library.save(
+        second.draftId,
+        updateDocument(second.document, {
+          canvas: { ...second.document.canvas, backgroundColor: "#222222" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "save-failed", reason: "storage-failed" });
+    files.failReadText = null;
+    releaseMarkerRead();
+
+    await expect(deleting).resolves.toEqual({ status: "deleted" });
+    expect(library.getState()).toMatchObject({ status: "storage-failed" });
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [{ draftId: second.draftId }],
+    });
+  });
+
+  it("merges a committed creation into a retry load that enumerated before publication", async () => {
+    const { files, library } = setup();
+    const existing = await createDraft(library, [candidate("one")]);
+    if (existing.status !== "created") throw new Error("expected an existing Draft");
+    let releasePublication!: () => void;
+    const publicationGate = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    let markPublicationReady!: () => void;
+    const publicationReady = new Promise<void>((resolve) => {
+      markPublicationReady = resolve;
+    });
+    const originalDirectoryExists = files.directoryExists.bind(files);
+    let pausePublication = true;
+    files.directoryExists = async (uri) => {
+      if (
+        pausePublication &&
+        uri.startsWith("memory://library/drafts/") &&
+        uri !== firstDraftUri
+      ) {
+        pausePublication = false;
+        markPublicationReady();
+        await publicationGate;
+      }
+      return originalDirectoryExists(uri);
+    };
+    const creating = createDraft(library, [candidate("two")]);
+    await publicationReady;
+
+    files.failReadText = `${firstDraftUri}/draft.json`;
+    await expect(
+      library.save(
+        existing.draftId,
+        updateDocument(existing.document, {
+          canvas: { ...existing.document.canvas, backgroundColor: "#111111" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "save-failed", reason: "storage-failed" });
+    files.failReadText = null;
+    let releaseEnumeration!: () => void;
+    const enumerationGate = new Promise<void>((resolve) => {
+      releaseEnumeration = resolve;
+    });
+    let markEnumerationCaptured!: () => void;
+    const enumerationCaptured = new Promise<void>((resolve) => {
+      markEnumerationCaptured = resolve;
+    });
+    const originalListDirectories = files.listDirectories.bind(files);
+    let pauseEnumeration = true;
+    files.listDirectories = async (uri) => {
+      const result = await originalListDirectories(uri);
+      if (pauseEnumeration && uri === "memory://library/drafts") {
+        pauseEnumeration = false;
+        markEnumerationCaptured();
+        await enumerationGate;
+      }
+      return result;
+    };
+
+    const reloading = library.load();
+    await enumerationCaptured;
+    releasePublication();
+    await expect(creating).resolves.toMatchObject({ status: "created", draftId: "draft:2" });
+    await settleBackgroundWork();
+    releaseEnumeration();
+
+    await expect(reloading).resolves.toMatchObject({
+      status: "ready",
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          draftId: "draft:2",
+          thumbnailStatus: "ready",
+          thumbnail: expect.objectContaining({ contentRevision: 1 }),
+        }),
+        expect.objectContaining({ draftId: existing.draftId }),
+      ]),
+    });
   });
 
   it("reports item staging failure per candidate and continues the ingest batch", async () => {
