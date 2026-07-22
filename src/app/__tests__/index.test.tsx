@@ -117,13 +117,7 @@ describe("Home Draft Library", () => {
   });
 
   it("shows the creation Banner immediately while the reliable Grid is loading", async () => {
-    let finishLoading!: (next: DraftLibraryState) => void;
-    runtime.loadDraftLibrary.mockImplementation(
-      () =>
-        new Promise<DraftLibraryState>((resolve) => {
-          finishLoading = resolve;
-        }),
-    );
+    state = { status: "loading" };
 
     const view = await render(<HomeScreen />);
 
@@ -131,8 +125,7 @@ describe("Home Draft Library", () => {
     expect(view.getByTestId("home-loading")).toBeTruthy();
     expect(view.queryByTestId("resume-session")).toBeNull();
     expect(view.queryByTestId("draft-item-0")).toBeNull();
-    await act(async () => finishLoading({ status: "loading" }));
-    view.unmount();
+    await view.unmount();
   });
 
   it("renders accessible thumbnail-only items and opens the exact selected Draft", async () => {
