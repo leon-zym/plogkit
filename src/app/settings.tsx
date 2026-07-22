@@ -28,7 +28,9 @@ export default function SettingsScreen() {
   }, []);
 
   const setRetainBasic = async (enabled: boolean) => {
+    if (settings === null) return;
     const next: AppSettings = {
+      ...settings,
       schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
       defaultMetadataPolicy: enabled ? "retain-basic" : "strip",
     };

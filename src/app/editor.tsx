@@ -371,7 +371,7 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
     navigate?.();
   }, [leaveAllowed]);
 
-  const goBack = () => attemptLeave(() => router.replace("/" as Href));
+  const goBack = () => attemptLeave(() => router.back());
 
   const renderPanel = () => {
     if (activeTool === "export") {

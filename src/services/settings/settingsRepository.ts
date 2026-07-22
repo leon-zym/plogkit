@@ -1,10 +1,13 @@
 import type { MetadataPolicy } from "@/core/exportPolicy";
 
-export const APP_SETTINGS_SCHEMA_VERSION = 1;
+export const APP_SETTINGS_SCHEMA_VERSION = 2;
+
+export type DraftThumbnailDisplay = "square" | "original";
 
 export interface AppSettings {
   readonly schemaVersion: typeof APP_SETTINGS_SCHEMA_VERSION;
   readonly defaultMetadataPolicy: MetadataPolicy;
+  readonly draftThumbnailDisplay: DraftThumbnailDisplay;
 }
 
 export interface SettingsFileAdapter {
@@ -22,6 +25,7 @@ export function createDefaultAppSettings(): AppSettings {
   return {
     schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
     defaultMetadataPolicy: "strip",
+    draftThumbnailDisplay: "square",
   };
 }
 
@@ -30,15 +34,26 @@ export function parseAppSettings(input: unknown): AppSettings {
     throw new Error("settings must be an object");
   }
   const record = input as Record<string, unknown>;
-  if (record.schemaVersion !== APP_SETTINGS_SCHEMA_VERSION) {
+  if (record.schemaVersion !== 1 && record.schemaVersion !== APP_SETTINGS_SCHEMA_VERSION) {
     throw new Error("settings schema is not supported");
   }
   if (record.defaultMetadataPolicy !== "strip" && record.defaultMetadataPolicy !== "retain-basic") {
     throw new Error("default metadata policy is not supported");
   }
+  if (record.schemaVersion === 1) {
+    return {
+      schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+      defaultMetadataPolicy: record.defaultMetadataPolicy,
+      draftThumbnailDisplay: "square",
+    };
+  }
+  if (record.draftThumbnailDisplay !== "square" && record.draftThumbnailDisplay !== "original") {
+    throw new Error("Draft thumbnail display is not supported");
+  }
   return {
     schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
     defaultMetadataPolicy: record.defaultMetadataPolicy,
+    draftThumbnailDisplay: record.draftThumbnailDisplay,
   };
 }
 

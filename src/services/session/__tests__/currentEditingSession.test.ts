@@ -11,6 +11,7 @@ import {
   type AssetUsage,
   type DraftId,
   type DraftLibrary,
+  type DeleteDraftResult,
   type ImportCandidate,
   type IngestAssetsResult,
   type ReadDraftResult,
@@ -24,6 +25,13 @@ const firstDraftId = draftId("draft:first");
 const secondDraftId = draftId("draft:second");
 const firstImageId = importedAssetId("asset:first");
 const secondImageId = importedAssetId("asset:second");
+const draftVersionFacts = {
+  metadata: {
+    createdAt: "2026-07-22T08:00:00.000Z",
+    updatedAt: "2026-07-22T08:00:00.000Z",
+  },
+  contentRevision: 1,
+} as const;
 
 function createAssets(id: DraftId, imageIds: readonly string[]): AssetCatalogSnapshot {
   const entries = Object.freeze(imageIds.map(importedAssetId));
@@ -54,6 +62,7 @@ class MemoryDraftLibrary implements DraftLibrary {
   readonly throwingReads = new Set<DraftId>();
   readonly throwingMaintenance = new Set<DraftId>();
   readonly saveCalls: { id: DraftId; document: PlogDocument }[] = [];
+  readonly deleteCalls: DraftId[] = [];
   readonly readGates = new Map<DraftId, Promise<void>>();
   saveResult: SaveDraftResult | null = null;
   previewResult: ReadPreviewResult | null = null;
@@ -63,6 +72,27 @@ class MemoryDraftLibrary implements DraftLibrary {
   ingestImplementation:
     | ((id: DraftId, candidates: readonly ImportCandidate[]) => Promise<IngestAssetsResult>)
     | null = null;
+  deleteResult: DeleteDraftResult = { status: "deleted" };
+
+  async load() {
+    return { status: "ready" as const, entries: Object.freeze([]) };
+  }
+
+  getState() {
+    return { status: "ready" as const, entries: Object.freeze([]) };
+  }
+
+  subscribe() {
+    return () => undefined;
+  }
+
+  reportThumbnailLoadFailure() {}
+
+  async deleteDraft(id: DraftId) {
+    this.deleteCalls.push(id);
+    if (this.deleteResult.status === "deleted") this.aggregates.delete(id);
+    return this.deleteResult;
+  }
 
   async create() {
     return { status: "not-created" as const, errors: [] };
@@ -75,7 +105,7 @@ class MemoryDraftLibrary implements DraftLibrary {
     const aggregate = this.aggregates.get(id);
     return aggregate === undefined
       ? { status: "recovery-failed", reason: "draft-not-found" }
-      : { status: "ready", draftId: id, ...aggregate };
+      : { status: "ready", draftId: id, ...draftVersionFacts, ...aggregate };
   }
 
   async maintainInactive(id: DraftId): Promise<void> {
@@ -90,7 +120,7 @@ class MemoryDraftLibrary implements DraftLibrary {
     const aggregate = this.aggregates.get(id);
     if (aggregate === undefined) return { status: "save-failed", reason: "draft-not-found" };
     this.aggregates.set(id, { ...aggregate, document });
-    return { status: "saved", document };
+    return { status: "saved", ...draftVersionFacts, document };
   }
 
   async ingest(id: DraftId, candidates: readonly ImportCandidate[]) {
@@ -139,6 +169,205 @@ describe("current editing session", () => {
     expect(result.handle.assets.resolve(firstImageId, "original")?.draftId).toBe(firstDraftId);
   });
 
+  it("flushes and permanently invalidates the current handle before deleting its Draft", async () => {
+    const { library, session } = setup(10_000);
+    const opened = await session.open(firstDraftId);
+    if (opened.status !== "opened") throw new Error("expected an open session");
+    opened.handle.editing.dispatch({
+      type: "commit",
+      intent: editIntents.canvas.changeBackground("#123456"),
+    });
+
+    await expect(session.delete(firstDraftId)).resolves.toEqual({ status: "deleted" });
+    expect(library.saveCalls.at(-1)?.document.canvas.backgroundColor).toBe("#123456");
+    expect(library.deleteCalls).toEqual([firstDraftId]);
+    expect(
+      opened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#654321"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
+  });
+
+  it("waits for an in-flight asset transaction, flushes its committed document, then deletes", async () => {
+    const { library, session } = setup(10_000);
+    const opened = await session.open(firstDraftId);
+    if (opened.status !== "opened") throw new Error("expected an open session");
+    const addedId = importedAssetId("asset:pending-delete");
+    const events: string[] = [];
+    let releaseIngest!: () => void;
+    const ingestGate = new Promise<void>((resolve) => {
+      releaseIngest = resolve;
+    });
+    let markIngestStarted!: () => void;
+    const ingestStarted = new Promise<void>((resolve) => {
+      markIngestStarted = resolve;
+    });
+    library.ingestImplementation = async () => {
+      events.push("ingest-started");
+      markIngestStarted();
+      await ingestGate;
+      events.push("ingest-published");
+      return {
+        status: "ingested",
+        imported: [
+          {
+            image: { id: addedId, width: 800, height: 600 },
+            sourceKind: "image",
+          },
+        ],
+        errors: [],
+        assets: createAssets(firstDraftId, [firstImageId, addedId]),
+      };
+    };
+    library.saveImplementation = async (_id, document) => {
+      events.push("save");
+      return {
+        status: "saved",
+        document,
+        metadata: {
+          createdAt: "2026-07-22T08:00:00.000Z",
+          updatedAt: "2026-07-22T09:00:00.000Z",
+        },
+        contentRevision: 2,
+      };
+    };
+    const deleteDraft = library.deleteDraft.bind(library);
+    jest.spyOn(library, "deleteDraft").mockImplementation(async (id) => {
+      events.push("delete");
+      return deleteDraft(id);
+    });
+
+    const adding = opened.handle.addImages([candidate("picker://pending-delete.jpg")]);
+    await ingestStarted;
+    const deleting = session.delete(firstDraftId);
+    expect(
+      opened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#654321"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
+    expect(library.deleteCalls).toEqual([]);
+
+    releaseIngest();
+    await expect(adding).resolves.toMatchObject({ status: "completed" });
+    await expect(deleting).resolves.toEqual({ status: "deleted" });
+
+    expect(events).toEqual(["ingest-started", "ingest-published", "save", "delete"]);
+    expect(library.saveCalls.at(-1)?.document.sourceImages.map(({ id }) => id)).toEqual([
+      firstImageId,
+      addedId,
+    ]);
+  });
+
+  it("restores the current session after a definite delete failure and freezes it while unknown", async () => {
+    const first = setup(10_000);
+    const opened = await first.session.open(firstDraftId);
+    if (opened.status !== "opened") throw new Error("expected an open session");
+    opened.handle.editing.dispatch({
+      type: "commit",
+      intent: editIntents.canvas.changeBackground("#123456"),
+    });
+    first.library.saveResult = { status: "save-failed", reason: "storage-failed" };
+
+    await expect(first.session.delete(firstDraftId)).resolves.toMatchObject({
+      status: "delete-failed",
+      reason: "flush-failed",
+    });
+    expect(first.library.deleteCalls).toEqual([]);
+    expect(
+      opened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#234567"),
+      }),
+    ).toMatchObject({ status: "changed" });
+    first.library.saveResult = null;
+    await expect(first.session.flush()).resolves.toEqual({ status: "flushed" });
+
+    const second = setup();
+    const unknownOpened = await second.session.open(firstDraftId);
+    if (unknownOpened.status !== "opened") throw new Error("expected an open session");
+    second.library.deleteResult = { status: "delete-unknown" };
+    await expect(second.session.delete(firstDraftId)).resolves.toEqual({
+      status: "delete-unknown",
+    });
+    expect(
+      unknownOpened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#345678"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
+    second.library.deleteResult = { status: "deleted" };
+    await expect(second.session.delete(firstDraftId)).resolves.toEqual({ status: "deleted" });
+  });
+
+  it("restores a failed deletion only after proving the current Draft remains intact", async () => {
+    const intact = setup();
+    const intactOpened = await intact.session.open(firstDraftId);
+    if (intactOpened.status !== "opened") throw new Error("expected an open session");
+    intact.library.deleteResult = { status: "delete-failed", reason: "storage-failed" };
+
+    await expect(intact.session.delete(firstDraftId)).resolves.toEqual({
+      status: "delete-failed",
+      reason: "storage-failed",
+    });
+    expect(intact.library.readCalls).toEqual([firstDraftId, firstDraftId]);
+    expect(
+      intactOpened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#123456"),
+      }),
+    ).toMatchObject({ status: "changed" });
+
+    const unverified = setup();
+    const unverifiedOpened = await unverified.session.open(firstDraftId);
+    if (unverifiedOpened.status !== "opened") throw new Error("expected an open session");
+    unverified.library.deleteResult = { status: "delete-failed", reason: "storage-failed" };
+    unverified.library.aggregates.delete(firstDraftId);
+
+    await expect(unverified.session.delete(firstDraftId)).resolves.toMatchObject({
+      status: "delete-unknown",
+    });
+    expect(
+      unverifiedOpened.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#654321"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
+  });
+
+  it("shares same-Draft deletion while allowing a different Draft to delete concurrently", async () => {
+    const { library, session } = setup();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const deleteDraft = library.deleteDraft.bind(library);
+    jest.spyOn(library, "deleteDraft").mockImplementation(async (id) => {
+      if (id === firstDraftId) {
+        markFirstStarted();
+        await firstGate;
+      }
+      return deleteDraft(id);
+    });
+
+    const first = session.delete(firstDraftId);
+    const duplicate = session.delete(firstDraftId);
+    await firstStarted;
+    const second = session.delete(secondDraftId);
+
+    expect(duplicate).toBe(first);
+    await expect(second).resolves.toEqual({ status: "deleted" });
+    expect(library.deleteCalls).toEqual([secondDraftId]);
+    releaseFirst();
+    await expect(first).resolves.toEqual({ status: "deleted" });
+    expect(library.deleteCalls).toEqual([secondDraftId, firstDraftId]);
+  });
+
   it("returns the same handle for an idempotent open without reading the active Draft", async () => {
     const { library, session } = setup();
     const first = await session.open(firstDraftId);
@@ -151,6 +380,27 @@ describe("current editing session", () => {
     if (first.status !== "opened" || second.status !== "opened") return;
     expect(second.handle).toBe(first.handle);
     expect(library.readCalls).toEqual([]);
+  });
+
+  it("rejects a stale idempotent open while switching to another Draft", async () => {
+    const { library, session } = setup();
+    await session.open(firstDraftId);
+    let releaseRead: (() => void) | undefined;
+    library.readGates.set(secondDraftId, new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    }));
+
+    const switching = session.open(secondDraftId);
+
+    await expect(session.open(firstDraftId)).resolves.toEqual({
+      status: "open-failed",
+      reason: "busy",
+    });
+    releaseRead?.();
+    await expect(switching).resolves.toMatchObject({
+      status: "opened",
+      handle: { draftId: secondDraftId },
+    });
   });
 
   it("keeps low-cost open independent from preview decoding", async () => {
@@ -218,6 +468,50 @@ describe("current editing session", () => {
     expect(await duplicate).toBe(await first);
     expect(competing).toEqual({ status: "open-failed", reason: "busy" });
     expect(library.readCalls).toEqual([firstDraftId]);
+  });
+
+  it("rejects deletion while a Draft open is still validating", async () => {
+    const { library, session } = setup();
+    let releaseRead: (() => void) | undefined;
+    library.readGates.set(
+      firstDraftId,
+      new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      }),
+    );
+
+    const opening = session.open(firstDraftId);
+    await expect(session.delete(firstDraftId)).resolves.toEqual({
+      status: "delete-failed",
+      reason: "busy",
+    });
+    releaseRead?.();
+
+    await expect(opening).resolves.toMatchObject({ status: "opened" });
+    expect(library.deleteCalls).toEqual([]);
+  });
+
+  it("rejects opening while a Draft deletion is unresolved", async () => {
+    const { library, session } = setup();
+    let releaseDelete: (() => void) | undefined;
+    const deletionGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const deleteDraft = library.deleteDraft.bind(library);
+    jest.spyOn(library, "deleteDraft").mockImplementation(async (id) => {
+      await deletionGate;
+      return deleteDraft(id);
+    });
+
+    const deleting = session.delete(firstDraftId);
+    await expect(session.open(firstDraftId)).resolves.toEqual({
+      status: "open-failed",
+      reason: "busy",
+    });
+    releaseDelete?.();
+
+    await expect(deleting).resolves.toEqual({ status: "deleted" });
+    expect(library.readCalls).toEqual([]);
   });
 
   it("does not let a stale handle schedule persistence after a successful switch", async () => {
@@ -375,7 +669,7 @@ describe("current editing session", () => {
       if (saveCount === 1) await firstSaveGate;
       const aggregate = library.aggregates.get(id)!;
       library.aggregates.set(id, { ...aggregate, document });
-      return { status: "saved", document };
+      return { status: "saved", ...draftVersionFacts, document };
     };
     opened.handle.editing.dispatch({
       type: "commit",

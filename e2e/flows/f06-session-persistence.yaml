@@ -1,5 +1,5 @@
 appId: com.leonzym.plogkit
-name: Restore the current session after relaunch
+name: Reopen a persisted Draft from the Library after relaunch
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -8,15 +8,23 @@ name: Restore the current session after relaunch
     id: editor-back
 - extendedWaitUntil:
     visible:
-      id: resume-session
+      id: draft-item-0
     timeout: 10000
 - stopApp
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: resume-session
+      id: home-screen
     timeout: 30000
+- assertVisible:
+    id: choose-photos
+- assertVisible:
+    id: draft-item-0
 - tapOn:
-    id: resume-session
+    id: draft-item-0
 - assertVisible:
     id: editor-screen
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: background-color-c9d3c2

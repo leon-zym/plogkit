@@ -34,7 +34,7 @@
 
 #### Scenario: 不同内容与排序时间作为同一修订提交
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 当前草稿已有一个成功保存的内容修订
 - WHEN 不同的统一文档保存成功
 - THEN 文档、内容修订号与最近编辑时间作为同一个完整根记录提交
@@ -52,7 +52,7 @@
 
 #### Scenario: 从草稿库继续终止前的草稿
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 当前草稿的最新编辑已持久化，应用被系统或用户强制终止
 - WHEN 用户重新启动应用
 - THEN 应用先展示草稿库，且该草稿仍可被发现，不自动进入 Editor
@@ -69,7 +69,7 @@
 
 #### Scenario: 草稿切换原子化
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 当前草稿有一个活跃会话
 - WHEN 用户打开另一个草稿
 - THEN 应用先保存当前最新修改，确认目标草稿可用后再进入其 Editor
@@ -83,7 +83,7 @@
 
 #### Scenario: 返回草稿库保留同进程 history
 
-- 状态：已确认（待 [Issue #9](https://github.com/leon-zym/plogkit/issues/9)）
+- 状态：已实现
 - GIVEN 用户正在编辑一个草稿
 - WHEN 用户返回草稿库后再次打开同一 `DraftId`
 - THEN 返回时只 flush 而不结束当前编辑会话

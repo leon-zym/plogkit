@@ -11,8 +11,9 @@ import { editorRuntime } from "@/features/editor/expoEditorRuntime";
 import EditorScreen from "../editor";
 
 const mockReplace = jest.fn();
+const mockBack = jest.fn();
 const mockDispatch = jest.fn();
-const mockRouter = { replace: mockReplace };
+const mockRouter = { replace: mockReplace, back: mockBack };
 let mockPreventRemove = false;
 let mockPreventRemoveCallback:
   | ((options: { data: { action: { type: string } } }) => void)
@@ -140,14 +141,14 @@ describe("Editor session leave", () => {
     });
 
     expect(view.getByTestId("editor-save-error")).toBeTruthy();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockBack).not.toHaveBeenCalled();
 
     await act(async () => {
       fireEvent.press(view.getByTestId("editor-back"));
     });
 
     expect(runtime.flush).toHaveBeenCalledTimes(2);
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockBack).toHaveBeenCalledTimes(1);
   });
 
   it("prevents native removal until the latest document flushes", async () => {

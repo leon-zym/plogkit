@@ -58,6 +58,46 @@ export interface DraftLibraryPreviewAdapter {
   readonly isValid: (uri: string) => Promise<boolean>;
 }
 
+export const DRAFT_THUMBNAIL_PROFILE = Object.freeze({
+  profileVersion: 1,
+  squareSize: 360,
+  originalLongEdge: 720,
+  codec: "jpeg" as const,
+  quality: 0.82,
+  colorSpace: "srgb" as const,
+  metadata: "strip" as const,
+});
+
+export type DraftThumbnailProfile = typeof DRAFT_THUMBNAIL_PROFILE;
+
+export interface DraftThumbnailSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface DraftThumbnailAdapter {
+  readonly generate: (input: {
+    readonly draftId: DraftId;
+    readonly contentRevision: number;
+    readonly document: PlogDocument;
+    readonly assets: AssetCatalogSnapshot;
+    readonly profile: DraftThumbnailProfile;
+    readonly squareUri: string;
+    readonly originalUri: string;
+  }) => Promise<{
+    readonly square: DraftThumbnailSize;
+    readonly original: DraftThumbnailSize;
+  }>;
+  readonly inspect: (uri: string) => Promise<DraftThumbnailSize | null>;
+}
+
+export interface DraftThumbnailPair {
+  readonly contentRevision: number;
+  readonly profileVersion: number;
+  readonly squareUri: string;
+  readonly originalUri: string;
+}
+
 export type AssetUsage = "preview" | "original" | "metadata";
 
 export interface AssetDescriptor {
@@ -83,6 +123,8 @@ export type CreateDraftResult =
       readonly status: "created";
       readonly draftId: DraftId;
       readonly document: PlogDocument;
+      readonly metadata: DraftMetadata;
+      readonly contentRevision: number;
       readonly assets: AssetCatalogSnapshot;
       readonly errors: readonly DraftImportError[];
     }
@@ -107,17 +149,33 @@ export type ReadDraftResult =
       readonly status: "ready";
       readonly draftId: DraftId;
       readonly document: PlogDocument;
+      readonly metadata: DraftMetadata;
+      readonly contentRevision: number;
       readonly assets: AssetCatalogSnapshot;
     }
   | { readonly status: "recovery-failed"; readonly reason: DraftRecoveryFailure };
 
 export type SaveDraftResult =
-  | { readonly status: "saved"; readonly document: PlogDocument }
+  | {
+      readonly status: "saved";
+      readonly document: PlogDocument;
+      readonly metadata: DraftMetadata;
+      readonly contentRevision: number;
+    }
   | {
       readonly status: "save-failed";
       readonly reason: DraftRecoveryFailure | "storage-failed";
       readonly message?: string;
     };
+
+export type DeleteDraftResult =
+  | { readonly status: "deleted" }
+  | {
+      readonly status: "delete-failed";
+      readonly reason: DraftRecoveryFailure | "storage-failed";
+      readonly message?: string;
+    }
+  | { readonly status: "delete-unknown"; readonly message?: string };
 
 export interface IngestedAsset {
   readonly image: SourceImage;
@@ -144,7 +202,41 @@ export type ReadPreviewResult =
       readonly message?: string;
     };
 
+export interface DraftMetadata {
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export type DraftListEntry =
+  | {
+      readonly status: "ready";
+      readonly draftId: DraftId;
+      readonly createdAt: string;
+      readonly updatedAt: string;
+      readonly contentRevision: number;
+      readonly photoCount: number;
+      readonly thumbnail: DraftThumbnailPair | null;
+      readonly thumbnailStatus: "ready" | "generating" | "unavailable";
+    }
+  | {
+      readonly status: "corrupt";
+      readonly draftId: DraftId;
+      readonly updatedAt: string | null;
+      readonly photoCount: number | null;
+      readonly reason: Exclude<DraftRecoveryFailure, "draft-not-found" | "storage-unavailable">;
+      readonly thumbnail: DraftThumbnailPair | null;
+    };
+
+export type DraftLibraryState =
+  | { readonly status: "uninitialized" }
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly entries: readonly DraftListEntry[] }
+  | { readonly status: "storage-failed"; readonly message?: string };
+
 export interface DraftLibrary {
+  readonly load: () => Promise<DraftLibraryState>;
+  readonly getState: () => DraftLibraryState;
+  readonly subscribe: (listener: () => void) => () => void;
   readonly create: (
     candidates: readonly ImportCandidate[],
     options: { readonly metadataPolicy: MetadataPolicy },
@@ -152,11 +244,15 @@ export interface DraftLibrary {
   /** Pre-open aggregate read. Active/idempotent session access must retain its existing snapshot. */
   readonly read: (id: DraftId) => Promise<ReadDraftResult>;
   readonly save: (id: DraftId, document: PlogDocument) => Promise<SaveDraftResult>;
+  /** Internal transaction capability. Application callers delete through CurrentEditingSession. */
+  readonly deleteDraft: (id: DraftId) => Promise<DeleteDraftResult>;
   readonly ingest: (
     id: DraftId,
     candidates: readonly ImportCandidate[],
   ) => Promise<IngestAssetsResult>;
   readonly readPreview: (id: DraftId, assetId: ImportedAssetId) => Promise<ReadPreviewResult>;
+  /** Visible decode failure invalidates both representations for this process and schedules rebuild. */
+  readonly reportThumbnailLoadFailure: (id: DraftId, pair: DraftThumbnailPair) => void;
   /** Best-effort compaction and orphan cleanup. Caller must guarantee the Draft is inactive. */
   readonly maintainInactive: (id: DraftId) => Promise<void>;
 }
@@ -178,28 +274,71 @@ interface Catalog {
   readonly entries: readonly CatalogEntry[];
 }
 
+interface DraftRootRecord {
+  readonly draftSchemaVersion: 1;
+  readonly draftId: DraftId;
+  readonly metadata: DraftMetadata;
+  readonly contentRevision: number;
+  readonly document: PlogDocument;
+}
+
+interface DraftPublicationRecord {
+  readonly publicationSchemaVersion: 1;
+  readonly draftId: DraftId;
+}
+
+interface DraftDeletionRecord {
+  readonly deletionSchemaVersion: 1;
+  readonly draftId: DraftId;
+}
+
+interface DraftThumbnailPairRecord {
+  readonly thumbnailPairSchemaVersion: 1;
+  readonly draftId: DraftId;
+  readonly contentRevision: number;
+  readonly profileVersion: number;
+  readonly squareFile: string;
+  readonly originalFile: string;
+  readonly square: DraftThumbnailSize;
+  readonly original: DraftThumbnailSize;
+}
+
 interface ImportedStagedAsset {
   readonly entry: CatalogEntry;
   readonly image: SourceImage;
+}
+
+interface ThumbnailRequest {
+  readonly id: DraftId;
+  readonly root: DraftRootRecord;
+  readonly catalog: Catalog;
+  readonly uri: string;
 }
 
 type ValidatedAggregate =
   | {
       readonly status: "valid";
       readonly uri: string;
-      readonly document: PlogDocument;
+      readonly root: DraftRootRecord;
       readonly catalog: Catalog;
     }
-  | { readonly status: "invalid"; readonly reason: DraftRecoveryFailure };
+  | {
+      readonly status: "invalid";
+      readonly reason: Exclude<DraftRecoveryFailure, "storage-unavailable">;
+      readonly root: DraftRootRecord | null;
+    };
 
 export interface CreateDraftLibraryOptions {
   readonly files: DraftLibraryFileAdapter;
   readonly previews: DraftLibraryPreviewAdapter;
+  readonly thumbnails: DraftThumbnailAdapter;
   readonly rootUri: string;
   readonly createDraftId?: () => DraftId;
   readonly createAssetId?: (candidate: ImportCandidate, index: number) => ImportedAssetId;
   readonly createStorageKey?: () => string;
   readonly createOperationId?: () => string;
+  readonly createThumbnailGenerationId?: () => string;
+  readonly now?: () => string;
 }
 
 let identitySequence = 0;
@@ -258,6 +397,42 @@ function storageDraftName(id: DraftId): string {
     if (third !== undefined) encoded += alphabet[third & 0x3f];
   }
   return `draft-${encoded}`;
+}
+
+function draftIdFromStorageName(name: string): DraftId | null {
+  if (!name.startsWith("draft-")) return null;
+  const encoded = name.slice("draft-".length);
+  if (encoded.length === 0 || encoded.length % 4 === 1 || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
+    return null;
+  }
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const values = [...encoded].map((character) => alphabet.indexOf(character));
+  if (values.some((value) => value < 0)) return null;
+  const bytes: number[] = [];
+  for (let index = 0; index < values.length; index += 4) {
+    const first = values[index];
+    const second = values[index + 1];
+    if (first === undefined || second === undefined) return null;
+    bytes.push((first << 2) | (second >>> 4));
+    const third = values[index + 2];
+    if (third !== undefined) {
+      bytes.push(((second & 0x0f) << 4) | (third >>> 2));
+      const fourth = values[index + 3];
+      if (fourth !== undefined) bytes.push(((third & 0x03) << 6) | fourth);
+    }
+  }
+  if (bytes.length === 0 || bytes.length % 2 !== 0) return null;
+  let value = "";
+  for (let index = 0; index < bytes.length; index += 2) {
+    value += String.fromCharCode((bytes[index]! << 8) | bytes[index + 1]!);
+  }
+  const id = draftId(value);
+  return storageDraftName(id) === name ? id : null;
+}
+
+function directoryName(uri: string): string {
+  const normalized = normalizedDirectoryUri(uri);
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
 function originalExtension(candidate: ImportCandidate): string {
@@ -336,6 +511,173 @@ function catalogJson(entries: readonly CatalogEntry[]): string {
   return JSON.stringify({ catalogSchemaVersion: 1, entries });
 }
 
+function parseTimestamp(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be an ISO timestamp`);
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new Error(`${label} must be a canonical ISO timestamp`);
+  }
+  return value;
+}
+
+function parseDraftRootJson(json: string): DraftRootRecord {
+  const input: unknown = JSON.parse(json);
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Draft root must be an object");
+  }
+  const record = input as Record<string, unknown>;
+  if (record.draftSchemaVersion !== 1 || typeof record.draftId !== "string") {
+    throw new Error("Draft root schema is invalid");
+  }
+  if (
+    typeof record.contentRevision !== "number" ||
+    !Number.isInteger(record.contentRevision) ||
+    record.contentRevision <= 0
+  ) {
+    throw new Error("Draft content revision is invalid");
+  }
+  const metadata = record.metadata;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw new Error("Draft metadata is invalid");
+  }
+  const metadataRecord = metadata as Record<string, unknown>;
+  const document = parseDocumentJson(JSON.stringify(record.document));
+  return Object.freeze({
+    draftSchemaVersion: 1,
+    draftId: draftId(record.draftId),
+    metadata: Object.freeze({
+      createdAt: parseTimestamp(metadataRecord.createdAt, "createdAt"),
+      updatedAt: parseTimestamp(metadataRecord.updatedAt, "updatedAt"),
+    }),
+    contentRevision: record.contentRevision,
+    document,
+  });
+}
+
+function draftRootJson(root: DraftRootRecord): string {
+  return JSON.stringify(root);
+}
+
+function parsePublicationJson(json: string): DraftPublicationRecord {
+  const input: unknown = JSON.parse(json);
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Draft publication must be an object");
+  }
+  const record = input as Record<string, unknown>;
+  if (record.publicationSchemaVersion !== 1 || typeof record.draftId !== "string") {
+    throw new Error("Draft publication schema is invalid");
+  }
+  return Object.freeze({ publicationSchemaVersion: 1, draftId: draftId(record.draftId) });
+}
+
+function publicationJson(id: DraftId): string {
+  return JSON.stringify({ publicationSchemaVersion: 1, draftId: id });
+}
+
+function parseDeletionJson(json: string): DraftDeletionRecord {
+  const input: unknown = JSON.parse(json);
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Draft deletion marker must be an object");
+  }
+  const record = input as Record<string, unknown>;
+  if (record.deletionSchemaVersion !== 1 || typeof record.draftId !== "string") {
+    throw new Error("Draft deletion marker schema is invalid");
+  }
+  return Object.freeze({ deletionSchemaVersion: 1, draftId: draftId(record.draftId) });
+}
+
+function deletionJson(id: DraftId): string {
+  return JSON.stringify({ deletionSchemaVersion: 1, draftId: id });
+}
+
+function parseThumbnailSize(value: unknown, label: string): DraftThumbnailSize {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} thumbnail size is invalid`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.width !== "number" ||
+    !Number.isInteger(record.width) ||
+    record.width <= 0 ||
+    typeof record.height !== "number" ||
+    !Number.isInteger(record.height) ||
+    record.height <= 0
+  ) {
+    throw new Error(`${label} thumbnail size is invalid`);
+  }
+  return Object.freeze({ width: record.width, height: record.height });
+}
+
+function parseThumbnailPairJson(json: string): DraftThumbnailPairRecord {
+  const input: unknown = JSON.parse(json);
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Draft thumbnail pair must be an object");
+  }
+  const record = input as Record<string, unknown>;
+  if (
+    record.thumbnailPairSchemaVersion !== 1 ||
+    typeof record.draftId !== "string" ||
+    typeof record.contentRevision !== "number" ||
+    !Number.isInteger(record.contentRevision) ||
+    record.contentRevision <= 0 ||
+    typeof record.profileVersion !== "number" ||
+    !Number.isInteger(record.profileVersion) ||
+    record.profileVersion <= 0 ||
+    typeof record.squareFile !== "string" ||
+    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.squareFile) ||
+    typeof record.originalFile !== "string" ||
+    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.originalFile) ||
+    record.squareFile === record.originalFile
+  ) {
+    throw new Error("Draft thumbnail pair schema is invalid");
+  }
+  return Object.freeze({
+    thumbnailPairSchemaVersion: 1,
+    draftId: draftId(record.draftId),
+    contentRevision: record.contentRevision,
+    profileVersion: record.profileVersion,
+    squareFile: record.squareFile,
+    originalFile: record.originalFile,
+    square: parseThumbnailSize(record.square, "square"),
+    original: parseThumbnailSize(record.original, "original"),
+  });
+}
+
+function thumbnailPairJson(record: DraftThumbnailPairRecord): string {
+  return JSON.stringify(record);
+}
+
+function readyListEntry(
+  root: DraftRootRecord,
+  thumbnail: DraftThumbnailPair | null = null,
+  thumbnailStatus: "ready" | "generating" | "unavailable" = "generating",
+): Extract<DraftListEntry, { status: "ready" }> {
+  return Object.freeze({
+    status: "ready",
+    draftId: root.draftId,
+    createdAt: root.metadata.createdAt,
+    updatedAt: root.metadata.updatedAt,
+    contentRevision: root.contentRevision,
+    photoCount: root.document.sourceImages.length,
+    thumbnail,
+    thumbnailStatus,
+  });
+}
+
+function sortDraftEntries(entries: readonly DraftListEntry[]): readonly DraftListEntry[] {
+  return Object.freeze(
+    [...entries].sort((left, right) => {
+      if (left.updatedAt === null && right.updatedAt !== null) return -1;
+      if (left.updatedAt !== null && right.updatedAt === null) return 1;
+      if (left.updatedAt !== null && right.updatedAt !== null) {
+        const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+        if (byUpdatedAt !== 0) return byUpdatedAt;
+      }
+      return left.draftId.localeCompare(right.draftId);
+    }),
+  );
+}
+
 function textFileState(
   files: DraftLibraryFileAdapter,
   currentUri: string,
@@ -397,17 +739,72 @@ function sourceImage(entry: CatalogEntry): SourceImage {
 export function createDraftLibrary({
   files,
   previews,
+  thumbnails,
   rootUri,
   createDraftId = defaultDraftId,
   createAssetId = defaultAssetId,
   createStorageKey = () => nextIdentity("file"),
   createOperationId = () => nextIdentity("operation"),
+  createThumbnailGenerationId = () => nextIdentity("thumbnail"),
+  now = () => new Date().toISOString(),
 }: CreateDraftLibraryOptions): DraftLibrary {
   const draftsUri = child(rootUri, "drafts");
   const stagingUri = child(rootUri, "staging");
+  const deletionsUri = child(rootUri, "deletions");
   let initializePromise: Promise<void> | null = null;
   const activeStagingOperations = new Set<string>();
   const draftOperationTails = new Map<DraftId, Promise<void>>();
+  const confirmedDeletedIds = new Set<DraftId>();
+  const unknownDeletionIds = new Set<DraftId>();
+  const runningThumbnailIds = new Set<DraftId>();
+  const pendingThumbnails = new Map<DraftId, ThumbnailRequest>();
+  const attemptedThumbnailRevisions = new Map<DraftId, Set<number>>();
+  let state: DraftLibraryState = Object.freeze({ status: "uninitialized" });
+  let loadPromise: Promise<DraftLibraryState> | null = null;
+  const pendingReadyUpdates: ((
+    entries: readonly DraftListEntry[],
+  ) => readonly DraftListEntry[])[] = [];
+  const listeners = new Set<() => void>();
+
+  const publishState = (next: DraftLibraryState): DraftLibraryState => {
+    state = next;
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch {
+        // Observers cannot change an already established storage result.
+      }
+    }
+    return next;
+  };
+
+  const installReadyEntries = (entries: readonly DraftListEntry[]): DraftLibraryState => {
+    let updated = entries;
+    for (const update of pendingReadyUpdates.splice(0)) updated = update(updated);
+    const ready = Object.freeze({
+      status: "ready" as const,
+      entries: sortDraftEntries(updated),
+    });
+    return publishState(ready);
+  };
+
+  const updateReadyEntries = (
+    update: (entries: readonly DraftListEntry[]) => readonly DraftListEntry[],
+  ): void => {
+    if (state.status !== "ready") {
+      pendingReadyUpdates.push(update);
+      return;
+    }
+    installReadyEntries(update(state.entries));
+  };
+
+  const installStorageFailure = (error: unknown): DraftLibraryState => {
+    const failed = Object.freeze({
+      status: "storage-failed" as const,
+      message: errorMessage(error),
+    });
+    return publishState(failed);
+  };
 
   const serializeDraftOperation = <T>(id: DraftId, operation: () => Promise<T>): Promise<T> => {
     const previous = draftOperationTails.get(id) ?? Promise.resolve();
@@ -453,6 +850,7 @@ export function createDraftLibrary({
         await files.ensureDirectory(rootUri);
         await files.ensureDirectory(draftsUri);
         await files.ensureDirectory(stagingUri);
+        await files.ensureDirectory(deletionsUri);
       } catch (error: unknown) {
         initializePromise = null;
         throw error;
@@ -484,6 +882,65 @@ export function createDraftLibrary({
   };
 
   const draftUri = (id: DraftId): string => child(draftsUri, storageDraftName(id));
+  const draftThumbnailsUri = (id: DraftId): string => child(draftUri(id), "thumbnails");
+  const thumbnailPairUri = (id: DraftId): string => child(draftUri(id), "thumbnail-pair.json");
+  const deletionMarkerUri = (id: DraftId): string =>
+    child(deletionsUri, `${storageDraftName(id)}.json`);
+
+  const inspectPublication = async (
+    id: DraftId,
+    uri = draftUri(id),
+  ): Promise<"valid" | "absent" | "invalid"> => {
+    const publicationUri = child(uri, "publication.json");
+    if (!(await files.fileExists(publicationUri))) return "absent";
+    const text = await files.readText(publicationUri);
+    let publication: DraftPublicationRecord;
+    try {
+      publication = parsePublicationJson(text);
+    } catch {
+      return "invalid";
+    }
+    return publication.draftId === id ? "valid" : "invalid";
+  };
+
+  const inspectDeletionMarker = async (
+    id: DraftId,
+  ): Promise<"valid" | "absent" | "invalid"> => {
+    const markerUri = deletionMarkerUri(id);
+    if (!(await files.fileExists(markerUri))) return "absent";
+    const text = await files.readText(markerUri);
+    let marker: DraftDeletionRecord;
+    try {
+      marker = parseDeletionJson(text);
+    } catch {
+      return "invalid";
+    }
+    return marker.draftId === id ? "valid" : "invalid";
+  };
+
+  const readCommittedThumbnailPair = async (
+    id: DraftId,
+    maximumRevision = Number.MAX_SAFE_INTEGER,
+  ): Promise<DraftThumbnailPair | null> => {
+    const pairUri = thumbnailPairUri(id);
+    const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
+    try {
+      if (!(await recoverFile(files, pairState)) || !(await files.fileExists(pairUri))) return null;
+      const record = parseThumbnailPairJson(await files.readText(pairUri));
+      if (record.draftId !== id || record.contentRevision > maximumRevision) return null;
+      const squareUri = child(draftThumbnailsUri(id), record.squareFile);
+      const originalUri = child(draftThumbnailsUri(id), record.originalFile);
+      if (!(await files.fileExists(squareUri)) || !(await files.fileExists(originalUri))) return null;
+      return Object.freeze({
+        contentRevision: record.contentRevision,
+        profileVersion: record.profileVersion,
+        squareUri,
+        originalUri,
+      });
+    } catch {
+      return null;
+    }
+  };
 
   const stageCandidate = async (
     operationUri: string,
@@ -538,80 +995,92 @@ export function createDraftLibrary({
 
   const validateAggregate = async (id: DraftId): Promise<ValidatedAggregate> => {
     const uri = draftUri(id);
-    const documentUri = child(uri, "document.json");
+    const rootRecordUri = child(uri, "draft.json");
     const catalogUri = child(uri, "catalog.json");
-    try {
-      if (!(await files.directoryExists(uri))) {
-        return { status: "invalid", reason: "draft-not-found" };
-      }
-    } catch {
-      return { status: "invalid", reason: "draft-not-found" };
+    if (!(await files.directoryExists(uri))) {
+      return { status: "invalid", reason: "draft-not-found", root: null };
     }
-    try {
-      await recoverFile(files, textFileState(files, documentUri, parseDocumentJson));
-      if (!(await files.fileExists(documentUri))) {
-        return { status: "invalid", reason: "document-corrupt" };
-      }
-    } catch {
-      return { status: "invalid", reason: "document-corrupt" };
+    const rootRecovered = await recoverFile(
+      files,
+      textFileState(files, rootRecordUri, parseDraftRootJson),
+    );
+    if (!rootRecovered || !(await files.fileExists(rootRecordUri))) {
+      return { status: "invalid", reason: "document-corrupt", root: null };
     }
+    const rootText = await files.readText(rootRecordUri);
+    let root: DraftRootRecord;
     try {
-      await recoverFile(files, textFileState(files, catalogUri, parseCatalog));
-      if (!(await files.fileExists(catalogUri))) {
-        return { status: "invalid", reason: "catalog-corrupt" };
-      }
+      root = parseDraftRootJson(rootText);
     } catch {
-      return { status: "invalid", reason: "catalog-corrupt" };
+      return { status: "invalid", reason: "document-corrupt", root: null };
     }
-    let document: PlogDocument;
-    try {
-      document = parseDocumentJson(await files.readText(documentUri));
-    } catch {
-      return { status: "invalid", reason: "document-corrupt" };
+    if (root.draftId !== id) {
+      return { status: "invalid", reason: "document-corrupt", root: null };
     }
+    const catalogRecovered = await recoverFile(
+      files,
+      textFileState(files, catalogUri, parseCatalog),
+    );
+    if (!catalogRecovered || !(await files.fileExists(catalogUri))) {
+      return { status: "invalid", reason: "catalog-corrupt", root };
+    }
+    const catalogText = await files.readText(catalogUri);
     let catalog: Catalog;
     try {
-      catalog = parseCatalog(await files.readText(catalogUri));
+      catalog = parseCatalog(catalogText);
     } catch {
-      return { status: "invalid", reason: "catalog-corrupt" };
+      return { status: "invalid", reason: "catalog-corrupt", root };
     }
     const byId = new Map(catalog.entries.map((entry) => [entry.id, entry]));
-    for (const image of document.sourceImages) {
+    for (const image of root.document.sourceImages) {
       const entry = byId.get(image.id);
       if (entry === undefined) {
-        return { status: "invalid", reason: "asset-reference-missing" };
+        return { status: "invalid", reason: "asset-reference-missing", root };
       }
       if (entry.width !== image.width || entry.height !== image.height) {
-        return { status: "invalid", reason: "asset-facts-mismatch" };
+        return { status: "invalid", reason: "asset-facts-mismatch", root };
       }
       const originalUri = descriptorUri(uri, entry, "original");
-      if (originalUri === null || !(await originalFileExists(originalUri))) {
-        return { status: "invalid", reason: "original-missing" };
+      if (originalUri === null || !(await files.fileExists(originalUri))) {
+        return { status: "invalid", reason: "original-missing", root };
       }
     }
     return {
       status: "valid",
       uri,
-      document,
+      root,
       catalog,
     };
   };
 
-  const load = async (id: DraftId): Promise<ReadDraftResult> => {
+  const loadAggregate = async (id: DraftId): Promise<ReadDraftResult> => {
     try {
       await initialize();
     } catch {
       return { status: "recovery-failed", reason: "storage-unavailable" };
     }
     await maintainStaging();
-    const validated = await validateAggregate(id);
+    let validated: ValidatedAggregate;
+    try {
+      if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") {
+        return { status: "recovery-failed", reason: "draft-not-found" };
+      }
+      if ((await inspectPublication(id)) !== "valid") {
+        return { status: "recovery-failed", reason: "draft-not-found" };
+      }
+      validated = await validateAggregate(id);
+    } catch {
+      return { status: "recovery-failed", reason: "storage-unavailable" };
+    }
     if (validated.status === "invalid") {
       return { status: "recovery-failed", reason: validated.reason };
     }
     return {
       status: "ready",
       draftId: id,
-      document: validated.document,
+      document: validated.root.document,
+      metadata: validated.root.metadata,
+      contentRevision: validated.root.contentRevision,
       assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
     };
   };
@@ -623,12 +1092,19 @@ export function createDraftLibrary({
       return;
     }
     await maintainStaging();
-    const validated = await validateAggregate(id);
+    let validated: ValidatedAggregate;
+    try {
+      if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") return;
+      if ((await inspectPublication(id)) !== "valid") return;
+      validated = await validateAggregate(id);
+    } catch {
+      return;
+    }
     if (validated.status === "invalid") return;
-    const { uri, document, catalog } = validated;
+    const { uri, root, catalog } = validated;
     const catalogUri = child(uri, "catalog.json");
     const catalogState = textFileState(files, catalogUri, parseCatalog);
-    const live = new Set(document.sourceImages.map(({ id: assetId }) => assetId));
+    const live = new Set(root.document.sourceImages.map(({ id: assetId }) => assetId));
     const stale = catalog.entries.filter(({ id: assetId }) => !live.has(assetId));
     const retained = catalog.entries.filter(({ id: assetId }) => live.has(assetId));
     if (stale.length > 0) {
@@ -670,6 +1146,37 @@ export function createDraftLibrary({
         }
       }
     }
+
+    const thumbnailsUri = draftThumbnailsUri(id);
+    let retainedThumbnailUris: ReadonlySet<string>;
+    try {
+      const pairUri = thumbnailPairUri(id);
+      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
+      const recovered = await recoverFile(files, pairState);
+      if (!recovered || !(await files.fileExists(pairUri))) {
+        retainedThumbnailUris = new Set();
+      } else {
+        const pair = parseThumbnailPairJson(await files.readText(pairUri));
+        if (pair.draftId !== id || pair.contentRevision > root.contentRevision) return;
+        retainedThumbnailUris = new Set([
+          child(thumbnailsUri, pair.squareFile),
+          child(thumbnailsUri, pair.originalFile),
+        ]);
+      }
+    } catch {
+      return;
+    }
+    let thumbnailCandidates: readonly string[];
+    try {
+      thumbnailCandidates = await files.listFiles(thumbnailsUri);
+    } catch {
+      return;
+    }
+    for (const candidate of thumbnailCandidates) {
+      if (isDirectChild(thumbnailsUri, candidate) && !retainedThumbnailUris.has(candidate)) {
+        await safeRemoveFile(candidate);
+      }
+    }
   };
 
   const readUnserialized = async (id: DraftId): Promise<ReadDraftResult> => {
@@ -678,7 +1185,178 @@ export function createDraftLibrary({
     } catch {
       return { status: "recovery-failed", reason: "storage-unavailable" };
     }
-    return load(id);
+    return loadAggregate(id);
+  };
+
+  const markThumbnailGenerationFinished = (
+    id: DraftId,
+    revision: number,
+    succeeded: boolean,
+  ): void => {
+    if (succeeded) return;
+    updateReadyEntries((entries) =>
+      entries.map((candidate) =>
+        candidate.draftId === id &&
+        candidate.status === "ready" &&
+        candidate.contentRevision === revision
+          ? Object.freeze({
+              ...candidate,
+              thumbnailStatus: candidate.thumbnail === null ? "unavailable" : "ready",
+            })
+          : candidate,
+      ),
+    );
+  };
+
+  const commitThumbnailPair = async (
+    request: ThumbnailRequest,
+    squareFile: string,
+    originalFile: string,
+    generated: { readonly square: DraftThumbnailSize; readonly original: DraftThumbnailSize },
+  ): Promise<boolean> => {
+    return serializeDraftOperation(request.id, async () => {
+      if (
+        confirmedDeletedIds.has(request.id) ||
+        (await inspectDeletionMarker(request.id)) === "valid" ||
+        (await inspectPublication(request.id)) !== "valid"
+      ) {
+        return false;
+      }
+      const validated = await validateAggregate(request.id);
+      if (
+        validated.status !== "valid" ||
+        validated.root.contentRevision !== request.root.contentRevision
+      ) {
+        return false;
+      }
+      const squareUri = child(draftThumbnailsUri(request.id), squareFile);
+      const originalUri = child(draftThumbnailsUri(request.id), originalFile);
+      const [square, original] = await Promise.all([
+        thumbnails.inspect(squareUri),
+        thumbnails.inspect(originalUri),
+      ]);
+      if (
+        square === null ||
+        original === null ||
+        square.width !== generated.square.width ||
+        square.height !== generated.square.height ||
+        original.width !== generated.original.width ||
+        original.height !== generated.original.height ||
+        square.width !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
+        square.height !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
+        Math.max(original.width, original.height) > DRAFT_THUMBNAIL_PROFILE.originalLongEdge
+      ) {
+        return false;
+      }
+      const record: DraftThumbnailPairRecord = Object.freeze({
+        thumbnailPairSchemaVersion: 1,
+        draftId: request.id,
+        contentRevision: request.root.contentRevision,
+        profileVersion: DRAFT_THUMBNAIL_PROFILE.profileVersion,
+        squareFile,
+        originalFile,
+        square,
+        original,
+      });
+      const pairUri = thumbnailPairUri(request.id);
+      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
+      const json = thumbnailPairJson(record);
+      await recoverFile(files, pairState);
+      await files.writeText(pairState.temporaryUri, json);
+      await commitPreparedFile(
+        files,
+        pairState,
+        async (currentUri) => (await files.readText(currentUri)) === json,
+      );
+      const pair = Object.freeze({
+        contentRevision: record.contentRevision,
+        profileVersion: record.profileVersion,
+        squareUri,
+        originalUri,
+      });
+      updateReadyEntries((entries) =>
+        entries.map((entry) =>
+          entry.draftId === request.id &&
+          entry.status === "ready" &&
+          entry.contentRevision >= pair.contentRevision
+            ? Object.freeze({ ...entry, thumbnail: pair, thumbnailStatus: "ready" })
+            : entry,
+        ),
+      );
+      return true;
+    });
+  };
+
+  const runThumbnailGeneration = async (request: ThumbnailRequest): Promise<void> => {
+    const attempted = attemptedThumbnailRevisions.get(request.id) ?? new Set<number>();
+    attempted.add(request.root.contentRevision);
+    attemptedThumbnailRevisions.set(request.id, attempted);
+    const generationId = assertStorageKey(createThumbnailGenerationId());
+    const prefix = `r${request.root.contentRevision}-p${DRAFT_THUMBNAIL_PROFILE.profileVersion}-${generationId}`;
+    const squareFile = `${prefix}-square.jpg`;
+    const originalFile = `${prefix}-original.jpg`;
+    const squareUri = child(draftThumbnailsUri(request.id), squareFile);
+    const originalUri = child(draftThumbnailsUri(request.id), originalFile);
+    let succeeded = false;
+    try {
+      const generated = await thumbnails.generate({
+        draftId: request.id,
+        contentRevision: request.root.contentRevision,
+        document: request.root.document,
+        assets: createCatalogSnapshot(request.id, request.uri, request.catalog),
+        profile: DRAFT_THUMBNAIL_PROFILE,
+        squareUri,
+        originalUri,
+      });
+      succeeded = await commitThumbnailPair(
+        request,
+        squareFile,
+        originalFile,
+        generated,
+      );
+    } catch {
+      succeeded = false;
+    } finally {
+      markThumbnailGenerationFinished(request.id, request.root.contentRevision, succeeded);
+      runningThumbnailIds.delete(request.id);
+      const pending = pendingThumbnails.get(request.id);
+      pendingThumbnails.delete(request.id);
+      if (pending !== undefined) queueThumbnail(pending);
+    }
+  };
+
+  const queueThumbnail = (request: ThumbnailRequest): void => {
+    const attempted = attemptedThumbnailRevisions.get(request.id);
+    if (attempted?.has(request.root.contentRevision) === true) return;
+    if (runningThumbnailIds.has(request.id)) {
+      const pending = pendingThumbnails.get(request.id);
+      if (pending === undefined || pending.root.contentRevision < request.root.contentRevision) {
+        pendingThumbnails.set(request.id, request);
+      }
+      return;
+    }
+    runningThumbnailIds.add(request.id);
+    void runThumbnailGeneration(request);
+  };
+
+  const scheduleThumbnailFromDisk = async (id: DraftId): Promise<void> => {
+    try {
+      const request = await serializeDraftOperation(
+        id,
+        async (): Promise<ThumbnailRequest | null> => {
+          if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") {
+            return null;
+          }
+          const validated = await validateAggregate(id);
+          return validated.status === "valid"
+            ? { id, root: validated.root, catalog: validated.catalog, uri: validated.uri }
+            : null;
+        },
+      );
+      if (request !== null) queueThumbnail(request);
+    } catch {
+      // Derived thumbnail scheduling never changes the reliable Draft snapshot.
+    }
   };
 
   const create = async (
@@ -686,6 +1364,16 @@ export function createDraftLibrary({
     options: { readonly metadataPolicy: MetadataPolicy },
   ): Promise<CreateDraftResult> => {
     if (candidates.length === 0) return { status: "not-created", errors: [] };
+    const loaded = await loadLibrary();
+    if (loaded.status !== "ready") {
+      return {
+        status: "create-failed",
+        message:
+          (loaded.status === "storage-failed" ? loaded.message : undefined) ??
+          "Draft Library storage is unavailable",
+        errors: [],
+      };
+    }
     try {
       await initialize();
     } catch (error: unknown) {
@@ -703,6 +1391,7 @@ export function createDraftLibrary({
       await files.ensureDirectory(child(aggregateUri, "assets"));
       await files.ensureDirectory(child(aggregateUri, "previews"));
       await files.ensureDirectory(child(aggregateUri, "metadata"));
+      await files.ensureDirectory(child(aggregateUri, "thumbnails"));
     } catch (error: unknown) {
       await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors: [] };
@@ -772,28 +1461,81 @@ export function createDraftLibrary({
       imported.map(({ image }) => image),
       options,
     );
+    const timestamp = parseTimestamp(now(), "current time");
+    const metadata = Object.freeze({ createdAt: timestamp, updatedAt: timestamp });
+    const root: DraftRootRecord = Object.freeze({
+      draftSchemaVersion: 1,
+      draftId: id,
+      metadata,
+      contentRevision: 1,
+      document,
+    });
     const catalog = parseCatalog(catalogJson(imported.map(({ entry }) => entry)));
     const publishedUri = draftUri(id);
-    let publicationStarted = false;
     try {
       await files.writeText(child(aggregateUri, "catalog.json"), catalogJson(catalog.entries));
-      await files.writeText(child(aggregateUri, "document.json"), JSON.stringify(document));
-      if (await files.directoryExists(publishedUri)) throw new Error("Draft identity already exists");
-      publicationStarted = true;
-      await files.moveDirectory(aggregateUri, publishedUri);
-      await finishStagingOperation(operationUri);
-      return {
-        status: "created",
-        draftId: id,
-        document,
-        assets: createCatalogSnapshot(id, publishedUri, catalog),
-        errors,
-      };
+      await files.writeText(child(aggregateUri, "draft.json"), draftRootJson(root));
     } catch (error: unknown) {
-      if (publicationStarted) await safeRemoveDirectory(publishedUri);
       await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors };
     }
+    return serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
+      let publicationStarted = false;
+      let publicationCommitted = false;
+      let publicationOutcomeUnknown = false;
+      try {
+        if (confirmedDeletedIds.has(id) || (await files.directoryExists(publishedUri))) {
+          throw new Error("Draft identity already exists");
+        }
+        publicationStarted = true;
+        await files.moveDirectory(aggregateUri, publishedUri);
+        const validated = await validateAggregate(id);
+        if (validated.status !== "valid") {
+          throw new Error(`published Draft failed validation: ${validated.reason}`);
+        }
+        const publicationUri = child(publishedUri, "publication.json");
+        let publicationWriteError: unknown = null;
+        try {
+          await files.writeText(publicationUri, publicationJson(id));
+        } catch (error: unknown) {
+          publicationWriteError = error;
+        }
+        let publication: "valid" | "absent" | "invalid";
+        try {
+          publication = await inspectPublication(id, publishedUri);
+        } catch (error: unknown) {
+          publicationOutcomeUnknown = true;
+          throw error;
+        }
+        if (publication !== "valid") {
+          throw publicationWriteError ?? new Error("Draft publication did not commit");
+        }
+        publicationCommitted = true;
+        updateReadyEntries((entries) =>
+          entries.some((entry) => entry.draftId === id)
+            ? entries
+            : [...entries, readyListEntry(root)],
+        );
+        queueThumbnail({ id, root, catalog, uri: publishedUri });
+        await finishStagingOperation(operationUri);
+        return {
+          status: "created",
+          draftId: id,
+          document,
+          metadata,
+          contentRevision: 1,
+          assets: createCatalogSnapshot(id, publishedUri, catalog),
+          errors,
+        };
+      } catch (error: unknown) {
+        if (publicationStarted && !publicationCommitted && !publicationOutcomeUnknown) {
+          await safeRemoveDirectory(publishedUri);
+        }
+        if (publicationOutcomeUnknown) installStorageFailure(error);
+        await finishStagingOperation(operationUri);
+        return { status: "create-failed", message: errorMessage(error), errors };
+      }
+    });
   };
 
   const saveUnserialized = async (
@@ -806,7 +1548,19 @@ export function createDraftLibrary({
       return { status: "save-failed", reason: "storage-failed", message: errorMessage(error) };
     }
     await maintainStaging();
-    const validated = await validateAggregate(id);
+    let validated: ValidatedAggregate;
+    try {
+      if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") {
+        return { status: "save-failed", reason: "draft-not-found" };
+      }
+      if ((await inspectPublication(id)) !== "valid") {
+        return { status: "save-failed", reason: "draft-not-found" };
+      }
+      validated = await validateAggregate(id);
+    } catch (error: unknown) {
+      installStorageFailure(error);
+      return { status: "save-failed", reason: "storage-failed", message: errorMessage(error) };
+    }
     if (validated.status === "invalid") {
       return { status: "save-failed", reason: validated.reason };
     }
@@ -826,23 +1580,73 @@ export function createDraftLibrary({
         return { status: "save-failed", reason: "asset-facts-mismatch" };
       }
       const original = descriptorUri(validated.uri, entry, "original");
-      if (original === null || !(await originalFileExists(original))) {
-        return { status: "save-failed", reason: "original-missing" };
+      try {
+        if (original === null || !(await files.fileExists(original))) {
+          return { status: "save-failed", reason: "original-missing" };
+        }
+      } catch (error: unknown) {
+        installStorageFailure(error);
+        return {
+          status: "save-failed",
+          reason: "storage-failed",
+          message: errorMessage(error),
+        };
       }
     }
+    if (JSON.stringify(validated.root.document) === JSON.stringify(prospective)) {
+      return {
+        status: "saved",
+        document: validated.root.document,
+        metadata: validated.root.metadata,
+        contentRevision: validated.root.contentRevision,
+      };
+    }
     const uri = draftUri(id);
-    const state = textFileState(files, child(uri, "document.json"), parseDocumentJson);
+    const rootState = textFileState(files, child(uri, "draft.json"), parseDraftRootJson);
     try {
-      const prospectiveJson = JSON.stringify(prospective);
-      await recoverFile(files, state);
-      await files.writeText(state.temporaryUri, prospectiveJson);
+      const nextRoot: DraftRootRecord = Object.freeze({
+        ...validated.root,
+        metadata: Object.freeze({
+          ...validated.root.metadata,
+          updatedAt: parseTimestamp(now(), "current time"),
+        }),
+        contentRevision: validated.root.contentRevision + 1,
+        document: prospective,
+      });
+      const prospectiveJson = draftRootJson(nextRoot);
+      await recoverFile(files, rootState);
+      await files.writeText(rootState.temporaryUri, prospectiveJson);
       await commitPreparedFile(
         files,
-        state,
+        rootState,
         async (currentUri) => (await files.readText(currentUri)) === prospectiveJson,
       );
-      return { status: "saved", document: prospective };
+      updateReadyEntries((entries) => {
+        const previous = entries.find((entry) => entry.draftId === id);
+        if (
+          previous?.status === "ready" &&
+          previous.contentRevision >= nextRoot.contentRevision
+        ) {
+          return entries;
+        }
+        return [
+          ...entries.filter((entry) => entry.draftId !== id),
+          readyListEntry(
+            nextRoot,
+            previous?.thumbnail ?? null,
+            "generating",
+          ),
+        ];
+      });
+      queueThumbnail({ id, root: nextRoot, catalog: validated.catalog, uri: validated.uri });
+      return {
+        status: "saved",
+        document: prospective,
+        metadata: nextRoot.metadata,
+        contentRevision: nextRoot.contentRevision,
+      };
     } catch (error: unknown) {
+      installStorageFailure(error);
       return { status: "save-failed", reason: "storage-failed", message: errorMessage(error) };
     }
   };
@@ -851,7 +1655,7 @@ export function createDraftLibrary({
     id: DraftId,
     candidates: readonly ImportCandidate[],
   ): Promise<IngestAssetsResult> => {
-    const loaded = await load(id);
+    const loaded = await loadAggregate(id);
     if (loaded.status === "recovery-failed") {
       return {
         status: "ingest-failed",
@@ -974,7 +1778,7 @@ export function createDraftLibrary({
     id: DraftId,
     assetId: ImportedAssetId,
   ): Promise<ReadPreviewResult> => {
-    const loaded = await load(id);
+    const loaded = await loadAggregate(id);
     if (loaded.status === "recovery-failed") {
       return { status: "preview-failed", reason: loaded.reason };
     }
@@ -1042,10 +1846,118 @@ export function createDraftLibrary({
     }
   };
 
+  const cleanupDeletedDraft = async (id: DraftId): Promise<void> => {
+    await safeRemoveDirectory(draftUri(id));
+    try {
+      if (!(await files.directoryExists(draftUri(id)))) {
+        await safeRemoveFile(deletionMarkerUri(id));
+      }
+    } catch {
+      // Keep the marker until a later maintenance pass can prove the Draft directory is absent.
+    }
+  };
+
+  const commitLogicalDeletion = (id: DraftId): DeleteDraftResult => {
+    confirmedDeletedIds.add(id);
+    unknownDeletionIds.delete(id);
+    updateReadyEntries((entries) => entries.filter((entry) => entry.draftId !== id));
+    void cleanupDeletedDraft(id);
+    return { status: "deleted" };
+  };
+
+  const deleteDraftUnserialized = async (id: DraftId): Promise<DeleteDraftResult> => {
+    if (unknownDeletionIds.has(id)) {
+      unknownDeletionIds.delete(id);
+      if (confirmedDeletedIds.has(id)) return commitLogicalDeletion(id);
+      return { status: "delete-failed", reason: "storage-failed" };
+    }
+    if (confirmedDeletedIds.has(id)) return commitLogicalDeletion(id);
+
+    let existing: "valid" | "absent" | "invalid";
+    try {
+      existing = await inspectDeletionMarker(id);
+    } catch (error: unknown) {
+      unknownDeletionIds.add(id);
+      installStorageFailure(error);
+      return { status: "delete-unknown", message: errorMessage(error) };
+    }
+    if (existing === "valid") return commitLogicalDeletion(id);
+    if (existing === "invalid") {
+      await safeRemoveFile(deletionMarkerUri(id));
+      try {
+        if ((await inspectDeletionMarker(id)) !== "absent") {
+          return { status: "delete-failed", reason: "storage-failed" };
+        }
+      } catch (error: unknown) {
+        return {
+          status: "delete-failed",
+          reason: "storage-failed",
+          message: errorMessage(error),
+        };
+      }
+    }
+    try {
+      if ((await inspectPublication(id)) !== "valid") {
+        return { status: "delete-failed", reason: "draft-not-found" };
+      }
+    } catch (error: unknown) {
+      return {
+        status: "delete-failed",
+        reason: "storage-failed",
+        message: errorMessage(error),
+      };
+    }
+
+    let writeError: unknown = null;
+    try {
+      await files.writeText(deletionMarkerUri(id), deletionJson(id));
+    } catch (error: unknown) {
+      writeError = error;
+    }
+    try {
+      const committed = await inspectDeletionMarker(id);
+      if (committed === "valid") return commitLogicalDeletion(id);
+      if (committed === "invalid") await safeRemoveFile(deletionMarkerUri(id));
+      return {
+        status: "delete-failed",
+        reason: "storage-failed",
+        ...(writeError === null ? {} : { message: errorMessage(writeError) }),
+      };
+    } catch (error: unknown) {
+      unknownDeletionIds.add(id);
+      installStorageFailure(error);
+      return { status: "delete-unknown", message: errorMessage(error) };
+    }
+  };
+
   const read = (id: DraftId): Promise<ReadDraftResult> =>
     serializeDraftOperation(id, () => readUnserialized(id));
-  const save = (id: DraftId, document: PlogDocument): Promise<SaveDraftResult> =>
-    serializeDraftOperation(id, () => saveUnserialized(id, document));
+  const save = async (id: DraftId, document: PlogDocument): Promise<SaveDraftResult> => {
+    const loaded = await loadLibrary();
+    if (loaded.status !== "ready") {
+      return {
+        status: "save-failed",
+        reason: "storage-failed",
+        ...(loaded.status === "storage-failed" && loaded.message !== undefined
+          ? { message: loaded.message }
+          : {}),
+      };
+    }
+    return serializeDraftOperation(id, () => saveUnserialized(id, document));
+  };
+  const deleteDraft = async (id: DraftId): Promise<DeleteDraftResult> => {
+    const loaded = await loadLibrary();
+    if (loaded.status !== "ready") {
+      return {
+        status: unknownDeletionIds.has(id) ? "delete-unknown" : "delete-failed",
+        ...(unknownDeletionIds.has(id) ? {} : { reason: "storage-failed" as const }),
+        ...(loaded.status === "storage-failed" && loaded.message !== undefined
+          ? { message: loaded.message }
+          : {}),
+      } as DeleteDraftResult;
+    }
+    return serializeDraftOperation(id, () => deleteDraftUnserialized(id));
+  };
   const ingest = (
     id: DraftId,
     candidates: readonly ImportCandidate[],
@@ -1059,5 +1971,175 @@ export function createDraftLibrary({
   const maintainInactive = (id: DraftId): Promise<void> =>
     serializeDraftOperation(id, () => maintainInactiveUnserialized(id));
 
-  return { create, read, save, ingest, readPreview, maintainInactive };
+  const reportThumbnailLoadFailure = (id: DraftId, pair: DraftThumbnailPair): void => {
+    if (state.status !== "ready") return;
+    const entry = state.entries.find((candidate) => candidate.draftId === id);
+    if (
+      entry?.thumbnail === null ||
+      entry?.thumbnail.squareUri !== pair.squareUri ||
+      entry.thumbnail.originalUri !== pair.originalUri
+    ) {
+      return;
+    }
+    if (entry.status === "corrupt") {
+      updateReadyEntries((entries) =>
+        entries.map((candidate) =>
+          candidate.draftId === id &&
+          candidate.status === "corrupt" &&
+          candidate.thumbnail?.squareUri === pair.squareUri &&
+          candidate.thumbnail.originalUri === pair.originalUri
+            ? Object.freeze({ ...candidate, thumbnail: null })
+            : candidate,
+        ),
+      );
+      return;
+    }
+    const canSchedule =
+      attemptedThumbnailRevisions.get(id)?.has(entry.contentRevision) !== true;
+    updateReadyEntries((entries) =>
+      entries.map((candidate) =>
+        candidate.draftId === id && candidate.status === "ready"
+          ? Object.freeze({
+              ...candidate,
+              thumbnail: null,
+              thumbnailStatus: canSchedule ? "generating" : "unavailable",
+            })
+          : candidate,
+      ),
+    );
+    if (canSchedule) void scheduleThumbnailFromDisk(id);
+  };
+
+  const inspectDraftForList = async (
+    id: DraftId,
+    uri: string,
+  ): Promise<DraftListEntry | null> => {
+    if (confirmedDeletedIds.has(id)) return null;
+    const publication = await inspectPublication(id, uri);
+    if (publication !== "valid") {
+      await safeRemoveDirectory(uri);
+      return null;
+    }
+    const validated = await validateAggregate(id);
+    if (validated.status === "valid") {
+      const thumbnail = await readCommittedThumbnailPair(
+        id,
+        validated.root.contentRevision,
+      );
+      const current =
+        thumbnail?.contentRevision === validated.root.contentRevision &&
+        thumbnail.profileVersion === DRAFT_THUMBNAIL_PROFILE.profileVersion;
+      return readyListEntry(
+        validated.root,
+        thumbnail,
+        current ? "ready" : "generating",
+      );
+    }
+    if (validated.reason === "draft-not-found") return null;
+    return Object.freeze({
+      status: "corrupt",
+      draftId: id,
+      updatedAt: validated.root?.metadata.updatedAt ?? null,
+      photoCount: validated.root?.document.sourceImages.length ?? null,
+      reason: validated.reason,
+      thumbnail: await readCommittedThumbnailPair(
+        id,
+        validated.root?.contentRevision ?? Number.MAX_SAFE_INTEGER,
+      ),
+    });
+  };
+
+  const enumerateDeletionMarkers = async (): Promise<void> => {
+    const markerUris = await files.listFiles(deletionsUri);
+    for (const markerUri of markerUris) {
+      const name = directoryName(markerUri);
+      if (!name.endsWith(".json")) {
+        await safeRemoveFile(markerUri);
+        continue;
+      }
+      const id = draftIdFromStorageName(name.slice(0, -".json".length));
+      if (id === null || deletionMarkerUri(id) !== markerUri) {
+        await safeRemoveFile(markerUri);
+        continue;
+      }
+      const marker = await inspectDeletionMarker(id);
+      if (marker !== "valid") {
+        if (marker === "invalid") await safeRemoveFile(markerUri);
+        continue;
+      }
+      confirmedDeletedIds.add(id);
+      await serializeDraftOperation(id, () => cleanupDeletedDraft(id));
+    }
+  };
+
+  const enumerateDrafts = async (): Promise<readonly DraftListEntry[]> => {
+    const directories = await files.listDirectories(draftsUri);
+    const candidates = directories.flatMap((uri) => {
+      const id = draftIdFromStorageName(directoryName(uri));
+      return id === null ? [] : [{ id, uri }];
+    });
+    const entries: DraftListEntry[] = [];
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < candidates.length) {
+        const candidate = candidates[nextIndex];
+        nextIndex += 1;
+        if (candidate === undefined) continue;
+        const entry = await serializeDraftOperation(candidate.id, () =>
+          inspectDraftForList(candidate.id, candidate.uri),
+        );
+        if (entry !== null) entries.push(entry);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, candidates.length) }, () => worker()),
+    );
+    return entries;
+  };
+
+  const loadLibrary = (): Promise<DraftLibraryState> => {
+    if (state.status === "ready") return Promise.resolve(state);
+    if (loadPromise !== null) return loadPromise;
+    publishState(Object.freeze({ status: "loading" }));
+    let operation!: Promise<DraftLibraryState>;
+    operation = (async (): Promise<DraftLibraryState> => {
+      try {
+        await initialize();
+        await maintainStaging();
+        await enumerateDeletionMarkers();
+        const ready = installReadyEntries(await enumerateDrafts());
+        if (ready.status === "ready") {
+          for (const entry of ready.entries) {
+            if (entry.status === "ready" && entry.thumbnailStatus !== "ready") {
+              void scheduleThumbnailFromDisk(entry.draftId);
+            }
+          }
+        }
+        return ready;
+      } catch (error: unknown) {
+        return installStorageFailure(error);
+      } finally {
+        if (loadPromise === operation) loadPromise = null;
+      }
+    })();
+    loadPromise = operation;
+    return operation;
+  };
+
+  return {
+    load: loadLibrary,
+    getState: () => state,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    create,
+    read,
+    save,
+    deleteDraft,
+    ingest,
+    readPreview,
+    reportThumbnailLoadFailure,
+    maintainInactive,
+  };
 }
