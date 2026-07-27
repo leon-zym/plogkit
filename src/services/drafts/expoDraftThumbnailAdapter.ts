@@ -1,24 +1,22 @@
 import { File } from "expo-file-system";
-import {
-  ImageFormat,
-  Skia,
-  type SkImage,
-  type SkSurface,
-} from "@shopify/react-native-skia";
+import { Skia, type SkImage } from "@shopify/react-native-skia";
 
-import { getDeviceTextLayoutEnvironment } from "@/render/deviceTextLayout";
-import { documentToRenderScene, type RenderScene } from "@/render/scene";
-import { drawSceneBackground, drawSceneImage, drawTextLayout } from "@/render/skiaDraw";
-import { createTextLayoutSnapshot } from "@/render/textLayout";
+import { createDeviceSkiaOffscreenSceneRenderer } from "@/render/deviceSkiaOffscreenRenderer";
+import { documentToRenderScene } from "@/render/scene";
+import type {
+  SkiaOffscreenSceneRenderer,
+  SkiaOffscreenTarget,
+} from "@/render/skiaOffscreenRenderer";
 
 import type {
-  AssetCatalogSnapshot,
   DraftThumbnailAdapter,
   DraftThumbnailProfile,
   DraftThumbnailSize,
 } from "./draftLibrary";
 
 type Representation = "square" | "original";
+const SQUARE_TARGET_ID = "square";
+const ORIGINAL_TARGET_ID = "original";
 
 export interface DraftThumbnailGeometry extends DraftThumbnailSize {
   readonly scale: number;
@@ -35,10 +33,7 @@ export function calculateDraftThumbnailGeometry(
   if (sceneWidth <= 0 || sceneHeight <= 0) {
     throw new Error("thumbnail scene dimensions must be positive");
   }
-  const originalScale = Math.min(
-    1,
-    profile.originalLongEdge / Math.max(sceneWidth, sceneHeight),
-  );
+  const originalScale = Math.min(1, profile.originalLongEdge / Math.max(sceneWidth, sceneHeight));
   const size =
     representation === "square"
       ? { width: profile.squareSize, height: profile.squareSize }
@@ -58,7 +53,7 @@ export function calculateDraftThumbnailGeometry(
   };
 }
 
-async function loadImage(uri: string): Promise<SkImage | null> {
+async function loadImageForInspection(uri: string): Promise<SkImage | null> {
   const data = await Skia.Data.fromURI(uri);
   try {
     return Skia.Image.MakeImageFromEncoded(data);
@@ -67,88 +62,81 @@ async function loadImage(uri: string): Promise<SkImage | null> {
   }
 }
 
-async function renderRepresentation(
-  scene: RenderScene,
-  assets: AssetCatalogSnapshot,
+function createThumbnailTarget(
+  sceneWidth: number,
+  sceneHeight: number,
   profile: DraftThumbnailProfile,
   representation: Representation,
-  destinationUri: string,
-): Promise<DraftThumbnailSize> {
+): SkiaOffscreenTarget {
   const geometry = calculateDraftThumbnailGeometry(
-    scene.width,
-    scene.height,
+    sceneWidth,
+    sceneHeight,
     profile,
     representation,
   );
-  let surface: SkSurface | null = null;
-  let snapshot: SkImage | null = null;
-  const textLayoutResult = createTextLayoutSnapshot(
-    getDeviceTextLayoutEnvironment(),
-    scene.texts,
-  );
-  if (textLayoutResult.status === "failure") {
-    throw new Error(`thumbnail text layout failed: ${textLayoutResult.message}`);
-  }
-  const textLayout = textLayoutResult.snapshot;
-  try {
-    surface = Skia.Surface.Make(geometry.width, geometry.height);
-    if (surface === null) throw new Error("could not create thumbnail surface");
-    const canvas = surface.getCanvas();
-    canvas.translate(geometry.translateX, geometry.translateY);
-    canvas.scale(geometry.scale, geometry.scale);
-    drawSceneBackground(Skia, canvas, scene);
-    for (const node of scene.images) {
-      const descriptor = assets.resolve(node.imageId, "original");
-      if (descriptor === null) throw new Error(`thumbnail asset ${node.imageId} is unavailable`);
-      const image = await loadImage(descriptor.uri);
-      if (image === null) throw new Error(`thumbnail asset ${node.imageId} could not decode`);
-      try {
-        drawSceneImage(Skia, canvas, node, image);
-      } finally {
-        image.dispose();
-      }
-    }
-    for (const layout of textLayout.layouts) drawTextLayout(canvas, layout);
-    surface.flush();
-    snapshot = surface.makeImageSnapshot();
-    const bytes = snapshot.encodeToBytes(ImageFormat.JPEG, Math.round(profile.quality * 100));
-    if (bytes.length === 0) throw new Error("Skia produced an empty thumbnail");
-    const file = new File(destinationUri);
-    file.create({ intermediates: true, overwrite: false });
-    file.write(bytes);
-    return { width: geometry.width, height: geometry.height };
-  } finally {
-    snapshot?.dispose();
-    textLayout.dispose();
-    surface?.dispose();
-  }
+  return {
+    id: representation === "square" ? SQUARE_TARGET_ID : ORIGINAL_TARGET_ID,
+    width: geometry.width,
+    height: geometry.height,
+    transform: {
+      scaleX: geometry.scale,
+      scaleY: geometry.scale,
+      translateX: geometry.translateX,
+      translateY: geometry.translateY,
+    },
+    encoding: { format: "jpeg", quality: profile.quality },
+  };
 }
 
-export function createExpoDraftThumbnailAdapter(): DraftThumbnailAdapter {
+function writeThumbnail(uri: string, bytes: Uint8Array): void {
+  const file = new File(uri);
+  file.create({ intermediates: true, overwrite: false });
+  file.write(bytes);
+}
+
+export interface CreateExpoDraftThumbnailAdapterOptions {
+  readonly renderer?: SkiaOffscreenSceneRenderer;
+}
+
+export function createExpoDraftThumbnailAdapter(
+  options: CreateExpoDraftThumbnailAdapterOptions = {},
+): DraftThumbnailAdapter {
+  const renderer = options.renderer ?? createDeviceSkiaOffscreenSceneRenderer();
   return {
     generate: async (input) => {
       const scene = documentToRenderScene(input.document);
-      const square = await renderRepresentation(
+      const result = await renderer.render({
         scene,
-        input.assets,
-        input.profile,
-        "square",
-        input.squareUri,
-      );
-      const original = await renderRepresentation(
-        scene,
-        input.assets,
-        input.profile,
-        "original",
-        input.originalUri,
-      );
-      return { square, original };
+        assets: input.assets,
+        targets: [
+          createThumbnailTarget(scene.width, scene.height, input.profile, "square"),
+          createThumbnailTarget(scene.width, scene.height, input.profile, "original"),
+        ],
+      });
+      if (result.status !== "rendered") {
+        const detail =
+          result.status === "cancelled"
+            ? `cancelled during ${result.phase}`
+            : `${result.code}: ${result.message}`;
+        throw new Error(`thumbnail rendering failed: ${detail}`);
+      }
+      const square = result.outputs[SQUARE_TARGET_ID];
+      const original = result.outputs[ORIGINAL_TARGET_ID];
+      if (square === undefined || original === undefined) {
+        throw new Error("Skia renderer omitted a requested thumbnail target");
+      }
+      writeThumbnail(input.squareUri, square.bytes);
+      writeThumbnail(input.originalUri, original.bytes);
+      return {
+        square: { width: square.width, height: square.height },
+        original: { width: original.width, height: original.height },
+      };
     },
     inspect: async (uri) => {
       try {
         const file = new File(uri);
         if (!file.exists) return null;
-        const image = await loadImage(uri);
+        const image = await loadImageForInspection(uri);
         if (image === null) return null;
         try {
           return { width: image.width(), height: image.height() };

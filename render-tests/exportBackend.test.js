@@ -2,10 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { LoadSkiaWeb } from "@shopify/react-native-skia/lib/commonjs/web/LoadSkiaWeb";
-import {
-  getSkiaExports,
-  makeOffscreenSurface,
-} from "@shopify/react-native-skia/lib/commonjs/headless";
+import { getSkiaExports } from "@shopify/react-native-skia/lib/commonjs/headless";
 
 import { createDocument, importedAssetId } from "../src/core/document";
 import { resolveExportPolicy } from "../src/core/exportPolicy";
@@ -16,12 +13,11 @@ import {
   createHeadlessTextLayoutEnvironment,
   renderHeadlessScene,
 } from "../src/render/headless";
+import { createHeadlessSkiaOffscreenSceneRenderer } from "../src/render/headlessSkiaOffscreenRenderer";
 import { documentToRenderScene } from "../src/render/scene";
 
 jest.mock("@shopify/react-native-skia", () => {
-  const headless = jest.requireActual(
-    "@shopify/react-native-skia/lib/commonjs/headless",
-  );
+  const headless = jest.requireActual("@shopify/react-native-skia/lib/commonjs/headless");
   return {
     ...headless,
     Skia: headless.getSkiaExports().Skia,
@@ -101,16 +97,7 @@ describe("Skia export backend contract", () => {
     fontProvider.dispose();
   });
 
-  function loadFixture() {
-    const data = api.Data.fromBytes(ONE_PIXEL_PNG);
-    try {
-      return Promise.resolve(api.Image.MakeImageFromEncoded(data));
-    } finally {
-      data.dispose();
-    }
-  }
-
-  it("matches shared rendered pixels and releases input, surface, and snapshot", async () => {
+  it("matches the shared renderer pixels and preserves the requested static encoding", async () => {
     const imageId = importedAssetId("backend-png");
     const baseDocument = createDocument([{ id: imageId, width: 96, height: 128 }]);
     const document = {
@@ -135,38 +122,11 @@ describe("Skia export backend contract", () => {
         formatOverride: "png",
       },
     };
-    const surfaceDispose = jest.fn();
-    const snapshotDispose = jest.fn();
-    let inputDispose;
     const backend = createSkiaExportBackend({
-      api,
-      getTextLayoutEnvironment: () => textLayoutEnvironment,
-      loadImage: async () => {
-        const image = await loadFixture();
-        inputDispose = jest.spyOn(image, "dispose");
-        return image;
-      },
-      makeSurface: (width, height) => {
-        const surface = makeOffscreenSurface(width, height);
-        return {
-          getCanvas: () => surface.getCanvas(),
-          flush: () => surface.flush(),
-          makeImageSnapshot: () => {
-            const snapshot = surface.makeImageSnapshot();
-            return {
-              encodeToBytes: (format, quality) => snapshot.encodeToBytes(format, quality),
-              dispose: () => {
-                snapshotDispose();
-                snapshot.dispose();
-              },
-            };
-          },
-          dispose: () => {
-            surfaceDispose();
-            surface.dispose();
-          },
-        };
-      },
+      renderer: createHeadlessSkiaOffscreenSceneRenderer(
+        new Map([["fixture://one", ONE_PIXEL_PNG]]),
+        textLayoutEnvironment,
+      ),
     });
     const assets = {
       entries: [imageId],
@@ -205,9 +165,6 @@ describe("Skia export backend contract", () => {
     decoded.dispose();
     expect(comparison.changedPixels).toBe(0);
     expect(preparedBytes[0].slice(1, 4)).toEqual(Uint8Array.from([0x50, 0x4e, 0x47]));
-    expect(inputDispose).toHaveBeenCalledTimes(1);
-    expect(surfaceDispose).toHaveBeenCalledTimes(1);
-    expect(snapshotDispose).toHaveBeenCalledTimes(1);
   });
 
   it("retains only basic JPEG metadata from the Draft sidecar", async () => {
@@ -220,10 +177,10 @@ describe("Skia export backend contract", () => {
       },
     };
     const backend = createSkiaExportBackend({
-      api,
-      getTextLayoutEnvironment: () => textLayoutEnvironment,
-      loadImage: loadFixture,
-      makeSurface: makeOffscreenSurface,
+      renderer: createHeadlessSkiaOffscreenSceneRenderer(
+        new Map([["fixture://one", ONE_PIXEL_PNG]]),
+        textLayoutEnvironment,
+      ),
       readMetadataText: async () =>
         JSON.stringify({
           capturedAt: "2026-07-18T09:10:11+08:00",
@@ -263,9 +220,7 @@ describe("Skia export backend contract", () => {
     const imageId = importedAssetId("backend-missing");
     const document = createDocument([{ id: imageId, width: 64, height: 48 }]);
     const backend = createSkiaExportBackend({
-      api,
-      getTextLayoutEnvironment: () => textLayoutEnvironment,
-      makeSurface: makeOffscreenSurface,
+      renderer: createHeadlessSkiaOffscreenSceneRenderer(new Map(), textLayoutEnvironment),
     });
     const { operation } = createOperation();
 
@@ -284,46 +239,61 @@ describe("Skia export backend contract", () => {
     expect(operation.prepareStaticImage).not.toHaveBeenCalled();
   });
 
-  it("releases the input image, snapshot, and surface when encoding fails", async () => {
+  it.each([
+    [
+      "target validation",
+      {
+        status: "failure",
+        code: "target-invalid",
+        phase: "render",
+        message: "target invalid",
+      },
+    ],
+    [
+      "composition",
+      {
+        status: "failure",
+        code: "surface-failed",
+        phase: "render",
+        targetId: "export",
+        message: "surface unavailable",
+      },
+    ],
+  ])("maps a shared renderer %s failure without writing a PreparedExport", async (
+    _label,
+    renderResult,
+  ) => {
+    const document = createDocument();
+    const backend = createSkiaExportBackend({
+      renderer: {
+        render: jest.fn(async () => renderResult),
+      },
+    });
+    const { operation } = createOperation();
+
+    await expect(
+      backend.prepare({
+        document,
+        assets: { entries: [], resolve: () => null },
+        policy: resolvedPolicy(document, backend),
+        operation,
+      }),
+    ).resolves.toEqual({ status: "failure", code: "render-failed", phase: "render" });
+    expect(operation.prepareStaticImage).not.toHaveBeenCalled();
+  });
+
+  it("maps a shared renderer encoding failure without writing a PreparedExport", async () => {
     const imageId = importedAssetId("backend-encode-failure");
     const document = createDocument([{ id: imageId, width: 64, height: 48 }]);
-    const inputDispose = jest.fn();
-    const snapshotDispose = jest.fn();
-    const surfaceDispose = jest.fn();
     const backend = createSkiaExportBackend({
-      api,
-      getTextLayoutEnvironment: () => textLayoutEnvironment,
-      loadImage: async () => {
-        const image = await loadFixture();
-        const dispose = image.dispose.bind(image);
-        image.dispose = () => {
-          inputDispose();
-          dispose();
-        };
-        return image;
-      },
-      makeSurface: (width, height) => {
-        const surface = makeOffscreenSurface(width, height);
-        return {
-          getCanvas: () => surface.getCanvas(),
-          flush: () => surface.flush(),
-          makeImageSnapshot: () => {
-            const snapshot = surface.makeImageSnapshot();
-            return {
-              encodeToBytes: () => {
-                throw new Error("encode failed");
-              },
-              dispose: () => {
-                snapshotDispose();
-                snapshot.dispose();
-              },
-            };
-          },
-          dispose: () => {
-            surfaceDispose();
-            surface.dispose();
-          },
-        };
+      renderer: {
+        render: jest.fn(async () => ({
+          status: "failure",
+          code: "encode-failed",
+          phase: "encode",
+          targetId: "export",
+          message: "encode failed",
+        })),
       },
     });
     const { operation } = createOperation();
@@ -342,42 +312,19 @@ describe("Skia export backend contract", () => {
         operation,
       }),
     ).resolves.toEqual({ status: "failure", code: "encode-failed", phase: "encode" });
-    expect(inputDispose).toHaveBeenCalledTimes(1);
-    expect(snapshotDispose).toHaveBeenCalledTimes(1);
-    expect(surfaceDispose).toHaveBeenCalledTimes(1);
     expect(operation.prepareStaticImage).not.toHaveBeenCalled();
   });
 
-  it("releases the loaded input and surface when cancellation wins after asset loading", async () => {
+  it("preserves renderer cancellation phase without writing a PreparedExport", async () => {
     const imageId = importedAssetId("backend-cancelled");
     const document = createDocument([{ id: imageId, width: 64, height: 48 }]);
     const controller = new AbortController();
-    const inputDispose = jest.fn();
-    const surfaceDispose = jest.fn();
     const backend = createSkiaExportBackend({
-      api,
-      getTextLayoutEnvironment: () => textLayoutEnvironment,
-      loadImage: async () => {
-        const image = await loadFixture();
-        const dispose = image.dispose.bind(image);
-        image.dispose = () => {
-          inputDispose();
-          dispose();
-        };
-        controller.abort();
-        return image;
-      },
-      makeSurface: (width, height) => {
-        const surface = makeOffscreenSurface(width, height);
-        return {
-          getCanvas: () => surface.getCanvas(),
-          flush: () => surface.flush(),
-          makeImageSnapshot: () => surface.makeImageSnapshot(),
-          dispose: () => {
-            surfaceDispose();
-            surface.dispose();
-          },
-        };
+      renderer: {
+        render: jest.fn(async () => ({
+          status: "cancelled",
+          phase: "assets",
+        })),
       },
     });
     const { operation } = createOperation();
@@ -397,8 +344,6 @@ describe("Skia export backend contract", () => {
         signal: controller.signal,
       }),
     ).resolves.toEqual({ status: "cancelled", phase: "assets" });
-    expect(inputDispose).toHaveBeenCalledTimes(1);
-    expect(surfaceDispose).toHaveBeenCalledTimes(1);
     expect(operation.prepareStaticImage).not.toHaveBeenCalled();
   });
 });
