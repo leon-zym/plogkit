@@ -65,16 +65,17 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 
 ## 命令
 
-| 命令                   | 作用                                       |
-| ---------------------- | ------------------------------------------ |
-| `pnpm check`           | 类型检查和 lint                            |
-| `pnpm test`            | App、核心逻辑和组件测试                    |
-| `pnpm test:e2e-runner` | E2E runner 的纯 Node 逻辑测试              |
-| `pnpm test:render`     | L3 golden 测试                             |
-| `pnpm e2e`             | 重置专用双端设备并运行两端完整 L4          |
-| `pnpm e2e:ios`         | 重置专用 iOS Simulator 并运行完整 L4       |
-| `pnpm e2e:android`     | 重置专用 Android Emulator 并运行完整 L4    |
-| `pnpm verify`          | 聚合静态、Node、App 和渲染验证，提交前运行 |
+| 命令                   | 作用                                    |
+| ---------------------- | --------------------------------------- |
+| `pnpm check`           | 类型检查和 lint                         |
+| `pnpm test`            | App、核心逻辑和组件测试                 |
+| `pnpm test:docs`       | 文档结构、状态、受控关系和导航契约      |
+| `pnpm test:e2e-runner` | E2E runner 的纯 Node 逻辑测试           |
+| `pnpm test:render`     | L3 golden 测试                          |
+| `pnpm e2e`             | 重置专用双端设备并运行两端完整 L4       |
+| `pnpm e2e:ios`         | 重置专用 iOS Simulator 并运行完整 L4    |
+| `pnpm e2e:android`     | 重置专用 Android Emulator 并运行完整 L4 |
+| `pnpm verify`          | 聚合静态、文档、Node、App 和渲染验证    |
 
 E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或盲目延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)。
 

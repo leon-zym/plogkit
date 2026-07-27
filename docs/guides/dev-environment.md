@@ -128,7 +128,7 @@ Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直�
 pnpm verify
 ```
 
-该命令执行类型检查、lint、E2E runner 的 Node 单元测试、Jest 单元与组件测试，以及 headless Skia golden 测试。
+该命令执行类型检查、lint、文档契约校验、E2E runner 的 Node 单元测试、Jest 单元与组件测试，以及 headless Skia golden 测试。只验证文档契约时运行 `pnpm test:docs`。
 
 本地 E2E 的公开命令由统一 runner 完成 clean prebuild、原生构建、设备准备、fixture 注入、Metro 管理和 Maestro 执行。macOS 上运行双端完整套件：
 

@@ -57,6 +57,7 @@ canonical current scope and product boundaries live in
 - Build and run: `pnpm ios` or `pnpm android`
 - Type check + lint: `pnpm check`
 - Unit/component tests: `pnpm test`
+- Documentation contracts: `pnpm test:docs`
 - Rendering goldens: `pnpm test:render` (update with `-u` only after inspecting diffs)
 - E2E (dedicated iOS + Android devices): `pnpm e2e`
 - E2E (single platform): `pnpm e2e:ios` or `pnpm e2e:android`
