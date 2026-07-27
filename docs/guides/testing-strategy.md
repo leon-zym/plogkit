@@ -38,7 +38,7 @@ Golden 必须使用随包字体，不能依赖系统字体。无头渲染代码�
 
 Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development build，JS bundle 由 Metro 提供。CI 使用固定的 Maestro CLI 基线，本地工具要求见[开发环境](dev-environment.md)。runner 不自动改变开发机环境。
 
-- `e2e/flows/f01-*.yaml` 至 `f08-*.yaml` 对应 `docs/specs/` 中的功能场景；`f00-settings.yaml` 覆盖全局设置。
+- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对应 `docs/specs/` 中的功能场景。
 - `e2e/subflows/` 存放复用步骤。业务步骤跨平台共享，系统照片选择器等差异用 `platform` 条件进入 iOS 或 Android 子流程，禁止复制完整业务 flow。
 - `e2e/fixtures/` 存放确定性测试照片；runner 每次擦除专用设备后只注入一组 fixture。
 - flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。

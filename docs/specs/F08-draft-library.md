@@ -1,7 +1,7 @@
 # F08 本地草稿库
 
 - 状态：已实现
-- 关联：[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0031](../adr/0031-draft-publication-record.md)、[ADR 0032](../adr/0032-draft-library-load-barrier.md)、[ADR 0033](../adr/0033-per-draft-deletion-marker.md)、[ADR 0034](../adr/0034-draft-content-revision.md)、[ADR 0035](../adr/0035-draft-thumbnail-generation.md)
+- 关联：[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0031](../adr/0031-draft-publication-record.md)、[ADR 0032](../adr/0032-draft-library-load-barrier.md)、[ADR 0033](../adr/0033-per-draft-deletion-marker.md)、[ADR 0034](../adr/0034-draft-content-revision.md)、[ADR 0035](../adr/0035-draft-thumbnail-generation.md)、[F09](F09-app-settings.md)
 - 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 概述
@@ -162,7 +162,7 @@
 - THEN Grid 不混合展示不同内容修订的两种缩略图
 - AND 只有同一内容修订的两种表示都可用时才一起切换
 
-#### Scenario: 切换全局显示方式
+#### Scenario: 以全局设置切换两种显示方式
 
 - 状态：已实现
 - GIVEN 草稿库已有可用缩略图
@@ -170,8 +170,9 @@
 - THEN 菜单提供“正方形”和“原始比例”两个选项
 - AND “正方形”在无边框正方形容器中以 `cover` 裁切铺满
 - AND “原始比例”在相同正方形容器中以 `contain` 完整展示
-- AND 选择作为设备本地全局偏好保存并作用于全部草稿
-- AND 默认显示方式为“正方形”
+- AND 当前全局选择作用于全部草稿
+
+（注：设置的默认值、独立更新、持久化与失败语义由 [F09](F09-app-settings.md) 定义。）
 
 #### Scenario: 最新缩略图尚不可用时降级
 

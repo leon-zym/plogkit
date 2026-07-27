@@ -1,5 +1,5 @@
 appId: com.leonzym.plogkit
-name: Browse, switch, configure, and delete local Drafts
+name: Browse, switch, and delete local Drafts
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -78,9 +78,3 @@ name: Browse, switch, configure, and delete local Drafts
     timeout: 30000
 - assertNotVisible:
     id: draft-item-1
-- tapOn:
-    id: home-menu
-- runFlow:
-    file: ../subflows/assert-radio-checked.yaml
-    env:
-      OPTION_ID: display-original

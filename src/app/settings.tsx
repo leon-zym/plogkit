@@ -1,43 +1,37 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { settingsRuntime } from "@/services/settings/expoSettingsRuntime";
-import {
-  APP_SETTINGS_SCHEMA_VERSION,
-  type AppSettings,
-} from "@/services/settings/settingsRepository";
+import { appSettings } from "@/services/settings/expoAppSettings";
+import { ActionButton } from "@/ui/ActionButton";
 import { colors, radii, spacing, typography } from "@/ui/theme";
 
 export default function SettingsScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const settingsState = useSyncExternalStore(
+    appSettings.subscribe,
+    appSettings.getState,
+    appSettings.getState,
+  );
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const settingsReady = settingsState.status === "ready";
+  const retainBasic = settingsState.settings.defaultMetadataPolicy === "retain-basic";
 
   useEffect(() => {
-    let active = true;
-    void settingsRuntime.load().then((loaded) => {
-      if (active) setSettings(loaded);
-    });
-    return () => {
-      active = false;
-    };
+    void appSettings.initialize();
   }, []);
 
   const setRetainBasic = async (enabled: boolean) => {
-    if (settings === null) return;
-    const next: AppSettings = {
-      ...settings,
-      schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
-      defaultMetadataPolicy: enabled ? "retain-basic" : "strip",
-    };
-    setSettings(next);
+    if (settingsState.status !== "ready" || saving) return;
     setSaving(true);
+    setSaveFailed(false);
     try {
-      await settingsRuntime.save(next);
+      const result = await appSettings.setDefaultMetadataPolicy(enabled ? "retain-basic" : "strip");
+      setSaveFailed(result.status !== "saved");
     } finally {
       setSaving(false);
     }
@@ -65,21 +59,44 @@ export default function SettingsScreen() {
             <Text style={styles.label}>{t("settings.retainBasic")}</Text>
             <Text style={styles.description}>{t("settings.retainBasicDescription")}</Text>
           </View>
-          {settings === null ? (
-            <ActivityIndicator color={colors.accent} />
-          ) : (
+          <View style={styles.control}>
+            {settingsState.status === "uninitialized" || settingsState.status === "loading" ? (
+              <ActivityIndicator color={colors.accent} testID="settings-loading" />
+            ) : null}
             <Switch
               accessibilityLabel={t("settings.retainBasic")}
-              disabled={saving}
+              accessibilityState={{
+                checked: retainBasic,
+                disabled: !settingsReady || saving,
+              }}
+              disabled={!settingsReady || saving}
               onValueChange={(enabled) => void setRetainBasic(enabled)}
               testID="settings-retain-basic"
               thumbColor={colors.surface}
               trackColor={{ false: colors.line, true: colors.accent }}
-              value={settings.defaultMetadataPolicy === "retain-basic"}
+              value={retainBasic}
             />
-          )}
+          </View>
         </View>
         <Text style={styles.privacy}>{t("settings.privacyNotice")}</Text>
+        {settingsState.status === "load-failed" || saveFailed ? (
+          <Text accessibilityLiveRegion="assertive" style={styles.error} testID="settings-error">
+            {t(
+              settingsState.status === "load-failed"
+                ? "settings.loadFailed"
+                : "settings.saveFailed",
+            )}
+          </Text>
+        ) : null}
+        {settingsState.status === "load-failed" ? (
+          <ActionButton
+            accessibilityLabel={t("common.retry")}
+            label={t("common.retry")}
+            onPress={() => void appSettings.initialize()}
+            testID="retry-app-settings"
+            variant="secondary"
+          />
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -134,6 +151,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.s1,
   },
+  control: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.s2,
+  },
   label: {
     ...typography.label,
     color: colors.ink,
@@ -145,6 +167,10 @@ const styles = StyleSheet.create({
   privacy: {
     ...typography.caption,
     color: colors.inkMuted,
+  },
+  error: {
+    ...typography.caption,
+    color: colors.danger,
   },
   pressed: {
     opacity: 0.6,

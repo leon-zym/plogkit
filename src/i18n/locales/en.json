@@ -61,7 +61,9 @@
     "title": "Settings",
     "retainBasic": "Keep photo details by default",
     "retainBasicDescription": "New editing sessions keep the capture date and device details by default. You can override this before export.",
-    "privacyNotice": "GPS location is always removed. Settings stay on this device."
+    "privacyNotice": "GPS location is always removed. Settings stay on this device.",
+    "loadFailed": "Settings could not be read from this device.",
+    "saveFailed": "The setting could not be saved. Try again."
   },
   "editor": {
     "photoCount_one": "{{count}} photo",

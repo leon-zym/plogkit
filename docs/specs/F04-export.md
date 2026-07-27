@@ -1,7 +1,7 @@
 # F04 导出与压缩预设
 
 - 状态：已实现
-- 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
+- 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[F09](F09-app-settings.md)
 - 实施跟踪：[Issue #12](https://github.com/leon-zym/plogkit/issues/12)、[Issue #16](https://github.com/leon-zym/plogkit/issues/16)
 
 ## 概述
@@ -13,7 +13,7 @@
 - 数据驱动预设（初始占位：原始/社交/紧凑）。
 - JPEG 与 PNG 输出，保存到系统相册。
 - 尺寸上限与自动降级。
-- 全局设置为新草稿提供元数据策略默认值，草稿保存用户的明确选择。
+- 全局设置为新草稿提供元数据策略默认值（设置生命周期见 [F09](F09-app-settings.md)），草稿保存用户的明确选择。
 - 导出统一 SDR/sRGB。
 
 ## 非目标

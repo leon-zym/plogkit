@@ -5,7 +5,8 @@ import { FlatList } from "react-native";
 
 import { editorRuntime } from "@/features/editor/expoEditorRuntime";
 import { draftId, type DraftLibraryState } from "@/services/drafts/draftLibrary";
-import { settingsRuntime } from "@/services/settings/expoSettingsRuntime";
+import type { AppSettingsState } from "@/services/settings/appSettings";
+import { appSettings } from "@/services/settings/expoAppSettings";
 
 import HomeScreen from "../index";
 
@@ -14,6 +15,8 @@ const firstId = draftId("draft:1");
 const corruptId = draftId("draft:corrupt");
 let state: DraftLibraryState;
 let listener: (() => void) | null;
+let settingsState: AppSettingsState;
+let settingsListener: (() => void) | null;
 
 jest.mock("@/features/editor/expoEditorRuntime", () => ({
   editorRuntime: {
@@ -27,10 +30,13 @@ jest.mock("@/features/editor/expoEditorRuntime", () => ({
   },
 }));
 
-jest.mock("@/services/settings/expoSettingsRuntime", () => ({
-  settingsRuntime: {
-    load: jest.fn(),
-    save: jest.fn(),
+jest.mock("@/services/settings/expoAppSettings", () => ({
+  appSettings: {
+    initialize: jest.fn(),
+    getState: jest.fn(),
+    subscribe: jest.fn(),
+    setDefaultMetadataPolicy: jest.fn(),
+    setDraftThumbnailDisplay: jest.fn(),
   },
 }));
 
@@ -47,9 +53,12 @@ const runtime = editorRuntime as unknown as {
   deleteDraft: jest.Mock;
   reportThumbnailLoadFailure: jest.Mock;
 };
-const settings = settingsRuntime as unknown as {
-  load: jest.Mock;
-  save: jest.Mock;
+const settings = appSettings as unknown as {
+  initialize: jest.Mock;
+  getState: jest.Mock;
+  subscribe: jest.Mock;
+  setDefaultMetadataPolicy: jest.Mock;
+  setDraftThumbnailDisplay: jest.Mock;
 };
 
 function readyState(): DraftLibraryState {
@@ -88,12 +97,25 @@ async function publish(next: DraftLibraryState): Promise<void> {
   await act(async () => listener?.());
 }
 
+async function publishSettings(next: AppSettingsState): Promise<void> {
+  settingsState = next;
+  await act(async () => settingsListener?.());
+}
+
 describe("Home Draft Library", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPush.mockClear();
     listener = null;
+    settingsListener = null;
     state = { status: "uninitialized" };
+    settingsState = {
+      status: "ready",
+      settings: {
+        defaultMetadataPolicy: "strip",
+        draftThumbnailDisplay: "square",
+      },
+    };
     runtime.getDraftLibraryState.mockImplementation(() => state);
     runtime.subscribeDraftLibrary.mockImplementation((next: () => void) => {
       listener = next;
@@ -108,12 +130,25 @@ describe("Home Draft Library", () => {
       contentRevision: 3,
     });
     runtime.deleteDraft.mockResolvedValue({ status: "deleted" });
-    settings.load.mockResolvedValue({
-      schemaVersion: 2,
-      defaultMetadataPolicy: "strip",
-      draftThumbnailDisplay: "square",
+    settings.getState.mockImplementation(() => settingsState);
+    settings.subscribe.mockImplementation((next: () => void) => {
+      settingsListener = next;
+      return () => {
+        settingsListener = null;
+      };
     });
-    settings.save.mockResolvedValue(undefined);
+    settings.initialize.mockImplementation(async () => settingsState);
+    settings.setDraftThumbnailDisplay.mockImplementation(
+      async (draftThumbnailDisplay: "square" | "original") => {
+        const next = Object.freeze({
+          ...settingsState.settings,
+          draftThumbnailDisplay,
+        });
+        settingsState = { status: "ready", settings: next };
+        settingsListener?.();
+        return { status: "saved", settings: next };
+      },
+    );
   });
 
   it("shows the creation Banner immediately while the reliable Grid is loading", async () => {
@@ -133,9 +168,7 @@ describe("Home Draft Library", () => {
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("draft-item-0")).toBeTruthy());
 
-    expect(view.getByTestId("draft-item-0").props.accessibilityLabel).toContain(
-      "Draft 1 of 2",
-    );
+    expect(view.getByTestId("draft-item-0").props.accessibilityLabel).toContain("Draft 1 of 2");
     expect(view.getByTestId("draft-item-0").props.accessibilityLabel).toContain("2 photos");
     expect(view.getByTestId("draft-item-1").props.accessibilityLabel).toContain("damaged");
     expect(view.queryByText("draft:1")).toBeNull();
@@ -176,53 +209,109 @@ describe("Home Draft Library", () => {
     await waitFor(() => expect(view.getByTestId("display-original")).toBeTruthy());
     await act(async () => fireEvent.press(view.getByTestId("display-original")));
 
-    expect(settings.save).toHaveBeenCalledWith({
-      schemaVersion: 2,
-      defaultMetadataPolicy: "strip",
-      draftThumbnailDisplay: "original",
-    });
+    expect(settings.setDraftThumbnailDisplay).toHaveBeenCalledWith("original");
     expect(view.getByTestId("draft-thumbnail-0").props.resizeMode).toBe("contain");
     expect(view.getByTestId("draft-thumbnail-0").props.source).toEqual({
       uri: "memory://original.jpg",
     });
   });
 
-  it("waits for loaded settings before saving the global display mode", async () => {
+  it("keeps the old display selected and disables both choices while saving", async () => {
     state = readyState();
-    let resolveSettings: ((value: {
-      schemaVersion: 2;
-      defaultMetadataPolicy: "retain-basic";
-      draftThumbnailDisplay: "square";
-    }) => void) | undefined;
-    settings.load.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveSettings = resolve;
-    }));
+    let resolveSave:
+      | ((value: {
+          readonly status: "saved";
+          readonly settings: AppSettingsState["settings"];
+        }) => void)
+      | null = null;
+    settings.setDraftThumbnailDisplay.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const view = await render(<HomeScreen />);
+
+    await act(async () => fireEvent.press(view.getByTestId("home-menu")));
+    await act(async () => fireEvent.press(view.getByTestId("display-original")));
+
+    await waitFor(() =>
+      expect(view.getByTestId("display-original").props.accessibilityState).toEqual(
+        expect.objectContaining({ checked: false, disabled: true }),
+      ),
+    );
+    expect(view.getByTestId("display-square").props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true, disabled: true }),
+    );
+
+    const next = Object.freeze({
+      defaultMetadataPolicy: "strip" as const,
+      draftThumbnailDisplay: "original" as const,
+    });
+    settingsState = { status: "ready", settings: next };
+    await act(async () => {
+      settingsListener?.();
+      resolveSave?.({ status: "saved", settings: next });
+    });
+
+    await waitFor(() => expect(view.queryByTestId("display-menu")).toBeNull());
+    expect(view.getByTestId("draft-thumbnail-0").props.resizeMode).toBe("contain");
+  });
+
+  it("waits for authoritative settings before saving the global display mode", async () => {
+    state = readyState();
+    settingsState = {
+      status: "loading",
+      settings: {
+        defaultMetadataPolicy: "strip",
+        draftThumbnailDisplay: "square",
+      },
+    };
     const view = await render(<HomeScreen />);
 
     await act(async () => fireEvent.press(view.getByTestId("home-menu")));
     const original = view.getByTestId("display-original");
-    expect(original.props.accessibilityState).toEqual(expect.objectContaining({
-      checked: false,
-      disabled: true,
-    }));
+    expect(original.props.accessibilityState).toEqual(
+      expect.objectContaining({
+        checked: false,
+        disabled: true,
+      }),
+    );
     await act(async () => fireEvent.press(original));
-    expect(settings.save).not.toHaveBeenCalled();
+    expect(settings.setDraftThumbnailDisplay).not.toHaveBeenCalled();
 
-    await act(async () => resolveSettings?.({
-      schemaVersion: 2,
-      defaultMetadataPolicy: "retain-basic",
-      draftThumbnailDisplay: "square",
-    }));
-    await waitFor(() => expect(
-      view.getByTestId("display-original").props.accessibilityState,
-    ).toEqual(expect.objectContaining({ checked: false, disabled: false })));
+    await publishSettings({
+      status: "ready",
+      settings: {
+        defaultMetadataPolicy: "retain-basic",
+        draftThumbnailDisplay: "square",
+      },
+    });
+    await waitFor(() =>
+      expect(view.getByTestId("display-original").props.accessibilityState).toEqual(
+        expect.objectContaining({ checked: false, disabled: false }),
+      ),
+    );
     await act(async () => fireEvent.press(view.getByTestId("display-original")));
 
-    expect(settings.save).toHaveBeenCalledWith({
-      schemaVersion: 2,
-      defaultMetadataPolicy: "retain-basic",
-      draftThumbnailDisplay: "original",
-    });
+    expect(settings.setDraftThumbnailDisplay).toHaveBeenCalledWith("original");
+  });
+
+  it("keeps the old display selection and shows an error when saving fails", async () => {
+    state = readyState();
+    settings.setDraftThumbnailDisplay.mockImplementationOnce(async () => ({
+      status: "save-failed",
+      settings: settingsState.settings,
+    }));
+    const view = await render(<HomeScreen />);
+
+    await act(async () => fireEvent.press(view.getByTestId("home-menu")));
+    await act(async () => fireEvent.press(view.getByTestId("display-original")));
+
+    expect(view.getByTestId("home-error")).toHaveTextContent(
+      "The display preference could not be saved.",
+    );
+    expect(view.getByTestId("draft-thumbnail-0").props.resizeMode).toBe("cover");
   });
 
   it("scrolls to the top only when the opened Draft returns with a new content revision", async () => {
@@ -241,10 +330,7 @@ describe("Home Draft Library", () => {
     }
     await publish({
       status: "ready",
-      entries: [
-        { ...revised.entries[0], contentRevision: 4 },
-        ...revised.entries.slice(1),
-      ],
+      entries: [{ ...revised.entries[0], contentRevision: 4 }, ...revised.entries.slice(1)],
     });
 
     expect(scrollToOffset).toHaveBeenCalledWith({ animated: false, offset: 0 });
