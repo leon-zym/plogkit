@@ -1,17 +1,20 @@
 # 架构决策记录（ADR）
 
-本目录以 ADR（Architecture Decision Record）形式记录 PlogKit 的所有重要决策。
+本目录记录 PlogKit 长期有效、跨 module 或难逆转，并改变 interface、seam、数据兼容性或工程约束的决定。完整文档 ownership 见 [`docs/README.md`](../README.md)。
 
 ## 规范
 
 - 每个决策一份文件，命名为 `NNNN-slug.md`，编号递增、永不复用。
-- 固定结构：状态 / 背景 / 决策 / 影响与代价。
-- 状态取值：`已接受`、`部分修订（见 NNNN）`、`已取代（被 NNNN 取代）`。
+- 标题、状态、接受日期、背景、决策、影响与代价为必选内容；其他章节只在决定需要时出现，不写空章节。
+- 状态取值：`已接受`、`部分修订`、`已取代`。
   - `已接受`：整份决策仍是现行规则。
   - `部分修订`：未被点名调整的结论继续有效；原 ADR 的状态与索引链接到后续 ADR，后续 ADR 以“修订”列出 predecessor 并承载当前结论。
   - `已取代`：原决策不再作为现行规则；原 ADR 的状态与索引链接到 successor，successor 以“取代”列出 predecessor。
+- 状态只描述决定是否仍然有效，不描述实现进度；接受日期使用独立的 `YYYY-MM-DD` 字段。
 - 决策演进时新增 ADR，不改写 predecessor 的背景、决策或影响；只更新其状态元数据、前后继链接与索引，保持历史可追溯。
-- ADR 标题与正文保留决策发生时的阶段语境，包括历史上的 MVP 表述；当前产品阶段与仍生效的规则以产品范围、决策台账及后续 ADR 为准。
+- predecessor 与 successor 必须双向关联。涉及持久格式、公开 interface、数据迁移或分阶段替换时，ADR 必须记录迁移与兼容。
+- 单项功能的用户行为归 specs，产品定位与范围归 product，实施进度、故障调查和开放问题归 Issue、PR 或 artifact。
+- ADR 标题与正文保留决策发生时的阶段语境，包括历史上的 MVP 表述；当前产品阶段以[产品范围](../product/product-scope.md)为准，决定的当前效力以本索引及 successor 为准。
 - 本目录以中文为权威版本（见 ADR 0014）。
 
 ## 索引
@@ -30,7 +33,7 @@
 | [0010](0010-color-management.md)                          | 色彩管理：P3 保真 spike 优先                                   | 已取代   | [0018](0018-mvp-srgb-color-strategy.md)                                                                                                                                                                                                     |
 | [0011](0011-testing-strategy.md)                          | 测试策略：五层金字塔与 BDD 方法论                              | 部分修订 | [0019](0019-cross-platform-maestro-e2e.md)、[0020](0020-ci-lifecycle-and-main-ruleset.md)、[0023](0023-export-preset-catalog-and-pipeline.md)、[0026](0026-test-runners-by-runtime.md)                                                      |
 | [0012](0012-e2e-tooling-maestro.md)                       | E2E 工具：Maestro 模拟器主力 + Device Hub 真机手动冒烟         | 部分修订 | [0019](0019-cross-platform-maestro-e2e.md)                                                                                                                                                                                                  |
-| [0013](0013-doc-system.md)                                | 文档体系：ADR + specs + guides，暂不引入 OpenSpec              | 已接受   | —                                                                                                                                                                                                                                           |
+| [0013](0013-doc-system.md)                                | 文档体系：ADR + specs + guides，暂不引入 OpenSpec              | 部分修订 | [0038](0038-document-ownership-contracts.md)                                                                                                                                                                                                |
 | [0014](0014-language-policy.md)                           | 语言策略：中文权威文档 + 英文代码与提交                        | 已接受   | —                                                                                                                                                                                                                                           |
 | [0015](0015-license-gpl3-cla.md)                          | 许可证：GPL-3.0 + CLA，资产许可纪律                            | 已接受   | —                                                                                                                                                                                                                                           |
 | [0016](0016-git-workflow.md)                              | Git 工作流：Conventional Commits + PR 门禁                     | 已接受   | —                                                                                                                                                                                                                                           |
@@ -55,29 +58,4 @@
 | [0035](0035-draft-thumbnail-generation.md)                | 草稿缩略图按内容修订成对生成与提交                             | 已接受   | —                                                                                                                                                                                                                                           |
 | [0036](0036-authoritative-durable-app-settings.md)        | 应用设置由进程级 module 权威持有并采用 durable-first 更新      | 已接受   | —                                                                                                                                                                                                                                           |
 | [0037](0037-shared-skia-offscreen-rendering.md)           | 共享 Skia 离屏构图使用具体目标批次与内部资源所有权             | 已接受   | —                                                                                                                                                                                                                                           |
-
-## 决策台账
-
-决策编号（D 编号）与 ADR 的对应关系：
-
-| 台账 | 内容                                                                                                    | 对应 ADR                                             |
-| ---- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| D01  | iOS 先行，跨端纪律 + CI 编译检查                                                                        | 0002                                                 |
-| D02  | 导出预设数据驱动；元数据默认剥离；当前导出 SDR 静态图、Live Photo 取静帧                                | 0008、0009、0023                                     |
-| D03  | Share Extension 进 v1.1，预留外部图片入口                                                               | 0017                                                 |
-| D04  | Expo SDK 57 + CNG + dev client + pnpm                                                                   | 0002                                                 |
-| D05  | UI 中英双语，i18n 从第一天建立                                                                          | 0014                                                 |
-| D06  | E2E：Maestro 双端模拟设备自动化 + 真机手动冒烟                                                          | 0012、0019                                           |
-| D07  | GPL-3.0 + CLA；字体/资产仅用可商用闭源许可                                                              | 0015                                                 |
-| D08  | ADR + specs + guides 体系；OpenSpec 暂不引入                                                            | 0013                                                 |
-| D09  | specs/ADR/guides 中文权威，README 双语，代码/commit 英文                                                | 0014                                                 |
-| D10  | 技术默认包（Zustand、Expo Router、按运行时选择测试运行器、导出上限等）；当前 SDR/sRGB，广色域后续重评估 | 0004、0007、0011、0018、0026                         |
-| D11  | Git：PR + Actions 绿灯合并（脚手架建立后启用）                                                          | 0016                                                 |
-| D12  | Draft 快速验证、正式 PR 双端编译、每周 E2E、main ruleset 门禁                                           | 0016、0020                                           |
-| D13  | 类型化编辑意图 + 稳定编辑提交 interface；快照 history 不跨重启                                          | 0003、0004、0021                                     |
-| D14  | 草稿库拥有持久化草稿 aggregate；发布记录确认用户草稿；加载屏障线性化进程内快照                          | 0003、0006、0021、0022、0025、0027、0030、0031、0032 |
-| D15  | Export Policy 统一预设语义；Pipeline 在 backend seam 内解析并发布 Photos                                | 0007、0008、0011、0023                               |
-| D16  | Text Block Layout 以 Paragraph snapshot 统一渲染与交互几何                                              | 0003、0005、0011、0024                               |
-| D17  | 草稿删除以每草稿独立外部标记为 commit point，由当前编辑会话协调并异步清理                               | 0022、0025、0028、0033                               |
-| D18  | 草稿根记录以内容修订标识持久代际；缩略图按修订成对生成并允许旧图降级                                    | 0027、0034、0035                                     |
-| D19  | 当前 SDR/sRGB 静态 Skia 路径共享具体离屏目标批次与 renderer-owned lifecycle；未来原生 backend 可绕行    | 0018、0023、0024、0035、0037                         |
+| [0038](0038-document-ownership-contracts.md)              | 以 ownership map 与 repo-local verifier 深化文档体系           | 已接受   | —                                                                                                                                                                                                                                           |

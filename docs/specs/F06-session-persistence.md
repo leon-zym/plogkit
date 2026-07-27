@@ -2,7 +2,6 @@
 
 - 状态：已实现
 - 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0004](../adr/0004-state-management-undo.md)、[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[ADR 0027](../adr/0027-draft-root-record.md)、[ADR 0029](../adr/0029-draft-library-pre-release-baseline-reset.md)、[ADR 0033](../adr/0033-per-draft-deletion-marker.md)、[ADR 0034](../adr/0034-draft-content-revision.md)
-- 实施跟踪：[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #14](https://github.com/leon-zym/plogkit/issues/14)、[Issue #15](https://github.com/leon-zym/plogkit/issues/15)
 
 ## 概述
 
@@ -25,16 +24,12 @@
 
 #### Scenario: 提交即持久化
 
-- 状态：已实现
 - GIVEN 用户完成一次编辑提交（如添加文本）
 - WHEN 自动保存调度完成
 - THEN 当前 `DraftId` 的持久化统一文档反映最新文档状态
 
-（注：当可见界面不足以证明持久化结果时，持久化草稿文件可作为 E2E 状态断言的观测点，见 [ADR 0011](../adr/0011-testing-strategy.md)。）
-
 #### Scenario: 不同内容与排序时间作为同一修订提交
 
-- 状态：已实现
 - GIVEN 当前草稿已有一个成功保存的内容修订
 - WHEN 不同的统一文档保存成功
 - THEN 文档、内容修订号与最近编辑时间作为同一个完整根记录提交
@@ -44,7 +39,6 @@
 
 #### Scenario: 打开有效草稿
 
-- 状态：已实现
 - GIVEN 一个持久化内容完整的草稿
 - WHEN 用户打开该草稿
 - THEN 应用进入 Editor 并展示草稿内容
@@ -52,7 +46,6 @@
 
 #### Scenario: 从草稿库继续终止前的草稿
 
-- 状态：已实现
 - GIVEN 当前草稿的最新编辑已持久化，应用被系统或用户强制终止
 - WHEN 用户重新启动应用
 - THEN 应用先展示草稿库，且该草稿仍可被发现，不自动进入 Editor
@@ -62,14 +55,12 @@
 
 #### Scenario: 损坏的持久事实拒绝打开
 
-- 状态：已实现
 - GIVEN 草稿的原图或编辑内容损坏，无法安全恢复
 - WHEN 用户打开该草稿
 - THEN 应用提示该草稿无法安全打开，不以残缺状态进入 Editor
 
 #### Scenario: 草稿切换原子化
 
-- 状态：已实现
 - GIVEN 当前草稿有一个活跃会话
 - WHEN 用户打开另一个草稿
 - THEN 应用先保存当前最新修改，确认目标草稿可用后再进入其 Editor
@@ -83,7 +74,6 @@
 
 #### Scenario: 返回草稿库保留同进程 history
 
-- 状态：已实现
 - GIVEN 用户正在编辑一个草稿
 - WHEN 用户返回草稿库后再次打开同一 `DraftId`
 - THEN 返回时只 flush 而不结束当前编辑会话
@@ -91,7 +81,6 @@
 
 #### Scenario: 主动离开时 flush 失败
 
-- 状态：已实现
 - GIVEN 当前草稿有 dirty 修改
 - WHEN 用户主动离开 Editor 且 flush 失败
 - THEN 阻止导航并保留未保存修改，允许用户重试

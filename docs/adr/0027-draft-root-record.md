@@ -1,6 +1,8 @@
 # ADR 0027：草稿身份、元数据与统一文档共用可恢复根记录
 
-- 状态：部分修订（2026-07-22 接受；见 [ADR 0031](0031-draft-publication-record.md)、[ADR 0034](0034-draft-content-revision.md)、[ADR 0035](0035-draft-thumbnail-generation.md)）
+- 状态：部分修订
+- 接受日期：2026-07-22
+- 后继：[ADR 0031](0031-draft-publication-record.md)、[ADR 0034](0034-draft-content-revision.md)、[ADR 0035](0035-draft-thumbnail-generation.md)
 - 关联：ADR 0003、0022、0025、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

@@ -1,6 +1,8 @@
 # ADR 0008：导出预设数据驱动与 EXIF 策略
 
-- 状态：部分修订（2026-07-02 接受；见 [ADR 0023](0023-export-preset-catalog-and-pipeline.md)）
+- 状态：部分修订
+- 接受日期：2026-07-02
+- 后继：[ADR 0023](0023-export-preset-catalog-and-pipeline.md)
 - 关联：ADR 0007
 
 ## 背景

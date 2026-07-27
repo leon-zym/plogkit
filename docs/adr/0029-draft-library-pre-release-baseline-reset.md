@@ -1,7 +1,8 @@
 # ADR 0029：草稿库产品化再次建立发布前持久化基线
 
-- 状态：已接受（2026-07-22）
-- 修订：ADR 0022
+- 状态：已接受
+- 接受日期：2026-07-22
+- 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)
 - 关联：ADR 0003、0027、0028、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

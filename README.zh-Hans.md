@@ -14,25 +14,16 @@ PlogKit 仍处于发布前开发阶段。当前版本可在 iOS 和 Android 模�
 
 当前版本包含：
 
+- 本地草稿库：在设备上创建、浏览、重新打开和删除作品。
 - 为图片加字：干净克制的样式，长文（中文优先）排版支持。
 - 背景色。
 - 多图竖向或网格拼接。
 - 使用原始、社交和紧凑预设导出 JPEG 或 PNG。
-- 撤销重做、编辑会话自动保存、导出后可继续编辑。
+- 撤销重做、自动保存，以及导出或重启应用后继续编辑。
 
-## Roadmap
+## 产品范围
 
-后续计划逐步加入：
-
-- 更细化的社交平台导出预设。
-- 拼贴风自由画布。
-- Share Extension。
-- HDR 与广色域保留。
-- Live Photo 支持。
-
-具体顺序将根据设计与技术验证决定。
-
-明确不做：美颜修饰、滤镜、AI 编辑、通用视频编辑、云同步、账户与模板市场。完整边界见 `docs/product/`。
+当前范围、已确认方向与产品硬边界的权威来源是 [`docs/product/product-scope.md`](docs/product/product-scope.md)。用户可观察行为与功能交付状态由 [`docs/specs/`](docs/specs/) 维护。
 
 ## 技术栈
 
@@ -40,12 +31,7 @@ React Native（Expo，New Architecture）+ Skia + TypeScript。编辑器为文�
 
 ## 文档
 
-项目权威文档位于 [`docs/`](docs/)，以中文书写（见 ADR 0014）：
-
-- [`docs/product/`](docs/product/)：定位、当前产品范围、命名。
-- [`docs/adr/`](docs/adr/)：架构决策记录与决策台账。
-- [`docs/specs/`](docs/specs/)：各功能的 BDD 验收 spec（Given/When/Then）。
-- [`docs/guides/`](docs/guides/)：设计系统、测试策略与开发环境。
+请从 canonical [`docs/README.md`](docs/README.md) 文档导航与 ownership map 开始。`docs/` 下的项目权威文档以中文书写（见 ADR 0014）。
 
 在本仓库工作的 AI Agent 必须遵循 [`AGENTS.md`](AGENTS.md)。
 

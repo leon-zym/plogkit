@@ -1,6 +1,8 @@
 # ADR 0013：文档体系：ADR + specs + guides，暂不引入 OpenSpec
 
-- 状态：已接受（2026-07-02）
+- 状态：部分修订
+- 接受日期：2026-07-02
+- 后继：[ADR 0038](0038-document-ownership-contracts.md)
 - 关联：ADR 0014
 
 ## 背景
