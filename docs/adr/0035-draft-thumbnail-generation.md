@@ -1,7 +1,8 @@
 # ADR 0035：草稿缩略图按内容修订成对生成与提交
 
-- 状态：已接受（2026-07-22）
-- 修订：ADR 0027
+- 状态：已接受
+- 接受日期：2026-07-22
+- 修订：[ADR 0027](0027-draft-root-record.md)
 - 关联：ADR 0025、0030、0033、0034、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

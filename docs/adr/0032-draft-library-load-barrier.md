@@ -1,7 +1,8 @@
 # ADR 0032：草稿库以可重试加载屏障线性化权威快照
 
-- 状态：已接受（2026-07-22）
-- 修订：ADR 0030
+- 状态：已接受
+- 接受日期：2026-07-22
+- 修订：[ADR 0030](0030-draft-library-enumeration-snapshot.md)
 - 关联：ADR 0022、0025、0031、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

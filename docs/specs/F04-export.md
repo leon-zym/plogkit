@@ -2,7 +2,6 @@
 
 - 状态：已实现
 - 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)
-- 实施跟踪：[Issue #12](https://github.com/leon-zym/plogkit/issues/12)、[Issue #16](https://github.com/leon-zym/plogkit/issues/16)
 
 ## 概述
 
@@ -62,7 +61,6 @@
 
 #### Scenario: 草稿保存不同于全局默认的元数据选择
 
-- 状态：已实现
 - GIVEN 全局设置为"剥离 EXIF"
 - WHEN 用户在当前草稿的导出面板选择"保留拍摄信息"并导出
 - THEN 导出的图片保留拍摄时间/设备信息但不含 GPS
@@ -81,7 +79,6 @@
 
 #### Scenario: 切换预设归一化覆盖项
 
-- 状态：已实现
 - GIVEN 用户在当前多格式预设中选择了非默认格式
 - WHEN 用户切换到另一预设
 - THEN 导出面板直接显示新预设的默认格式，不继承旧格式选择
@@ -89,7 +86,6 @@
 
 #### Scenario: 预设决定是否提供格式选择
 
-- 状态：已实现
 - GIVEN 用户查看一个导出预设
 - WHEN 该预设只允许一种格式
 - THEN 导出面板不显示格式选择
@@ -97,7 +93,6 @@
 
 #### Scenario: 不可用策略阻止导出而不阻止编辑
 
-- 状态：已实现
 - GIVEN 当前草稿引用的预设已不可用，或其输出要求超出当前设备能力
 - WHEN 用户尝试导出
 - THEN 应用说明预设不可用或能力不支持，并且不静默输出较弱结果
@@ -105,7 +100,6 @@
 
 #### Scenario: 系统相册是唯一最终产物
 
-- 状态：已实现
 - GIVEN 用户确认导出并收到成功反馈
 - WHEN 用户打开系统相册
 - THEN 系统相册中出现新图片
@@ -113,7 +107,6 @@
 
 #### Scenario: 取消或失败不保留隐藏导出副本
 
-- 状态：已实现
 - GIVEN 一次导出被用户取消或以预期错误失败
 - WHEN 用户继续使用或重新启动 PlogKit
 - THEN 应用内没有可继续使用的最终导出副本或导出历史
@@ -131,8 +124,3 @@
 - WHEN 用户发起新导出
 - THEN 新 operation 仍可创建并完成
 - AND 后续冷启动或安全初始化再次尝试清理遗留目录
-
-## 开放问题
-
-- 各平台预设参数（微信朋友圈短边、小红书/抖音分辨率、锐化等）由维护者定义后填入预设数据，本 spec 相应增补场景。
-- 导出进度反馈形态（大图渲染耗时时）待交互稿确认。

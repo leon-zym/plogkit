@@ -4,18 +4,20 @@ Guidance for AI coding agents working on PlogKit.
 
 ## Project Overview
 
-PlogKit is a lightweight, local-first mobile app for plog creators: add text,
-backgrounds, stitch photos, and export with social-friendly presets.
-It complements the system Photos app and deliberately excludes filters, beauty
-editing, AI generation, and cloud features.
+PlogKit is a lightweight, local-first mobile app for plog creators. It
+complements the system Photos app with focused publishing preparation. The
+canonical current scope and product boundaries live in
+[`docs/product/product-scope.md`](docs/product/product-scope.md).
 
 - Stack: React Native (Expo SDK 57, New Architecture) + TypeScript (strict) + Skia.
   Expo has changed significantly over time — consult the versioned docs at
   https://docs.expo.dev/versions/v57.0.0/ before writing Expo-related code.
 - State: Zustand document store; Reanimated shared values hold transient gesture
   state only. The serializable document is the single source of truth (ADR 0003).
-- All significant decisions live in `docs/adr/` (one file per decision).
-  Product scope: `docs/product/`. Feature acceptance specs: `docs/specs/`.
+- Start documentation navigation and ownership decisions from
+  [`docs/README.md`](docs/README.md). ADRs own durable architecture and
+  engineering-governance decisions; specs own user-observable acceptance and
+  feature delivery status.
 
 ## Language Policy (ADR 0014)
 
@@ -27,19 +29,12 @@ editing, AI generation, and cloud features.
 
 ## Documentation Discipline
 
-- Treat long-lived docs as contracts, not work logs. Do not copy issue/PR
-  background, incident evidence, root-cause narratives, patch mechanics, or
-  transient diagnostics into AGENTS.md, specs, guides, or ADRs. Distill only
-  the context needed to understand the durable contract.
-- Update a long-lived document only when its contract changes: ADRs record
-  durable decisions and trade-offs; specs record user-observable acceptance;
-  guides record current prerequisites, commands, and operating procedures;
-  AGENTS.md contains terse, enforceable agent rules. Keep implementation details
-  in code/tests and investigation history in issues, PRs, or artifacts.
-- Give each drift-prone fact one canonical owner. Other documents should link to
-  it or provide only the terse local context they need. When touching duplicated
-  guidance, consolidate it in scope; create a follow-up only when the remaining
-  duplication poses a concrete drift risk.
+- Follow the ownership map and update triggers in
+  [`docs/README.md`](docs/README.md). Treat long-lived docs as contracts, not
+  work logs; keep implementation history and investigation evidence in Issues,
+  PRs, tests, or artifacts.
+- Update the canonical owner when a contract changes. Other documents may keep
+  only the minimum local context their readers need and must link the owner.
 
 ## Architecture Map
 
@@ -51,7 +46,7 @@ editing, AI generation, and cloud features.
 - `src/services/` — draft persistence and imported-asset ownership,
   current-session autosave, and export orchestration. Export backends own render
   and encode responsibilities behind the pipeline seam.
-- `app/` — Expo Router routes.
+- `src/app/` — Expo Router routes.
 - `e2e/flows/` — cross-platform Maestro YAML flows, named after specs (e.g. `f01-add-text.yaml`).
 - `e2e/subflows/` — shared steps and narrowly scoped iOS/Android system-UI adapters.
 
@@ -109,11 +104,11 @@ editing, AI generation, and cloud features.
 
 ## Hard Boundaries
 
-- Never add: filters, beauty/retouch, AI generation, cloud sync, accounts,
-  telemetry, watermarks, or any network calls. The app is local-first.
-- Treat the "out of scope" lists in `docs/product/` as hard limits; do not
-  implement deferred features (share extension, HDR export, Live Photo export,
-  draft lists) without an explicit maintainer request plus a new ADR.
+- Treat the current scope, confirmed directions, and hard boundaries in
+  [`docs/product/product-scope.md`](docs/product/product-scope.md) as canonical.
+  Do not implement behavior outside the current scope without an explicit
+  maintainer request; update the relevant spec first and add an ADR when the
+  change alters a durable architecture or engineering constraint.
 - Never introduce a new dependency (especially native) without explicit approval.
 - Never hand-edit generated `ios/` and `android/` directories; use app config
   and config plugins (CNG), then `pnpm expo prebuild --clean`.

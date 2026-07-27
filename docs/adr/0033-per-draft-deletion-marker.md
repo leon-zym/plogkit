@@ -1,7 +1,8 @@
 # ADR 0033：草稿删除使用独立外部标记并由当前编辑会话协调
 
-- 状态：已接受（2026-07-22）
-- 修订：ADR 0022、0028
+- 状态：已接受
+- 接受日期：2026-07-22
+- 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0028](0028-draft-deletion-tombstone.md)
 - 关联：ADR 0025、0027、0029、0032、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景

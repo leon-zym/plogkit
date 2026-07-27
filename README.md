@@ -14,25 +14,16 @@ PlogKit is in pre-release development. The current version runs in iOS and Andro
 
 The current version includes:
 
+- A local draft library for creating, browsing, reopening, and deleting work on this device.
 - Add text to images, with clean limited styles and long-text (CJK-first) layout support.
 - Background colors.
 - Stitch multiple images vertically or in grid layouts.
 - Export JPEG or PNG with original, social, and compact presets.
-- Undo and redo, auto-saved editing session, and continue editing after export.
+- Undo and redo, autosave, and continued editing after export or app restart.
 
-## Roadmap
+## Product Scope
 
-Planned additions:
-
-- More platform-specific export presets.
-- A collage-style freeform canvas.
-- Share Extension.
-- HDR and wide-gamut preservation.
-- Live Photo support.
-
-Their implementation order will follow design and technical validation.
-
-Deliberately out of scope: beauty/retouch, filters, AI editing, general video editing, cloud sync, accounts, and template marketplaces. See `docs/product/` for the full boundary list.
+The authoritative current scope, confirmed directions, and hard boundaries are maintained in [`docs/product/product-scope.md`](docs/product/product-scope.md). User-observable behavior and delivery status are maintained in [`docs/specs/`](docs/specs/).
 
 ## Tech Stack
 
@@ -40,12 +31,7 @@ React Native (Expo, New Architecture) + Skia + TypeScript. The editor is documen
 
 ## Documentation
 
-Authoritative project documentation lives in [`docs/`](docs/) and is written in Chinese (see ADR 0014):
-
-- [`docs/product/`](docs/product/): positioning, current product scope, naming.
-- [`docs/adr/`](docs/adr/): architecture decision records with a decision ledger.
-- [`docs/specs/`](docs/specs/): BDD acceptance specs (Given/When/Then) per feature.
-- [`docs/guides/`](docs/guides/): design system, testing strategy, and development environment.
+Start with the canonical [`docs/README.md`](docs/README.md) navigation and ownership map. Authoritative project documentation under `docs/` is written in Chinese (see ADR 0014).
 
 Agents working on this repository must follow [`AGENTS.md`](AGENTS.md).
 

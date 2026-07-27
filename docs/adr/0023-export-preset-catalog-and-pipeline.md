@@ -1,7 +1,8 @@
 # ADR 0023：深化导出预设 catalog 与导出管线
 
-- 状态：已接受（2026-07-17）
-- 修订：ADR 0007、0008、0011
+- 状态：已接受
+- 接受日期：2026-07-17
+- 修订：[ADR 0007](0007-export-pipeline.md)、[ADR 0008](0008-export-presets-data-driven.md)、[ADR 0011](0011-testing-strategy.md)
 - 关联：ADR 0003、0009、[F04](../specs/F04-export.md)
 
 ## 背景
