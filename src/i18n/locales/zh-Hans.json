@@ -60,7 +60,9 @@
     "title": "设置",
     "retainBasic": "默认保留拍摄信息",
     "retainBasicDescription": "新建编辑会话时，默认保留拍摄时间与设备信息。导出前仍可临时修改。",
-    "privacyNotice": "GPS 位置信息始终移除。设置仅保存在本机。"
+    "privacyNotice": "GPS 位置信息始终移除。设置仅保存在本机。",
+    "loadFailed": "无法从本机读取设置。",
+    "saveFailed": "无法保存设置，请重试。"
   },
   "editor": {
     "photoCount": "{{count}} 张照片",

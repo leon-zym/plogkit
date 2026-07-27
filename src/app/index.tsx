@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,13 +21,8 @@ import type {
   DraftListEntry,
   DraftThumbnailPair,
 } from "@/services/drafts/draftLibrary";
-import { settingsRuntime } from "@/services/settings/expoSettingsRuntime";
-import {
-  APP_SETTINGS_SCHEMA_VERSION,
-  createDefaultAppSettings,
-  type AppSettings,
-  type DraftThumbnailDisplay,
-} from "@/services/settings/settingsRepository";
+import { type DraftThumbnailDisplay } from "@/services/settings/appSettings";
+import { appSettings } from "@/services/settings/expoAppSettings";
 import { ActionButton } from "@/ui/ActionButton";
 import { colors, radii, shadows, spacing, typography } from "@/ui/theme";
 
@@ -58,14 +53,20 @@ export default function HomeScreen() {
   const [libraryState, setLibraryState] = useState<DraftLibraryState>(() =>
     editorRuntime.getDraftLibraryState(),
   );
-  const [settings, setSettings] = useState<AppSettings>(createDefaultAppSettings());
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const settingsState = useSyncExternalStore(
+    appSettings.subscribe,
+    appSettings.getState,
+    appSettings.getState,
+  );
+  const settings = settingsState.settings;
+  const settingsReady = settingsState.status === "ready";
   const [menuVisible, setMenuVisible] = useState(false);
   const [actionTarget, setActionTarget] = useState<DraftListEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [unknownDeletion, setUnknownDeletion] = useState<DraftId | null>(null);
   const [importing, setImporting] = useState(false);
   const [opening, setOpening] = useState<DraftId | null>(null);
+  const [savingDisplay, setSavingDisplay] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
 
   const columnCount = useMemo(
@@ -75,8 +76,7 @@ export default function HomeScreen() {
         : Math.max(3, Math.floor((width - spacing.s8 + spacing.s2) / (128 + spacing.s2))),
     [width],
   );
-  const itemSize =
-    (width - spacing.s8 - spacing.s2 * (columnCount - 1)) / columnCount;
+  const itemSize = (width - spacing.s8 - spacing.s2 * (columnCount - 1)) / columnCount;
 
   useEffect(() => {
     let active = true;
@@ -88,10 +88,7 @@ export default function HomeScreen() {
       const entry = next.entries.find(
         (candidate) => candidate.status === "ready" && candidate.draftId === opened.draftId,
       );
-      if (
-        entry?.status === "ready" &&
-        entry.contentRevision !== opened.contentRevision
-      ) {
+      if (entry?.status === "ready" && entry.contentRevision !== opened.contentRevision) {
         openedRevision.current = {
           draftId: entry.draftId,
           contentRevision: entry.contentRevision,
@@ -103,12 +100,7 @@ export default function HomeScreen() {
       install(editorRuntime.getDraftLibraryState());
     });
     void editorRuntime.loadDraftLibrary().then(install);
-    void settingsRuntime.load().then((loaded) => {
-      if (active) {
-        setSettings(loaded);
-        setSettingsLoaded(true);
-      }
-    });
+    void appSettings.initialize();
     return () => {
       active = false;
       unsubscribe();
@@ -174,18 +166,15 @@ export default function HomeScreen() {
   };
 
   const saveDisplay = async (display: DraftThumbnailDisplay) => {
-    if (!settingsLoaded) return;
-    const next: AppSettings = {
-      ...settings,
-      schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
-      draftThumbnailDisplay: display,
-    };
-    setSettings(next);
-    setMenuVisible(false);
+    if (!settingsReady || savingDisplay) return;
+    setSavingDisplay(true);
+    setErrorKey(null);
     try {
-      await settingsRuntime.save(next);
-    } catch {
-      setErrorKey("home.settingsFailed");
+      const result = await appSettings.setDraftThumbnailDisplay(display);
+      if (result.status !== "saved") setErrorKey("home.settingsFailed");
+      setMenuVisible(false);
+    } finally {
+      setSavingDisplay(false);
     }
   };
 
@@ -218,9 +207,7 @@ export default function HomeScreen() {
             : t("home.draftStatus.ready"),
     );
     parts.push(
-      entry.status === "corrupt"
-        ? t("home.draftActions.corrupt")
-        : t("home.draftActions.ready"),
+      entry.status === "corrupt" ? t("home.draftActions.corrupt") : t("home.draftActions.ready"),
     );
     return parts.join(" ");
   };
@@ -260,9 +247,7 @@ export default function HomeScreen() {
           }
         }}
         disabled={opening === item.draftId}
-        onLongPress={
-          corrupt ? undefined : () => setActionTarget(item)
-        }
+        onLongPress={corrupt ? undefined : () => setActionTarget(item)}
         onPress={onPress}
         style={({ pressed }) => [
           styles.draftItem,
@@ -305,8 +290,7 @@ export default function HomeScreen() {
     );
   };
 
-  const showStorageFailure =
-    unknownDeletion !== null || libraryState.status === "storage-failed";
+  const showStorageFailure = unknownDeletion !== null || libraryState.status === "storage-failed";
 
   const banner = (
     <View style={styles.banner}>
@@ -352,7 +336,8 @@ export default function HomeScreen() {
     </View>
   );
 
-  const entries = !showStorageFailure && libraryState.status === "ready" ? libraryState.entries : [];
+  const entries =
+    !showStorageFailure && libraryState.status === "ready" ? libraryState.entries : [];
 
   return (
     <SafeAreaView style={styles.safeArea} testID="home-screen">
@@ -379,11 +364,7 @@ export default function HomeScreen() {
                     void editorRuntime.loadDraftLibrary();
                   }
                 }}
-                testID={
-                  unknownDeletion === null
-                    ? "retry-draft-library"
-                    : "retry-draft-deletion"
-                }
+                testID={unknownDeletion === null ? "retry-draft-library" : "retry-draft-deletion"}
                 variant="secondary"
               />
             </View>
@@ -416,15 +397,15 @@ export default function HomeScreen() {
                 accessibilityRole="radio"
                 accessibilityState={{
                   checked: settings.draftThumbnailDisplay === display,
-                  disabled: !settingsLoaded,
+                  disabled: !settingsReady || savingDisplay,
                 }}
-                disabled={!settingsLoaded}
+                disabled={!settingsReady || savingDisplay}
                 key={display}
                 onPress={() => void saveDisplay(display)}
                 style={({ pressed }) => [
                   styles.menuRow,
-                  !settingsLoaded && styles.disabledMenuRow,
-                  pressed && settingsLoaded && styles.pressed,
+                  (!settingsReady || savingDisplay) && styles.disabledMenuRow,
+                  pressed && settingsReady && !savingDisplay && styles.pressed,
                 ]}
                 testID={`display-${display}`}
               >
@@ -434,6 +415,20 @@ export default function HomeScreen() {
                 </Text>
               </Pressable>
             ))}
+            {settingsState.status === "load-failed" ? (
+              <View style={styles.settingsFailure}>
+                <Text accessibilityLiveRegion="assertive" style={styles.menuError}>
+                  {t("settings.loadFailed")}
+                </Text>
+                <ActionButton
+                  accessibilityLabel={t("common.retry")}
+                  label={t("common.retry")}
+                  onPress={() => void appSettings.initialize()}
+                  testID="retry-home-settings"
+                  variant="secondary"
+                />
+              </View>
+            ) : null}
             <View style={styles.menuDivider} />
             <Pressable
               accessibilityLabel={t("settings.title")}
@@ -655,6 +650,8 @@ const styles = StyleSheet.create({
   menuCheck: { color: colors.accent, fontSize: 18 },
   menuArrow: { color: colors.inkMuted, fontSize: 26 },
   menuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+  settingsFailure: { gap: spacing.s2 },
+  menuError: { ...typography.caption, color: colors.danger },
   deleteText: { ...typography.body, color: colors.danger, fontWeight: "600" },
   confirmActions: { gap: spacing.s2 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },

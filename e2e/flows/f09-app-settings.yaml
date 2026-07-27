@@ -1,0 +1,62 @@
+appId: com.leonzym.plogkit
+name: App settings remain durable and independent
+---
+- runFlow: ../subflows/launch-app.yaml
+- assertVisible:
+    id: home-screen
+- tapOn:
+    id: home-menu
+- tapOn:
+    id: open-settings
+- assertVisible:
+    id: settings-screen
+- tapOn:
+    id: settings-retain-basic
+- extendedWaitUntil:
+    visible:
+      id: settings-retain-basic
+      enabled: true
+    timeout: 10000
+- tapOn:
+    id: settings-back
+- assertVisible:
+    id: home-screen
+- tapOn:
+    id: home-menu
+- tapOn:
+    id: display-original
+- extendedWaitUntil:
+    notVisible:
+      id: display-menu
+    timeout: 10000
+- tapOn:
+    id: home-menu
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: display-original
+- tapOn:
+    id: open-settings
+- assertVisible:
+    id: settings-retain-basic
+    checked: true
+- assertVisible: GPS location is always removed.*
+- tapOn:
+    id: settings-back
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: home-screen
+    timeout: 30000
+- tapOn:
+    id: home-menu
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: display-original
+- tapOn:
+    id: open-settings
+- assertVisible:
+    id: settings-retain-basic
+    checked: true
