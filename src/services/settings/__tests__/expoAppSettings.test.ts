@@ -76,8 +76,16 @@ describe("Expo App Settings file adapter", () => {
   const settingsUri = "memory://documents/settings.json";
   const pendingUri = `${settingsUri}.pending`;
   const backupUri = `${settingsUri}.backup`;
-  const oldSettings = '{"value":"old"}';
-  const newSettings = '{"value":"new"}';
+  const oldSettings = JSON.stringify({
+    schemaVersion: 2,
+    defaultMetadataPolicy: "strip",
+    draftThumbnailDisplay: "square",
+  });
+  const newSettings = JSON.stringify({
+    schemaVersion: 2,
+    defaultMetadataPolicy: "retain-basic",
+    draftThumbnailDisplay: "original",
+  });
 
   beforeEach(() => {
     mockContents.clear();
@@ -123,6 +131,16 @@ describe("Expo App Settings file adapter", () => {
     expect(mockContents.get(settingsUri)).toBe(oldSettings);
     expect(mockContents.has(backupUri)).toBe(false);
     expect(mockContents.has(pendingUri)).toBe(false);
+  });
+
+  it("leaves schema validation of a complete JSON object to the settings module", async () => {
+    const unsupportedSettings = '{"schemaVersion":99}';
+    mockContents.set(settingsUri, unsupportedSettings);
+
+    await expect(expoAppSettingsFileAdapter.exists(settingsUri)).resolves.toBe(true);
+    await expect(expoAppSettingsFileAdapter.readText(settingsUri)).resolves.toBe(
+      unsupportedSettings,
+    );
   });
 
   it("keeps the backup recoverable when restoring the primary also fails", async () => {

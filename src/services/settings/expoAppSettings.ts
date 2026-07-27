@@ -21,20 +21,23 @@ const expoRecoverableFiles: RecoverableFileAdapter = {
   },
 };
 
+async function isCompleteJsonObject(candidateUri: string): Promise<boolean> {
+  if (!new File(candidateUri).exists) return false;
+  try {
+    const parsed: unknown = JSON.parse(await new File(candidateUri).text());
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
 function settingsFileState(uri: string): RecoverableFileState {
   return {
     currentUri: uri,
     backupUri: `${uri}.backup`,
     temporaryUri: `${uri}.pending`,
-    isValid: async (candidateUri) => {
-      if (!new File(candidateUri).exists) return false;
-      try {
-        const parsed: unknown = JSON.parse(await new File(candidateUri).text());
-        return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
-      } catch {
-        return false;
-      }
-    },
+    // Recovery detects incomplete file replacement; appSettings owns schema validation.
+    isValid: isCompleteJsonObject,
   };
 }
 
