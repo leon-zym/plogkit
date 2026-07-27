@@ -1,6 +1,5 @@
 import {
   getSkiaExports,
-  makeOffscreenSurface,
   AlphaType,
   ColorType,
   ImageFormat,
@@ -9,14 +8,12 @@ import {
 } from "@shopify/react-native-skia/lib/commonjs/headless";
 
 import { diffRgba, type RgbaDiff } from "./goldenDiff";
+import { createHeadlessSkiaOffscreenSceneRenderer } from "./headlessSkiaOffscreenRenderer";
 import type { RenderScene } from "./scene";
-import { drawSceneBackground, drawSceneImage, drawTextLayout } from "./skiaDraw";
 import {
   createTextLayoutEnvironment,
-  createTextLayoutSnapshot,
   type AnyTextLayoutEnvironment,
   type TextLayoutEnvironment,
-  type TextLayoutSnapshot,
 } from "./textLayout";
 
 export interface HeadlessFont {
@@ -81,69 +78,42 @@ export async function renderHeadlessScene(
   encodedImages: ReadonlyMap<string, Uint8Array>,
   options: HeadlessRenderOptions = {},
 ): Promise<Uint8Array> {
-  const { Skia } = getSkiaExports();
   const width = options.width ?? Math.round(scene.width);
   const height = options.height ?? Math.round(scene.height);
-  const surface = makeOffscreenSurface(width, height);
-  const images = new Map<string, SkImage>();
-  let snapshot: SkImage | null = null;
-  let textLayout: TextLayoutSnapshot | null = null;
-
-  try {
-    for (const node of scene.images) {
-      const encoded = encodedImages.get(node.imageId);
-      if (encoded === undefined) {
-        throw new Error(`headless fixture is missing image ${node.imageId}`);
-      }
-      const data = Skia.Data.fromBytes(encoded);
-      let image: SkImage | null = null;
-      try {
-        image = Skia.Image.MakeImageFromEncoded(data);
-      } finally {
-        data.dispose();
-      }
-      if (image === null) {
-        throw new Error(`could not decode headless image ${node.imageId}`);
-      }
-      images.set(node.imageId, image);
-    }
-
-    if (scene.texts.length > 0 && options.textLayoutEnvironment === undefined) {
-      throw new Error("headless text rendering requires a bundled-font layout environment");
-    }
-    if (options.textLayoutEnvironment !== undefined) {
-      const result = createTextLayoutSnapshot(options.textLayoutEnvironment, scene.texts);
-      if (result.status === "failure") {
-        throw new Error(`headless text layout failed: ${result.message}`);
-      }
-      textLayout = result.snapshot;
-    }
-
-    const sceneSkia = Skia as unknown as typeof import("@shopify/react-native-skia").Skia;
-    const canvas = surface.getCanvas();
-    canvas.scale(width / scene.width, height / scene.height);
-    drawSceneBackground(sceneSkia, canvas, scene);
-    for (const node of scene.images) {
-      const image = images.get(node.imageId);
-      if (image === undefined) {
-        throw new Error(`headless image ${node.imageId} was not loaded`);
-      }
-      drawSceneImage(sceneSkia, canvas, node, image);
-    }
-    for (const layout of textLayout?.layouts ?? []) {
-      drawTextLayout(canvas, layout);
-    }
-    surface.flush();
-    snapshot = surface.makeImageSnapshot();
-    return snapshot.encodeToBytes(ImageFormat.PNG, 100);
-  } finally {
-    snapshot?.dispose();
-    for (const image of images.values()) {
-      image.dispose();
-    }
-    textLayout?.dispose();
-    surface.dispose();
+  const renderer = createHeadlessSkiaOffscreenSceneRenderer(
+    encodedImages,
+    options.textLayoutEnvironment,
+  );
+  const result = await renderer.render({
+    scene,
+    assets: {
+      resolve: (imageId) => ({ uri: imageId }),
+    },
+    targets: [
+      {
+        id: "headless",
+        width,
+        height,
+        transform: {
+          scaleX: width / scene.width,
+          scaleY: height / scene.height,
+          translateX: 0,
+          translateY: 0,
+        },
+        encoding: { format: "png" },
+      },
+    ],
+  });
+  if (result.status !== "rendered") {
+    const detail =
+      result.status === "cancelled"
+        ? `cancelled during ${result.phase}`
+        : `${result.code}: ${result.message}`;
+    throw new Error(`headless scene rendering failed: ${detail}`);
   }
+  const output = result.outputs.headless;
+  if (output === undefined) throw new Error("headless renderer omitted its requested output");
+  return output.bytes;
 }
 
 function decodePng(png: Uint8Array, label: string): SkImage {
