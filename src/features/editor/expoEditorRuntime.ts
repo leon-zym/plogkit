@@ -13,5 +13,5 @@ export const editorRuntime = new EditorRuntime({
   storage,
   session,
   selectCandidates: picker.select,
-  loadMetadataPolicy: async () => (await appSettings.initialize()).settings.defaultMetadataPolicy,
+  loadMetadataPolicy: async () => appSettings.getState().settings.defaultMetadataPolicy,
 });
