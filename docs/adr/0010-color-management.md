@@ -3,20 +3,20 @@
 - 状态：已取代
 - 接受日期：2026-07-02
 - 后继：[ADR 0018](0018-mvp-srgb-color-strategy.md)
-- 关联：ADR 0007、0009
+- 关联：[ADR 0007](0007-export-pipeline.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)
 
 ## 背景
 
-iPhone 照片默认为 Display P3 广色域。PlogKit 的核心承诺是"修图交给相册，发布前整理交给 PlogKit"——如果渲染管线默认 sRGB，用户在相册中调好的色彩会在导出时被压缩，直接违背该承诺。React Native Skia 的广色域支持历史上较弱，端到端保真度未经验证。
+iPhone 照片默认为 Display P3 广色域。PlogKit 当时的核心承诺是“修图交给相册，发布前整理交给 PlogKit”。如果渲染管线默认 sRGB，用户在相册中调好的色彩会在导出时被压缩，直接违背该承诺。React Native Skia 的广色域支持历史上较弱，端到端保真度未经验证。
 
 ## 决策
 
-- 将"P3 图片经 Skia 合成导出后的色彩保真验证"列为首个技术 spike。
+- 将“P3 图片经 Skia 合成导出后的色彩保真验证”列为首个技术 spike。
 - spike 结论决定 MVP 色彩策略：
   - 若可行：预览与导出管线全程保持 P3。
   - 若不可行：MVP 统一转换为 sRGB，并在产品文档中明确声明该限制（多数社交平台上传后亦为 sRGB，可接受，但必须是有意识的决策）。
-- spike 结论落档为对本 ADR 的补充或新 ADR。
+- spike 结论由后继 [ADR 0018](0018-mvp-srgb-color-strategy.md) 承载。
 
 ## 影响与代价
 
-- spike 前，涉及色彩空间的实现决策一律挂起，避免返工。
+- 本 ADR 已由 ADR 0018 取代，不再作为当前色彩实现依据。

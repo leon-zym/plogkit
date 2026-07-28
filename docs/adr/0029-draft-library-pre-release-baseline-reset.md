@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-22
 - 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)
-- 关联：ADR 0003、0027、0028、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0027](0027-draft-root-record.md)、[ADR 0028](0028-draft-deletion-tombstone.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 

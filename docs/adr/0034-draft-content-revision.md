@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-22
 - 修订：[ADR 0027](0027-draft-root-record.md)
-- 关联：ADR 0022、0025、0029、0030、0032、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)、[ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)、[ADR 0032](0032-draft-library-load-barrier.md)、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 
@@ -15,7 +15,7 @@
 - 只有 prospective 文档相对当前已持久化文档语义不同，且新根记录成功提交时，`contentRevision` 才恰好递增一次。相同文档保存、失败保存、打开、导出、资产 ingest、缩略图重建和非活跃维护均不递增。
 - 多个编辑提交可以被一次 autosave 合并为一个内容修订；撤销或重做到与当前持久文档不同的内容仍形成新修订。`contentRevision` 不是编辑次数、用户可见版本历史或多 writer CAS。
 - 保存重试前先恢复根记录。若前一次调用报错但新根记录其实已经提交，相同文档的重试是 no-op，不得重复递增 revision 或更新时间。
-- 首页以打开时与 flush 后的内容修订是否不同判断返回时滚动到顶部；缩略图以该 revision 绑定派生结果。其他 caller 不自行推导时间或比较序列化 bytes。
+- Caller 可以比较打开时与保存后的内容修订，判断持久内容是否变化；缩略图以该 revision 绑定派生结果。具体首页行为由 [F08](../specs/F08-draft-library.md) 定义，caller 不自行推导时间或比较序列化 bytes。
 - 根记录与 catalog 继续作为独立的可恢复事实，各自按 `current`、`backup`、`temp` 收敛后再执行一次 aggregate 完整性校验。添加资产时先发布资产与 catalog、后让根记录引用；移除引用时先提交根记录、后压缩 catalog。
 - 不增加 `catalogRevision`，也不搜索“旧根记录 + 旧 catalog”等候选组合。独立恢复后若 I/O 已确定且两者语义不兼容，条目归类为损坏草稿；无法判定的读取错误按 ADR 0032 返回页面级 storage failure，不静默回滚用户内容。
 

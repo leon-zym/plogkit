@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-22
 - 修订：[ADR 0027](0027-draft-root-record.md)
-- 关联：ADR 0025、0030、0033、0034、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)、[ADR 0033](0033-per-draft-deletion-marker.md)、[ADR 0034](0034-draft-content-revision.md)、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 

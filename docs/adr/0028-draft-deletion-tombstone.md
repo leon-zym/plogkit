@@ -4,7 +4,7 @@
 - 接受日期：2026-07-22
 - 后继：[ADR 0033](0033-per-draft-deletion-marker.md)
 - 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)
-- 关联：ADR 0027、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #10](https://github.com/leon-zym/plogkit/issues/10)
+- 关联：[ADR 0027](0027-draft-root-record.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)、[Issue #10](https://github.com/leon-zym/plogkit/issues/10)
 
 ## 背景
 

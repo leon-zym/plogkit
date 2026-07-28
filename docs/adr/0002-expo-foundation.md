@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-02
 - 后继：[ADR 0019](0019-cross-platform-maestro-e2e.md)
-- 关联：ADR 0001、0016
+- 关联：[ADR 0001](0001-core-stack-rn-skia.md)
 
 ## 背景
 
@@ -21,5 +21,5 @@
 ## 影响与代价
 
 - 受 Expo SDK 升级节奏约束，原生依赖选择需优先考虑 Expo 兼容性。
-- Xcode 27 beta 工具链构建 RN 存在未验证风险，需完成模拟器与真机构建的冒烟验证。
-- Android 端在 CI 环境就绪前不可验证，双端一致性依赖跨端纪律与后补测试。
+- CNG 减少手工维护原生工程的成本，但原生配置必须通过 app config 或 config plugin 表达。
+- iOS 先行造成的自动化平台范围已由 [ADR 0019](0019-cross-platform-maestro-e2e.md) 修订。

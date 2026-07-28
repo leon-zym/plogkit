@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-02
 - 后继：[ADR 0038](0038-document-ownership-contracts.md)
-- 关联：ADR 0014
+- 关联：[ADR 0014](0014-language-policy.md)
 
 ## 背景
 

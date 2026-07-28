@@ -1,15 +1,15 @@
 # F04 导出与压缩预设
 
 - 状态：已实现
-- 关联：[ADR 0007](../adr/0007-export-pipeline.md)、[ADR 0008](../adr/0008-export-presets-data-driven.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[ADR 0025](../adr/0025-recoverable-draft-persistence-maintenance.md)、[F09](F09-app-settings.md)
+- 关联：[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0018](../adr/0018-mvp-srgb-color-strategy.md)、[ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)、[F09](F09-app-settings.md)
 
 ## 概述
 
-从文档模型渲染并导出图片，提供数据驱动的压缩预设与 EXIF 控制。导出后当前项目保持可编辑。
+将当前作品导出为图片，提供原始、社交与紧凑预设，并允许用户控制照片信息。导出后当前草稿保持可编辑。
 
 ## 范围
 
-- 数据驱动预设（初始占位：原始/社交/紧凑）。
+- 原始、社交与紧凑三种导出预设。
 - JPEG 与 PNG 输出，保存到系统相册。
 - 尺寸上限与自动降级。
 - 全局设置为新草稿提供元数据策略默认值（设置生命周期见 [F09](F09-app-settings.md)），草稿保存用户的明确选择。
@@ -17,7 +17,7 @@
 
 ## 非目标
 
-- HDR 保留、Live Photo 导出（vNext）、自定义预设编辑器（可后置）、批量导出。
+- HDR 保留、Live Photo 导出、自定义预设和批量导出。
 
 ## 需求与场景
 
@@ -26,14 +26,14 @@
 #### Scenario: 使用默认预设导出
 
 - GIVEN 一个含拼接与文字的编辑会话
-- WHEN 用户选择"社交"预设并确认导出
+- WHEN 用户选择「社交」预设并确认导出
 - THEN 系统相册出现一张新图片，其内容与预览一致、尺寸符合预设规则
 - AND 导出成功后界面给出明确反馈
 
-#### Scenario: 导出内容从文档渲染而非截屏
+#### Scenario: 导出分辨率不受预览影响
 
 - GIVEN 预览画布因屏幕尺寸以降采样分辨率显示
-- WHEN 用户以"原始"预设导出
+- WHEN 用户以「原始」预设导出
 - THEN 导出图片分辨率按预设规则计算，不受预览显示分辨率影响
 
 ### 需求 2：尺寸上限与降级
@@ -41,7 +41,7 @@
 #### Scenario: 超限自动降级
 
 - GIVEN 一个 9 张原图的竖向拼接，按原尺寸计算总像素超过 64MP
-- WHEN 用户以"原始"预设导出
+- WHEN 用户以「原始」预设导出
 - THEN 导出图片按比例降级至上限内（总像素 ≤ 64MP 且长边 ≤ 16384px）
 - AND 导出过程不发生内存崩溃
 
@@ -51,25 +51,25 @@
 - WHEN 用户通过任一预设导出
 - THEN 导出图片为 SDR/sRGB，应用不宣称保留广色域
 
-### 需求 3：EXIF 控制
+### 需求 3：照片信息控制
 
-#### Scenario: 默认剥离 EXIF
+#### Scenario: 默认移除照片信息
 
-- GIVEN 源图片含 GPS 与拍摄信息，且用户未更改任何 EXIF 设置
+- GIVEN 源图片含 GPS 与拍摄信息，且用户未更改照片信息设置
 - WHEN 用户导出
-- THEN 导出图片不含任何 EXIF 元数据（含 GPS）
+- THEN 导出图片不含照片信息或 GPS
 
-#### Scenario: 草稿保存不同于全局默认的元数据选择
+#### Scenario: 草稿保存不同于全局默认的照片信息选择
 
-- GIVEN 全局设置为"剥离 EXIF"
-- WHEN 用户在当前草稿的导出面板选择"保留拍摄信息"并导出
+- GIVEN 全局设置为“移除全部照片信息”
+- WHEN 用户在当前草稿的导出面板选择“保留拍摄信息”并导出
 - THEN 导出的图片保留拍摄时间/设备信息但不含 GPS
 - AND 重新打开该草稿时仍保留此选择
 - AND 全局设置保持不变
 
 ### 需求 4：导出后继续编辑
 
-#### Scenario: 导出不压平文档
+#### Scenario: 导出后仍可继续编辑
 
 - GIVEN 用户刚完成一次导出
 - WHEN 用户返回编辑界面并修改文字内容
@@ -82,7 +82,7 @@
 - GIVEN 用户在当前多格式预设中选择了非默认格式
 - WHEN 用户切换到另一预设
 - THEN 导出面板直接显示新预设的默认格式，不继承旧格式选择
-- AND 若当前元数据选择不兼容则切换为"剥离全部"，后续不自动恢复
+- AND 若当前照片信息选择不兼容则切换为“移除全部”，后续不自动恢复
 
 #### Scenario: 预设决定是否提供格式选择
 
@@ -113,14 +113,6 @@
 
 #### Scenario: 临时初始化失败后可以重试
 
-- GIVEN 导出 cache staging 的必需目录初始化发生瞬时失败
-- WHEN 用户在同一进程内再次发起导出且存储已恢复
-- THEN pipeline 可以创建新的 operation 并继续导出
-- AND 上一次初始化失败不永久毒化本进程
-
-#### Scenario: 遗留枚举失败不阻止新导出
-
-- GIVEN 导出 staging root 可写，但遗留 operation 枚举或删除暂时失败
-- WHEN 用户发起新导出
-- THEN 新 operation 仍可创建并完成
-- AND 后续冷启动或安全初始化再次尝试清理遗留目录
+- GIVEN 用户的一次导出因临时存储故障而失败
+- WHEN 存储恢复后，用户在同一进程内再次发起导出
+- THEN 应用可以完成新的导出

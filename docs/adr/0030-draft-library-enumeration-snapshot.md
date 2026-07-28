@@ -4,7 +4,7 @@
 - 接受日期：2026-07-22
 - 后继：[ADR 0031](0031-draft-publication-record.md)、[ADR 0032](0032-draft-library-load-barrier.md)
 - 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)
-- 关联：ADR 0027、0028、0029、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0027](0027-draft-root-record.md)、[ADR 0028](0028-draft-deletion-tombstone.md)、[ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 
@@ -20,8 +20,8 @@
 - 缺少最近编辑时间的条目排在顶部，其余按最近编辑时间倒序；相同排序事实使用稳定的内部 tie-breaker，避免列表抖动。排序和损坏分类由 Draft Library implementation 拥有，首页不解释持久化失败或拼装顺序。
 - 冷启动只有在草稿根目录整体无法枚举或无法产生可靠快照时返回页面级 storage failure；单个草稿失败不得让整个列表失败。页面级故障可以由用户重试，已判定损坏的单项不提供同进程手动重试。
 - 首次快照完成后，Draft Library 在同一进程内持有权威列表快照。create、save、delete 及损坏分类变化在对应 transaction 成功后原子更新快照；返回首页直接读取该快照，不重新扫描磁盘。下次进程启动重新枚举并恢复。
-- 首页使用虚拟化 Grid，草稿缩略图按可见范围加载；完整性校验不延迟到可见 item。当前不增加未校验 item 状态、滚动预取校验、派生全局列表缓存或后台全库刷新。
-- 取消持久化最近草稿定位器和“继续上次编辑”快捷入口。应用启动不自动打开草稿；当前进程内的当前编辑会话仍由 Current Editing Session module 持有，用户通过按最近编辑时间排序的 Grid 重新打开草稿。
+- 完整性校验不延迟到列表项可见时。当前不增加未校验 item 状态、滚动预取校验、派生全局列表缓存或后台全库刷新。
+- 不持久化最近草稿定位器。应用启动与重新打开草稿的用户行为由 [F08](../specs/F08-draft-library.md) 定义，当前进程内的编辑会话仍由 Current Editing Session module 持有。
 - 若真实设备验证表明全量根记录与完整性校验成为冷启动瓶颈，可以在保持目录和草稿根记录为事实源的前提下新增可重建、非权威列表缓存；不得在没有测量证据时把缓存升级为新的写入 transaction 或 external seam。
 
 ## 影响与代价

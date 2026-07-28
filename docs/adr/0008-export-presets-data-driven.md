@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-02
 - 后继：[ADR 0023](0023-export-preset-catalog-and-pipeline.md)
-- 关联：ADR 0007
+- 关联：[ADR 0007](0007-export-pipeline.md)、[F04](../specs/F04-export.md)
 
 ## 背景
 

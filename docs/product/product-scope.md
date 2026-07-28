@@ -10,7 +10,7 @@ PlogKit 已完成 MVP 阶段，当前处于发布前迭代。本文拥有当前�
 - 首页通过新建 Banner 与本地草稿 Grid 支持创建、浏览、重新打开和删除草稿。
 - 草稿和编辑内容保留在设备本地，不依赖账户或网络。
 
-验收契约：[F07 图片导入与资产管理](../specs/F07-image-import.md)、[F08 本地草稿库](../specs/F08-draft-library.md)。
+验收契约：[F07 图片导入](../specs/F07-image-import.md)、[F08 本地草稿库](../specs/F08-draft-library.md)。
 
 ### 统一文档编辑
 

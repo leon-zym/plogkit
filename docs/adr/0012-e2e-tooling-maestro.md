@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-02
 - 后继：[ADR 0019](0019-cross-platform-maestro-e2e.md)
-- 关联：ADR 0011
+- 关联：[ADR 0011](0011-testing-strategy.md)
 
 ## 背景
 

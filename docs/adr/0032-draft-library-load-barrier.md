@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-22
 - 修订：[ADR 0030](0030-draft-library-enumeration-snapshot.md)
-- 关联：ADR 0022、0025、0031、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)、[ADR 0031](0031-draft-publication-record.md)、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 

@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-21
 - 修订：[ADR 0011](0011-testing-strategy.md) 中 CI 作为第五层，以及“jest-expo 单一运行器”与“单一 Jest 运行器”的适用范围
-- 关联：ADR 0019
+- 关联：[ADR 0019](0019-cross-platform-maestro-e2e.md)
 
 ## 背景
 

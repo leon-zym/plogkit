@@ -4,13 +4,13 @@
 - 接受日期：2026-07-16
 - 后继：[ADR 0028](0028-draft-deletion-tombstone.md)、[ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[ADR 0030](0030-draft-library-enumeration-snapshot.md)、[ADR 0031](0031-draft-publication-record.md)、[ADR 0033](0033-per-draft-deletion-marker.md)
 - 修订：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0006](0006-image-import-pipeline.md)
-- 关联：ADR 0004、0021、[F06](../specs/F06-session-persistence.md)、[F07](../specs/F07-image-import.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0004](0004-state-management-undo.md)、[ADR 0021](0021-edit-commit-module.md)、[F06](../specs/F06-session-persistence.md)、[F07](../specs/F07-image-import.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 
 现有实现只维护 `projects/current`，由 `EditorRuntime` 同时组合恢复、编辑提交、autosave、flush、导入结果和资产读取。Home、Editor 与 Root caller 分别掌握 `get → restore → get`、会话替换和 flush 顺序，当前编辑会话缺少一个可直接测试的 deep module。
 
-产品后续将加入本地草稿库。草稿是可长期保留并重新打开的作品状态；当前编辑会话是打开一个草稿进行编辑的临时活动。若继续围绕单例 current 目录深化，会在草稿库实现时再次推翻身份、存储和 interface。
+当时的产品计划将加入本地草稿库。草稿是可长期保留并重新打开的作品状态；当前编辑会话是打开一个草稿进行编辑的临时活动。若继续围绕单例 current 目录深化，会在草稿库实现时再次推翻身份、存储和 interface。
 
 草稿创建同时涉及身份、统一文档、导入资产、metadata 与失败清理。将草稿库、当前编辑会话和导入资产设计成只共享低层持久化 seam 的并列 module，会迫使 caller 编排跨 module transaction，或把业务 rollback 塞入文件 adapter，无法获得 locality。
 
@@ -18,7 +18,6 @@
 
 - 草稿库拥有稳定、opaque 的 `DraftId`。`DraftId` 不是名称或路径，也不写入 `PlogDocument`；复制文档内容创建新草稿时必须生成新的 `DraftId`。
 - 草稿库 module 拥有完整的持久化草稿 aggregate：统一文档、导入资产、metadata、预览与缩略图，以及创建、读取、保存和删除 transaction。导入资产生命周期是草稿库 implementation 内部的 deep module，不形成独立 external seam。
-- 本决策只确立缩略图与删除 transaction 的唯一 owner。在草稿库产品 UI 实施前，不提前生成无 caller 的缩略图，不实现列表展示、删除 UI 或占位 interface；删除 transaction 的恢复性顺序由 Issue #10 后续补强。
 - 每个导入资产只属于一个 `DraftId`。统一文档只保存稳定的 `ImportedAssetId` 与图片固有属性，不保存原图、预览或 metadata URI；草稿库负责解析实际素材并验证所有权。
 - `ImportedAssetId` 是 draft-scoped、opaque 的身份，只要求在一个草稿内唯一；它不是文件名、URI、系统相册 ID 或内容哈希。复制草稿时可以在新 `DraftId` 的命名空间内保留 aggregate 中的 `ImportedAssetId`。
 - 导入资产的原图一经发布便不可原地替换。替换图片时创建新的 `ImportedAssetId`，再通过一次编辑提交切换统一文档引用；旧资产继续支持 undo，直到会话结束后的压缩。预览是可重建的派生数据，可在不改变资产身份的前提下重新生成。
@@ -39,11 +38,9 @@
 - 压缩时先原子提交移除无引用条目的新资产 catalog，再 best-effort 删除对应原图、预览与 metadata。删除失败只留下可重试清理的孤立文件，不阻止保存、切换或打开；不得先删除文件再更新 catalog。
 - 未被资产 catalog 引用的孤立文件不影响打开草稿，由草稿库后续内部维护流程清理。资产引用推导与清理职责不进入当前编辑会话的 external interface。
 - 返回草稿库只执行 flush，不结束当前编辑会话；再次打开同一草稿保留当前进程内的 undo/redo history。切换草稿或进程终止才结束会话，重新打开草稿时 history 为空。
-- 应用启动先展示草稿库，不自动恢复上次草稿；“继续上次编辑”只是对最近 `DraftId` 的快捷 `open`。该启动与历史草稿导航由 Issue #9 实施；本轮只实施其依赖的 aggregate 与会话 lifecycle。
 - 可预期的恢复、读取和持久化失败使用 typed result；module invariant、重入等编程错误才抛异常。后台 flush 失败保留 dirty 文档并允许重试；用户主动离开 Editor 时，flush 失败阻止导航。
-- 草稿库 interface 是草稿创建、资产 ingest、读取和保存 transaction 的主要 test surface；删除 transaction 在 Issue #9/#10 实施时继续通过草稿库 interface 验证。当前编辑会话 interface 是 open、切换、autosave 与 flush 的主要 test surface。测试使用内存 adapter，被吸收入 implementation 的 repository、scheduler 与资产文件 module 不保留重复行为测试。
+- 草稿库 interface 是草稿创建、资产 ingest、读取、保存和删除 transaction 的主要 test surface。当前编辑会话 interface 是 open、切换、autosave 与 flush 的主要 test surface。测试使用内存 adapter，被吸收入 implementation 的 repository、scheduler 与资产文件 module 不保留重复行为测试。
 - 当前不跨草稿共享或去重资产，不引入持久化引用计数。只有出现真实存储压力时，才评估在草稿库 implementation 后引入内容寻址存储、跨草稿引用跟踪与垃圾回收，且不得扩大草稿或当前编辑会话的 external interface。
-- 实施先建立按 `DraftId` 工作的草稿 aggregate 与草稿访问 seam，再深化当前编辑会话 module，之后补全草稿库 UI。产品尚未发布，本次将新持久化 schema 作为 baseline reset：提升 `schemaVersion`，但不迁移 `projects/current` 或此前未发布 schema 的历史数据，不引入兼容路径、双写阶段或旧 schema 读取；本次 reset 后的未来 schema 变更继续遵守 ADR 0003 的迁移要求。
 
 ## 影响与代价
 
@@ -55,6 +52,3 @@
 - 草稿身份与统一文档保持分离，草稿库可以增加列表、命名、删除和缩略图而不修改 document schema 或编辑提交 interface。
 - 草稿打开不承担完整图片解码成本；可重建的派生预览不会升级为草稿恢复失败，无法安全编辑的原图或引用损坏则不会扩散成渲染、导出模块都需要理解的“残缺资产”状态。
 - 无引用资产在活跃会话内会暂时占用额外空间，但避免了引用计数与 undo history 的双向耦合；会话结束后的可达性压缩提供确定且崩溃安全的回收边界。
-- 草稿 aggregate 基础成为当前编辑会话重构的 blocking dependency；这扩大了首个实施 ticket，但避免单例兼容 module 和后续二次重构。
-- F06 与 F07 的功能级状态保持已实现；本 ADR 新增但尚未落地的目标用户行为在对应场景标记为已确认并关联实施 issue。在重构 ticket 落地前，现有实现仍使用单例恢复与路径引用。
-- 草稿列表的具体 UI、命名、排序与删除交互由 Issue #9 后续细化，不在本 ADR 中决定。

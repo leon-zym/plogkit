@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-22
 - 后继：[ADR 0031](0031-draft-publication-record.md)、[ADR 0034](0034-draft-content-revision.md)、[ADR 0035](0035-draft-thumbnail-generation.md)
-- 关联：ADR 0003、0022、0025、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 

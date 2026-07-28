@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 接受日期：2026-07-15
-- 关联：ADR 0003、0004
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0004](0004-state-management-undo.md)
 
 ## 背景
 

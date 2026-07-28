@@ -3,7 +3,7 @@
 - 状态：已接受
 - 接受日期：2026-07-22
 - 修订：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0028](0028-draft-deletion-tombstone.md)
-- 关联：ADR 0025、0027、0029、0032、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
+- 关联：[ADR 0025](0025-recoverable-draft-persistence-maintenance.md)、[ADR 0027](0027-draft-root-record.md)、[ADR 0029](0029-draft-library-pre-release-baseline-reset.md)、[ADR 0032](0032-draft-library-load-barrier.md)、[F08](../specs/F08-draft-library.md)、[Issue #9](https://github.com/leon-zym/plogkit/issues/9)
 
 ## 背景
 
@@ -18,7 +18,6 @@ ADR 0028 以待删除标记建立删除 commit point，但让一个没有旧值�
 - `CurrentEditingSession.delete(draftId)` 是应用层唯一删除入口，Draft Library 的删除 transaction 保持内部能力。删除非当前草稿或损坏草稿时，会话 module 直接委托；删除当前草稿时，open、flush、资产变更与 delete 共用 lifecycle gate。
 - 当前草稿删除先阻止新编辑、autosave 与资产操作，等待在途操作并成功 flush，再提交删除标记。标记有效时永久失效旧 handle；明确未提交且草稿仍完整时解除 barrier 并恢复原会话；结果未知时保持 barrier，直到重试或冷启动恢复出确定事实。
 - 同一 `DraftId` 的删除与所有其他持久操作继续串行，避免删除后陈旧保存重新写入。不同草稿的删除可以独立提交。
-- 未来多选删除或全部清除可以固定确认时的 `DraftId` 集合，逐草稿提交并允许部分成功。只有未来要求批次 all-or-nothing 或进程重启后自动完成整批时，才新增独立 batch manifest；当前不提前引入。
 
 ## 影响与代价
 

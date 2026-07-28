@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-07-02
 - 后继：[ADR 0023](0023-export-preset-catalog-and-pipeline.md)
-- 关联：ADR 0001、0003、0008、0009、0010
+- 关联：[ADR 0001](0001-core-stack-rn-skia.md)、[ADR 0003](0003-document-driven-architecture.md)、[ADR 0008](0008-export-presets-data-driven.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)、[ADR 0010](0010-color-management.md)
 
 ## 背景
 
@@ -15,7 +15,7 @@
   - 渲染段：文档模型 → 像素（Skia，从文档渲染，绝不截屏预览画布）。
   - 编码段：像素 → 文件（当前为 Skia `encodeToBytes`，接口预留未来替换为平台原生编码实现）。
 - 导出使用 CPU offscreen surface，绕开 GPU 纹理尺寸限制。
-- 硬性尺寸上限：输出总像素 ≤ 64MP 且长边 ≤ 16384px；超限时按比例自动降级，并在导出预设语义中如实表述（"在上限内尽量保留"而非"保留原尺寸"）。
+- 硬性尺寸上限：输出总像素 ≤ 64MP 且长边 ≤ 16384px；超限时按比例自动降级，并在导出预设语义中如实表述为“在上限内尽量保留”。
 - 预览路径与导出路径分离：预览用低成本渲染（预览副本、屏幕分辨率），导出用全质量渲染（沙盒原图、目标分辨率）。
 
 ## 影响与代价
