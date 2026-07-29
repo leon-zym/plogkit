@@ -1,7 +1,9 @@
 # ADR 0008：导出预设数据驱动与 EXIF 策略
 
-- 状态：部分修订（2026-07-02 接受；见 [ADR 0023](0023-export-preset-catalog-and-pipeline.md)）
-- 关联：ADR 0007
+- 状态：部分修订
+- 接受日期：2026-07-02
+- 后继：[ADR 0023](0023-export-preset-catalog-and-pipeline.md)
+- 关联：[ADR 0007](0007-export-pipeline.md)、[F04](../specs/F04-export.md)
 
 ## 背景
 
@@ -13,7 +15,6 @@
 - 预设结构自带 `presetSchemaVersion`，与文档 schema 独立演进。
 - 具体平台参数后续定义，当前以占位预设起步（原始/社交/紧凑三档方向，见产品文档）；新增平台预设应当只是新增一条数据。
 - EXIF 策略：默认剥离全部 EXIF（含 GPS）；App 设置中提供全局开关，导出面板提供本次导出的临时开关；两级开关均可选择保留拍摄时间/设备信息。
-- 产品措辞纪律：不承诺预设能阻止平台上传后的二次压缩。
 
 ## 影响与代价
 

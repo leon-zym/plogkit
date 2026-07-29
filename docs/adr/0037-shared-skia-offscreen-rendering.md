@@ -1,7 +1,8 @@
 # ADR 0037：共享 Skia 离屏构图使用具体目标批次与内部资源所有权
 
-- 状态：已接受（2026-07-27）
-- 关联：ADR 0018、0023、0024、0035、[F04](../specs/F04-export.md)、[F08](../specs/F08-draft-library.md)
+- 状态：已接受
+- 接受日期：2026-07-27
+- 关联：[ADR 0018](0018-mvp-srgb-color-strategy.md)、[ADR 0023](0023-export-preset-catalog-and-pipeline.md)、[ADR 0024](0024-text-block-layout-geometry.md)、[ADR 0035](0035-draft-thumbnail-generation.md)、[F04](../specs/F04-export.md)、[F08](../specs/F08-draft-library.md)
 
 ## 背景
 
@@ -39,12 +40,12 @@ Skia export backend 继续拥有 `ResolvedExportPolicy`、capabilities、metadat
 
 不得由本 module 恢复 `RenderedPixels`、neutral RGBA buffer、外露 `SkImage`、standalone encoder 或 backend registry。未来 iOS HDR backend 可以使用原生 pixel buffer、色彩空间、gain map 与 encoder；未来 Live Photo backend 可以使用照片/视频资源对与 AVFoundation。二者都可以完全绕过本 renderer，并按 ADR 0023 在真实需求出现时扩展 backend 与 `PreparedExport`。
 
-未来 Live Photo 能力只适用于该能力上线后新导入、并按届时资产契约保留照片／视频资源对的素材。现有草稿继续遵循 F07 与 ADR 0009 的静帧语义，不补录、推测恢复或迁移已经丢弃的 paired video。本决策不修改统一文档 schema、catalog schema、Thumbnail `profileVersion` 或任何持久数据。
+本 renderer 是内部实现，不修改统一文档 schema、catalog schema、Thumbnail `profileVersion` 或其他持久数据。
 
 ## 影响与代价
 
 - 三条离屏路径通过更小 interface 获得完整构图、batch 复用和一致资源释放；修复绘制或 lifecycle 问题只需修改一处。
 - Thumbnail pair 只建立一次文字布局，并对每个 original asset 只解码一次；代价是生成当前两个小尺寸表示时同时持有两个 output surface。
 - 测试以 renderer interface 验证完整像素构图、batch 原子性、typed failure、取消和资源所有权；caller contract tests 只验证领域投影与错误映射，不保留低级 primitive 调用顺序测试。
-- 当前 golden、导出格式/质量/metadata、Thumbnail profile/geometry、持久 schema、Preview 和 F04/F08 用户可观察行为保持不变，因此无需数据迁移或 spec 修改。
+- 本决策不改变导出、缩略图或预览的产品契约，也不需要数据迁移。
 - Device Skia 与 CanvasKit 仍可能有运行时实现差异；差异由各自 adapter 吸收。若未来差异无法由薄 adapter 表达，应保留高层 renderer interface 并允许 adapter 采用不同 implementation，而不是向 caller 泄漏 Skia orchestration。

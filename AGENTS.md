@@ -1,149 +1,139 @@
 # AGENTS.md
 
-Guidance for AI coding agents working on PlogKit.
+Project development rules for contributors and coding agents working on
+PlogKit.
 
-## Project Overview
+## Start here
 
-PlogKit is a lightweight, local-first mobile app for plog creators: add text,
-backgrounds, stitch photos, and export with social-friendly presets.
-It complements the system Photos app and deliberately excludes filters, beauty
-editing, AI generation, and cloud features.
+Start with the [documentation ownership map](docs/README.md), then read the
+owners relevant to the task. Update canonical documentation with the change
+instead of maintaining the same fact in multiple files.
 
-- Stack: React Native (Expo SDK 57, New Architecture) + TypeScript (strict) + Skia.
-  Expo has changed significantly over time — consult the versioned docs at
-  https://docs.expo.dev/versions/v57.0.0/ before writing Expo-related code.
-- State: Zustand document store; Reanimated shared values hold transient gesture
-  state only. The serializable document is the single source of truth (ADR 0003).
-- All significant decisions live in `docs/adr/` (one file per decision).
-  Product scope: `docs/product/`. Feature acceptance specs: `docs/specs/`.
+## Architecture
 
-## Language Policy (ADR 0014)
+PlogKit is a local-first React Native app built with Expo SDK 57, TypeScript
+strict mode, and Skia. Use the
+[versioned Expo documentation](https://docs.expo.dev/versions/v57.0.0/) for
+Expo APIs.
 
-- `docs/` (product, adr, specs, guides): **Chinese is authoritative.**
-- `README.md` (English) and `README.zh-Hans.md` (Chinese): bilingual pair —
-  when editing one, always update the other in the same change.
-- Code, comments, commit messages, and this file: English.
-- App UI strings: zh + en through the i18n layer; never hardcode copy.
+```text
+.
+├── src/
+│   ├── app/       Expo Router routes and application composition
+│   ├── core/      document model and platform-independent business rules
+│   ├── features/  feature UI and interaction orchestration
+│   ├── render/    document rendering shared by device and headless runtimes
+│   ├── services/  persistence, import, export, settings, and platform integration
+│   ├── ui/        shared UI primitives and theme
+│   └── i18n/      localized copy and resources
+├── e2e/           Maestro flows, fixtures, and platform-specific subflows
+├── scripts/e2e/   E2E orchestration and device preparation
+├── render-tests/  headless rendering integration and golden images
+└── plugins/       Expo config plugins
+```
 
-## Documentation Discipline
+The serializable document is the single source of truth. Render, persistence,
+undo, and export must consume that model rather than parallel UI state.
+`src/core/` must not import React or React Native. Shared rendering code must
+not depend on device-only APIs. Transient interaction state may stay outside the
+document while an interaction is active, but the completed change must commit
+to the document model.
 
-- Treat long-lived docs as contracts, not work logs. Do not copy issue/PR
-  background, incident evidence, root-cause narratives, patch mechanics, or
-  transient diagnostics into AGENTS.md, specs, guides, or ADRs. Distill only
-  the context needed to understand the durable contract.
-- Update a long-lived document only when its contract changes: ADRs record
-  durable decisions and trade-offs; specs record user-observable acceptance;
-  guides record current prerequisites, commands, and operating procedures;
-  AGENTS.md contains terse, enforceable agent rules. Keep implementation details
-  in code/tests and investigation history in issues, PRs, or artifacts.
-- Give each drift-prone fact one canonical owner. Other documents should link to
-  it or provide only the terse local context they need. When touching duplicated
-  guidance, consolidate it in scope; create a follow-up only when the remaining
-  duplication poses a concrete drift risk.
+## Development workflow
 
-## Architecture Map
+- Read the relevant docs, implementation, and tests before editing. Update the
+  affected spec before changing user-visible behavior. Record a durable
+  decision in a new ADR before implementing it; never rewrite an accepted ADR.
+- Define the smallest coherent change and its verification seam. Use TDD for
+  `src/core/`. Every bug fix needs a regression test that fails without the fix.
+- Implement the direct, typed solution. Run affected tests regularly and
+  `pnpm check` when broader static feedback is useful.
+- Update canonical docs and generated artifacts that changed with the code.
+- Follow the [testing strategy](docs/guides/testing-strategy.md) to choose
+  additional render or device verification. Run `pnpm verify` before
+  committing.
+- Review the final diff against the original request, affected specs, and
+  project standards. Then commit with a Conventional Commit message in English.
+  Work on a branch and open a non-draft PR when the change is ready for review.
 
-- `src/core/` — pure TypeScript, no React/RN imports: document model & schema
-  (versioned, with migrations), stitch layout math, undo stack, export presets.
-- `src/render/` — document → Skia element tree. Must work on-device AND in
-  Node headless (CanvasKit); keep it free of device-only APIs.
-- `src/features/` — editor UI, panels, gestures (commit to document on gesture end).
-- `src/services/` — draft persistence and imported-asset ownership,
-  current-session autosave, and export orchestration. Export backends own render
-  and encode responsibilities behind the pipeline seam.
-- `app/` — Expo Router routes.
-- `e2e/flows/` — cross-platform Maestro YAML flows, named after specs (e.g. `f01-add-text.yaml`).
-- `e2e/subflows/` — shared steps and narrowly scoped iOS/Android system-UI adapters.
+## Development standards
 
-## Commands
+- Prefer the smallest implementation that fully satisfies the current
+  contract. Do not add `any`, speculative abstractions, or generalized
+  machinery for hypothetical requirements.
+- Do not add speculative compatibility layers, fallback branches for
+  hypothetical states, or feature flags unless the user requests them or a
+  documented compatibility or recovery contract requires them.
+- Prefer mature best practices supported by the current stack. Before departing
+  from an established project pattern, explain the benefit and ask the
+  maintainer.
+- Comment non-obvious invariants, tradeoffs, and failure handling. Do not
+  narrate straightforward code.
+- Do not introduce dependencies, especially native dependencies, without
+  explicit maintainer approval.
+- Do not hand-edit generated `ios/` or `android/` directories. Change Expo app
+  config or config plugins, then run `pnpm prebuild`.
+- Released document schema changes require a version bump and migration. A
+  pre-release reset may omit migration only when an ADR authorizes discarding
+  unpublished data. Catalog schema changes also bump `catalogSchemaVersion`.
+- Every interactive element needs a `testID`, a localized accessibility label,
+  and the appropriate accessibility state.
+- Check the canonical [product scope](docs/product/product-scope.md) before
+  changing product boundaries or adding network behavior.
+- `docs/` is authoritative in Chinese. Code, comments, commit messages, and this
+  file use English. Keep `README.md` and `README.zh-Hans.md` semantically
+  aligned. App copy belongs in the i18n layer.
+- Never commit secrets, signing assets, or large binaries. Golden PNGs are
+  allowed.
+- Embedded fonts must use OFL. Icons and other embedded assets must use
+  MIT, Apache-2.0, or CC-BY. Do not embed GPL, AGPL, or non-commercial assets.
+  App code is GPL-3.0-only.
 
-- Install: `pnpm install`
-- Metro for an installed development build: `pnpm start`
-- Build and run: `pnpm ios` or `pnpm android`
-- Type check + lint: `pnpm check`
-- Unit/component tests: `pnpm test`
-- Rendering goldens: `pnpm test:render` (update with `-u` only after inspecting diffs)
-- E2E (dedicated iOS + Android devices): `pnpm e2e`
-- E2E (single platform): `pnpm e2e:ios` or `pnpm e2e:android`
-- Full verification: `pnpm verify`
+## Verification
 
-## Workflow
+Use the [testing strategy](docs/guides/testing-strategy.md) for test ownership,
+commands, CI gates, E2E scope, and failure handling. `pnpm verify` is the
+required pre-commit suite.
 
-- Spec first: when behavior changes, update `docs/specs/` scenarios before code.
-- TDD for `src/core`: write the failing test first.
-- Decision changes require a new ADR (never rewrite an accepted one) and an
-  update to `docs/adr/README.md` index in the same change.
-- Git: Conventional Commits in English (`feat:`, `fix:`, `docs:`, `test:`,
-  `refactor:`, `chore:`). After scaffold, all changes go through branch + PR
-  with green CI (ADR 0016). Run `pnpm verify` before committing.
-- Run the affected platform's full E2E for system-UI or platform-specific
-  behavior changes. Run full dual-platform E2E for native configuration,
-  persistence, export, or a critical cross-platform flow.
+## Pull requests
 
-## Code Style
+- Pushing commits and opening a non-draft PR starts the review cycle; it does
+  not complete the task. Report the submitted PR to the user, create a scheduled
+  follow-up for an interval appropriate to the expected CI and review latency,
+  then end the active run instead of waiting synchronously.
+- When the follow-up starts, remove the existing schedule if it remains
+  configured. Inspect merge conflicts, every required check on the latest head,
+  and all new or unresolved review threads.
+- Fix valid findings, rerun the required verification, push the follow-up
+  commit, and resolve threads whose concerns are addressed.
+- If a review comment is not valid, reply in the PR's main conversation with a
+  link to or quotation from the original comment and a specific explanation.
+  Do not place the disagreement reply inside the review thread; resolve that
+  thread after posting the explanation.
+- Report each follow-up result to the user. If checks or review are still
+  pending, create a new follow-up before ending the run. After every new push,
+  repeat the same cycle against the new head.
+- The task is complete only when the PR has no merge conflict, all required
+  checks pass on the latest head, and no new or unresolved review feedback
+  remains. Remove any remaining follow-up schedule, send the final report, and
+  stop. Report external blockers or repeated identical failures instead of
+  looping. Do not merge unless requested.
 
-- TypeScript strict. Never use `any`; prefer precise types and discriminated unions.
-- No premature abstraction, no defensive/compat code, no feature flags.
-- Comments: only for non-obvious intent or constraints; never narrate the code.
-- Every interactive element must have a `testID` and a sensible
-  `accessibilityLabel` (required for Maestro and real accessibility).
-
-## Testing Rules (details: docs/guides/testing-strategy.md)
-
-- Four verification layers: static checks → unit/component → headless Skia
-  goldens → Maestro E2E. GitHub Actions executes these layers as CI gates.
-- BDD as methodology, no Cucumber/Gherkin tooling. Test names describe behavior.
-- Golden updates require visually inspecting rendered output/diff images first;
-  never bulk-update goldens blindly. Goldens use bundled fonts only. Always
-  `dispose()` Skia surfaces/images in headless code.
-- Keep Maestro business flows cross-platform. Isolate system UI differences in
-  platform subflows; do not duplicate complete flows.
-- Test non-trivial pure E2E runner logic with Node's built-in runner; validate
-  Maestro flow behavior on the affected target platform or platforms.
-- When E2E fails without a diagnosed cause, rerun the failing flow unchanged;
-  never add retries, sleeps, or longer timeouts merely to suppress flakiness.
-- E2E state assertions may read autosaved draft state from the app sandbox.
-  Export E2E asserts a new system Photos/MediaStore resource; pixel, format,
-  dimensions, and metadata belong to backend contract/headless tests. Do not
-  add test-only backdoors into app code.
-
-## Hard Boundaries
-
-- Never add: filters, beauty/retouch, AI generation, cloud sync, accounts,
-  telemetry, watermarks, or any network calls. The app is local-first.
-- Treat the "out of scope" lists in `docs/product/` as hard limits; do not
-  implement deferred features (share extension, HDR export, Live Photo export,
-  draft lists) without an explicit maintainer request plus a new ADR.
-- Never introduce a new dependency (especially native) without explicit approval.
-- Never hand-edit generated `ios/` and `android/` directories; use app config
-  and config plugins (CNG), then `pnpm expo prebuild --clean`.
-- Never commit secrets, signing assets, or large binaries (golden PNGs are OK).
-- Assets/fonts must permit commercial closed-source embedding: fonts OFL,
-  icons/other assets MIT/Apache-2.0/CC-BY. Never GPL/AGPL/NC-licensed assets
-  (ADR 0015). App code itself is GPL-3.0-only.
-- Released document schema changes require a `schemaVersion` bump plus a
-  migration. A pre-release baseline reset may omit migration only when an ADR
-  explicitly authorizes discarding all unpublished data. Catalog declaration
-  schema changes likewise bump `catalogSchemaVersion`.
-- Export invariants: render from the document model (never screenshot the
-  preview); respect per-preset caps (≤ 64MP total, ≤ 16384px long edge);
-  strip EXIF/GPS by default; the current export baseline is SDR-only until a
-  later ADR explicitly changes it (ADR 0007–0009, 0018).
-
-## Environment Notes
-
-See `docs/guides/dev-environment.md` for setup requirements and verified configurations.
+If scheduled follow-ups or task wake-ups are unavailable, keep the task active
+and monitor the PR with a background polling command. If background polling is
+also unavailable or unsuitable, report the limitation and ask the user to
+trigger the next check later. Do not claim completion while the PR is pending.
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Triage uses the five canonical labels without overrides. See `docs/agents/triage-labels.md`.
+The five canonical triage roles use their default label strings. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-This repository uses the single-context layout. See `docs/agents/domain.md`.
+This is a single-context repository with a root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

@@ -1,19 +1,20 @@
-# ADR 0017：Share Extension 延后至 v1.1，预留外部图片入口
+# ADR 0017：暂缓 Share Extension，保留来源无关的图片入口
 
-- 状态：已接受（2026-07-02）
-- 关联：ADR 0002、0006
+- 状态：已接受
+- 接受日期：2026-07-02
+- 关联：[ADR 0002](0002-expo-foundation.md)、[ADR 0006](0006-image-import-pipeline.md)
 
 ## 背景
 
-PlogKit 定位为系统相册的伴侣应用，用户在相册修完图后最自然的动作是"分享 → 发送到 PlogKit"直接进入编辑，而非切换应用后重新选图。Share Extension 是该定位的关键入口，但在 RN/Expo 中实现需要原生 extension target（社区有 `expo-share-intent` 等 config plugin 方案），有确定的实现成本。
+Share Extension 可以让系统相册把图片直接交给 PlogKit，但在 RN/Expo 中需要原生 extension target。该决定当时将实现排在 v1.1；版本排期不属于 ADR 的现行约束，当前产品范围以产品文档为准。同时，导入管线不应与系统照片选择器耦合。
 
 ## 决策
 
-- Share Extension 不进 MVP，列入 v1.1 roadmap。
-- MVP 架构预留"外部图片进入编辑流程"的通用入口：导入管线（ADR 0006）接受来源无关的图片输入，路由层预留外部启动参数的处理位置。
-- v1.1 实现时优先评估 `expo-share-intent` 类 config plugin 方案，保持 CNG 纪律（ADR 0002），届时新增 ADR。
+- 当前不实现 Share Extension，产品范围以 [`product-scope.md`](../product/product-scope.md) 为准。
+- 架构保留“外部图片进入编辑流程”的来源无关入口：导入管线（ADR 0006）接受来源无关的图片输入，不把系统照片选择器设为领域边界。
+- 以后引入 Share Extension 时，需要新增 ADR 决定原生 target、进程边界、持久化交接与 CNG 集成方式。
 
 ## 影响与代价
 
-- MVP 阶段用户只能从应用内选图进入，入口体验暂不完整。
-- 预留入口的抽象成本极低（导入函数不耦合图片来源），不构成过度设计。
+- 来源无关的导入边界避免未来新增来源时重写图片校验与草稿创建流程。
+- 当前仍需维护一个尚无第二调用方的 seam；其范围只覆盖输入来源，不提前实现原生 extension 或跨进程协议。
