@@ -1,7 +1,8 @@
 # ADR 0001：核心技术栈：React Native + Skia + TypeScript
 
-- 状态：已接受（2026-07-02）
-- 关联：ADR 0002、0007、0009
+- 状态：已接受
+- 接受日期：2026-07-02
+- 关联：[ADR 0002](0002-expo-foundation.md)、[ADR 0007](0007-export-pipeline.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)
 
 ## 背景
 
@@ -19,4 +20,3 @@ PlogKit 目标是 iOS 与 Android 双端的轻量 plog 工具（加字、背景�
 
 - Skia 提供跨端一致的渲染模型，且支持 Node 无头渲染，是测试策略（ADR 0011）的基础。
 - 纯 Skia 管线无法处理 Apple HDR 增益图与 Live Photo 动态资产，MVP 相应收缩（ADR 0009），导出编码段接口化预留原生实现的可能（ADR 0007）。
-- Skia Paragraph 的 emoji 排版存在已知问题（行高异常，上游 issue #3422），文本功能需在实现时评估规避。

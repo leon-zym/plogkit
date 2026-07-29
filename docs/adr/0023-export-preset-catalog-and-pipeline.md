@@ -1,8 +1,9 @@
 # ADR 0023：深化导出预设 catalog 与导出管线
 
-- 状态：已接受（2026-07-17）
-- 修订：ADR 0007、0008、0011
-- 关联：ADR 0003、0009、[F04](../specs/F04-export.md)
+- 状态：已接受
+- 接受日期：2026-07-17
+- 修订：[ADR 0007](0007-export-pipeline.md)、[ADR 0008](0008-export-presets-data-driven.md)、[ADR 0011](0011-testing-strategy.md)
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)、[F04](../specs/F04-export.md)
 
 ## 背景
 
@@ -28,8 +29,6 @@
 
 `ExportPresetId` 表示预设稳定的用户语义，`presetRevision` 表示该预设当前策略修订。同一目标与含义下调整参数保留 ID 并提升 revision；改变目标平台或用户语义时创建新 ID，绝不复用旧 ID。产品发布前本次重构直接建立新 baseline，不实现占位 ID 兼容或迁移；产品发布后，删除或重命名已发布 ID 时再明确设计迁移或退役策略，不提前保留 hidden preset。
 
-未来若确有 bundled declaration 以外的设备本地磁盘或用户文件来源，各来源 loader 只负责将输入校验并转换为同一种 snapshot，再在 bootstrap 或更新点原子替换；已经开始的导出持有一次解析完成的 `ResolvedExportPolicy`，不受中途更新影响。当前不实现这些 loader；输入来源保持在 snapshot 边界之外，新增来源不改变 resolver interface。该 snapshot 形状可作为未来花字等 catalog 的设计模式，但现在不抽取 generic catalog、通用 loader 或共享 adapter；第二个真实 catalog 出现后，才根据实际重复提取 manifest envelope、snapshot replacement 或完整性校验等基础设施，各领域 resolver 保持独立。
-
 导出的稳定 external seam 位于 `ExportPipeline` 与其 backend，而不是 render 与 encoder 之间的中立 pixel interface。`ExportPipeline.run()` 接收统一文档中的导出设置与草稿资产，在每次运行开始时使用当前 immutable catalog snapshot、源素材事实与 backend capabilities 调用 policy resolver，并在该次运行内持有一份 immutable `ResolvedExportPolicy`。UI 可以调用同一 resolver 预检，但 pipeline 对真实导出结果负责，不信任预检时的结果仍然有效。backend 只接收 resolved policy；pipeline 还负责 orchestration、destination、typed result 与诊断上下文。backend 内部仍保持 render 与 encode 两项清晰职责，但二者共享 backend-private 的 owned 中间产物，并由 backend 保证释放、色彩、格式和编码不变量。当前 Skia backend 可以直接使用 `SkImage` 完成 SDR 静态图渲染与编码，不为制造 seam 将 64MP 图像回读成额外 RGBA buffer。
 
 未来 HDR backend 可以使用原生 pixel buffer 与 gain map，Live Photo backend 可以使用帧序列及 AVFoundation 资源，而无需扩张一个所有 encoder 都必须理解的 `RenderedPixels` union。本决策删除 `RenderedPixels.encode()` 和名义上可独立替换、实际仍委托 Skia artifact 的浅 encode stage；它取代 ADR 0007 中“只替换 encoder implementation”的过强假设，但保留 document → render → encode → destination 的责任顺序与从文档渲染而非截屏的硬约束。
@@ -49,6 +48,5 @@ success 与已经解析到预设的 failure 诊断上下文携带 `presetId`、`
 ## 影响与代价
 
 - Policy resolver 仍可供 UI 预检，但真实导出的解析、backend 调用、Photos 发布与清理集中在 pipeline interface 后，caller 不掌握关键顺序。
-- Export Policy 必须先建立新的 document export settings baseline；Draft aggregate 随后作为本轮最终 document schema baseline，`ExportPipeline` 再依赖 Draft aggregate 提供稳定资产。
 - 以 backend 为真实 adapter seam 避免为单一 Skia 产物制造浅层 encoder interface，但也意味着未来引入原生 HDR 或 Live Photo backend 时需在各 backend implementation 内分别保持 render/encode 不变量。
 - Photos 发布不具备 exactly-once；用户在极窄的崩溃窗口后重试可能得到重复照片，这是不引入持久化导出历史与推测回滚所接受的代价。

@@ -1,7 +1,9 @@
 # ADR 0006：图片导入管线：沙盒拷贝 + 降采样预览
 
-- 状态：部分修订（2026-07-02 接受；见 [ADR 0022](0022-draft-aggregate-current-editing-session.md)）
-- 关联：ADR 0003、0007、0009、0017
+- 状态：部分修订
+- 接受日期：2026-07-02
+- 后继：[ADR 0022](0022-draft-aggregate-current-editing-session.md)
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0007](0007-export-pipeline.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)、[ADR 0017](0017-share-extension-deferred.md)、[F07](../specs/F07-image-import.md)
 
 ## 背景
 
@@ -14,20 +16,9 @@
 - 导出时按需逐张解码沙盒原图，绘制后立即释放，避免同时持有多张全分辨率位图。
 - Live Photo 在导入时取封面静帧（key photo）作为源素材（ADR 0009）。
 - iCloud 未下载资产：导入时请求下载并等待，超时向用户提示。
-- 导入入口抽象为"外部图片进入编辑流程"的通用通道，为 v1.1 的 Share Extension 预留（ADR 0017）。
-
-## 建议的沙盒结构
-
-```text
-projects/
-  current/
-    document.json
-    assets/          # 原图拷贝
-    previews/        # 降采样预览副本
-    preview.jpg      # 项目缩略图
-```
+- 导入入口抽象为“外部图片进入编辑流程”的来源无关通道，新增来源不改变导入管线的职责（ADR 0017）。
 
 ## 影响与代价
 
-- 沙盒拷贝带来存储占用翻倍（原图 + 预览），可接受；后续可加清理策略。
-- 该结构可平滑扩展为多项目草稿库，无需重设计数据模型。
+- 沙盒同时保存原图与预览，会增加存储占用，并需要明确的资产生命周期与清理策略。
+- 草稿身份、目录和资产所有权已由 [ADR 0022](0022-draft-aggregate-current-editing-session.md) 进一步定义。

@@ -1,7 +1,8 @@
 # ADR 0036：应用设置由进程级 module 权威持有并采用 durable-first 更新
 
-- 状态：已接受（2026-07-27）
-- 关联：ADR 0003、0017、[F09](../specs/F09-app-settings.md)、[Issue #48](https://github.com/leon-zym/plogkit/issues/48)
+- 状态：已接受
+- 接受日期：2026-07-27
+- 关联：[ADR 0003](0003-document-driven-architecture.md)、[F09](../specs/F09-app-settings.md)、[Issue #48](https://github.com/leon-zym/plogkit/issues/48)
 
 ## 背景
 

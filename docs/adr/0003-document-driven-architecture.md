@@ -1,7 +1,9 @@
 # ADR 0003：文档驱动的编辑器架构与统一文档模型
 
-- 状态：部分修订（2026-07-02 接受；见 [ADR 0022](0022-draft-aggregate-current-editing-session.md)）
-- 关联：ADR 0004、0007、0011
+- 状态：部分修订
+- 接受日期：2026-07-02
+- 后继：[ADR 0022](0022-draft-aggregate-current-editing-session.md)
+- 关联：[ADR 0004](0004-state-management-undo.md)、[ADR 0007](0007-export-pipeline.md)、[ADR 0011](0011-testing-strategy.md)
 
 ## 背景
 

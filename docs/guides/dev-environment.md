@@ -167,4 +167,4 @@ CI 触发条件和验证时机见[测试策略](testing-strategy.md)。E2E 编�
 
 Development build 只用于开发和测试，不能作为商店发布包。仓库当前没有配置生产签名、App Store Archive、Android App Bundle 或 EAS Build production profile。建立发布流程时应单独配置 Release 构建、签名、版本号和商店提交步骤。
 
-参考：[Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/)、[Expo DevClient](https://docs.expo.dev/versions/v57.0.0/sdk/dev-client/)、[Expo CLI](https://docs.expo.dev/more/expo-cli/)、[本地 App 开发](https://docs.expo.dev/guides/local-app-development/)、[Android Emulator 网络地址](https://developer.android.com/studio/run/emulator-networking-address)、[Node.js DNS](https://nodejs.org/api/dns.html)、[Android NDK 与 CMake](https://developer.android.com/studio/projects/install-ndk)。
+参考：[Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/)、[Expo DevClient](https://docs.expo.dev/versions/v57.0.0/sdk/dev-client/)、[Expo CLI](https://docs.expo.dev/more/expo-cli/)、[本地 App 开发](https://docs.expo.dev/guides/local-app-development/)、[Android Emulator 网络地址](https://developer.android.com/studio/run/emulator-networking-address)、[Android NDK 与 CMake](https://developer.android.com/studio/projects/install-ndk)。

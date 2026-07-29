@@ -2,37 +2,37 @@
 
 **A lightweight plog toolkit beyond your system Photos app.**
 
-[简体中文](README.zh-Hans.md)
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-Hans.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue.svg" alt="License: GPL-3.0-only" /></a>
+  <a href="https://docs.expo.dev/versions/v57.0.0/"><img src="https://img.shields.io/badge/Expo%20SDK-57-000020.svg?logo=expo&logoColor=white" alt="Expo SDK 57" /></a>
+  <a href="https://reactnative.dev/"><img src="https://img.shields.io/badge/React%20Native-0.86-61DAFB.svg?logo=react&logoColor=black" alt="React Native 0.86" /></a>
+  <a href="https://shopify.github.io/react-native-skia/"><img src="https://img.shields.io/badge/React%20Native%20Skia-2.6-4285F4.svg" alt="React Native Skia 2.6" /></a>
+</p>
 
 PlogKit is a lightweight mobile app for plog creators. It fills the gap between editing photos and publishing a plog, helping creators finish the last step faster. Photo adjustment and color tuning stay in the system Photos app; PlogKit focuses on a lightweight, direct finishing workflow.
 
-## Status
+## Project Status
 
 PlogKit is in pre-release development. The current version runs in iOS and Android simulator development builds. Production signing, physical-device release validation, and store distribution are not configured yet.
 
-## Features
+## Highlights
 
-The current version includes:
+Current highlights include:
 
-- Add text to images, with clean limited styles and long-text (CJK-first) layout support.
+- A local draft library for creating, browsing, reopening, and deleting work on this device.
+- Add text to images, with clean, restrained styles and Chinese-first long-text layout support.
 - Background colors.
 - Stitch multiple images vertically or in grid layouts.
 - Export JPEG or PNG with original, social, and compact presets.
-- Undo and redo, auto-saved editing session, and continue editing after export.
+- Undo and redo, autosave, and continued editing after export or app restart.
 
-## Roadmap
+## Product Scope
 
-Planned additions:
-
-- More platform-specific export presets.
-- A collage-style freeform canvas.
-- Share Extension.
-- HDR and wide-gamut preservation.
-- Live Photo support.
-
-Their implementation order will follow design and technical validation.
-
-Deliberately out of scope: beauty/retouch, filters, AI editing, general video editing, cloud sync, accounts, and template marketplaces. See `docs/product/` for the full boundary list.
+The authoritative current scope, confirmed directions, and hard boundaries are maintained in [`docs/product/product-scope.md`](docs/product/product-scope.md). User-observable behavior and delivery status are maintained in [`docs/specs/`](docs/specs/).
 
 ## Tech Stack
 
@@ -40,14 +40,19 @@ React Native (Expo, New Architecture) + Skia + TypeScript. The editor is documen
 
 ## Documentation
 
-Authoritative project documentation lives in [`docs/`](docs/) and is written in Chinese (see ADR 0014):
+Start with the canonical [`docs/README.md`](docs/README.md) navigation and ownership map. Authoritative project documentation under `docs/` is written in Chinese.
 
-- [`docs/product/`](docs/product/): positioning, current product scope, naming.
-- [`docs/adr/`](docs/adr/): architecture decision records with a decision ledger.
-- [`docs/specs/`](docs/specs/): BDD acceptance specs (Given/When/Then) per feature.
-- [`docs/guides/`](docs/guides/): design system, testing strategy, and development environment.
+## Development
 
-Agents working on this repository must follow [`AGENTS.md`](AGENTS.md).
+PlogKit's development baseline is macOS, Node.js 22, pnpm 11, and the native toolchain for the target platform.
+
+```bash
+pnpm install
+pnpm ios # or pnpm android
+pnpm verify
+```
+
+See the [development environment](docs/guides/dev-environment.md) and [testing strategy](docs/guides/testing-strategy.md) for complete setup and verification details. Project directory structure, development workflow, and guidelines are in [`AGENTS.md`](AGENTS.md).
 
 ## License
 

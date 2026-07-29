@@ -46,7 +46,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 - `clearState` 会重置应用数据。dev menu 的自动界面由项目 config plugin 禁用，避免干扰业务元素定位。
 - 本地与 CI 共用同一编排入口。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
-当可见界面不足以证明持久化结果时，通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
+当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
 ### 设备 readiness 与 flow 隔离
 

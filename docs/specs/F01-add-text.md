@@ -1,19 +1,11 @@
 # F01 为图片加字
 
 - 状态：已实现
-- 关联：[ADR 0003](../adr/0003-document-driven-architecture.md)、[ADR 0005](../adr/0005-text-editing-model.md)、[ADR 0024](../adr/0024-text-block-layout-geometry.md)
-- 实施跟踪：[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)
+- 关联：[ADR 0005](../adr/0005-text-editing-model.md)、[ADR 0024](../adr/0024-text-block-layout-geometry.md)
 
 ## 概述
 
 在文档画布上添加、编辑与摆放文本块。文本用于 plog 叙述，中文长段排版是一等公民。
-
-## 范围
-
-- 添加/编辑/删除文本块；一个文档支持多个文本块。
-- 字号、颜色、对齐（左/中/右）、行高；可选文本背景块。
-- 一小组预置文本样式（干净、克制）。
-- 拖动摆放（画布绝对坐标，可选锚定图块）。
 
 ## 非目标
 
@@ -26,9 +18,15 @@
 #### Scenario: 添加文本块
 
 - GIVEN 一个含至少一张图片的编辑会话
-- WHEN 用户点击"加字"并在输入面板输入「周末的海边日记」后确认
+- WHEN 用户点击「加字」并在输入面板输入「周末的海边日记」后确认
 - THEN 画布上出现渲染后的文本块，内容为「周末的海边日记」
-- AND 文档模型新增一个文本元素
+
+#### Scenario: 添加多个文本块
+
+- GIVEN 画布上已有一个文本块
+- WHEN 用户再次点击「加字」，输入另一段文字并确认
+- THEN 新旧文本块同时显示在画布上
+- AND 用户可以分别选中并编辑两个文本块
 
 #### Scenario: 编辑已有文本
 
@@ -40,20 +38,18 @@
 
 - GIVEN 画布上已有一个文本块
 - WHEN 用户进入编辑并清空内容后确认
-- THEN 该文本块从画布与文档模型中移除
+- THEN 该文本块从画布中移除
 
 ### 需求 2：中文长段排版
 
 #### Scenario: 长段中文自动换行
 
-- 状态：已实现（[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 用户在输入面板输入超过画布宽度的连续中文长段（≥100 字）
 - WHEN 用户确认提交
 - THEN 文本在文本块宽度内自动换行渲染，无字符截断或溢出画布
 
 #### Scenario: 显式换行
 
-- 状态：已实现（[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 用户在输入面板输入含显式换行符的文本（如 `第一行\n第二行\n第三行`）
 - WHEN 用户确认提交
 - THEN 画布上按换行符位置断行渲染
@@ -61,7 +57,6 @@
 
 #### Scenario: 中文与 emoji 及 fallback 字形混排
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 用户在输入面板输入含中文、emoji 和符号的混合文本（如 `🏖️ 周末海边 ☀️ 美好时光 😊`）
 - WHEN 用户确认提交
 - THEN 在 iOS 和 Android 上文本均完整渲染，emoji 不丢失、不截断
@@ -74,7 +69,21 @@
 - GIVEN 画布上已有选中的文本块
 - WHEN 用户将字号调大并选择新颜色
 - THEN 画布渲染即时反映新字号与颜色
-- AND 释放控件后文档模型记录一次提交（可撤销）
+- AND 点击一次撤销后恢复调整前的字号与颜色
+
+#### Scenario: 使用预置文本样式
+
+- GIVEN 画布上已有选中的文本块
+- WHEN 用户选择正文、标题或注释中的一种预置文本样式
+- THEN 文本按该样式显示
+- AND 用户仍可继续单独调整字号与行高
+
+#### Scenario: 修改对齐与行高
+
+- GIVEN 画布上已有选中的多行文本块
+- WHEN 用户修改文字对齐方式与行高
+- THEN 画布立即按新的对齐方式与行高显示全部文字
+- AND 点击一次撤销后恢复调整前的显示
 
 #### Scenario: 文本背景块
 
@@ -89,11 +98,10 @@
 - GIVEN 画布上已有一个文本块
 - WHEN 用户拖动该文本块到新位置并松手
 - THEN 文本块停留在新位置
-- AND 松手时文档模型记录一次位置提交（拖动过程不逐帧入档）
+- AND 点击一次撤销后回到本次拖动前的位置
 
 #### Scenario: 实际排版几何与命中一致
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 画布上有中文换行、显式换行或右对齐的可见文本块
 - WHEN 用户点击其可见字形附近并拖动
 - THEN 对应文本块被选中并随手势移动
@@ -101,7 +109,6 @@
 
 #### Scenario: 小文本兼顾触达与准确选中框
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)、[Issue #24](https://github.com/leon-zym/plogkit/issues/24)）
 - GIVEN 画布上有一个可见范围小于 44×44pt 的文本块
 - WHEN 用户点击围绕该文本的最小 44×44pt 触达区域
 - THEN 该文本块可以被选中
@@ -109,13 +116,7 @@
 
 #### Scenario: 重叠文本按可见层级命中
 
-- 状态：已实现（[Issue #13](https://github.com/leon-zym/plogkit/issues/13)）
-- GIVEN 两个文本块的 touch bounds 重叠
+- GIVEN 两个文本块的可点击区域重叠
 - WHEN 用户点击重叠区域
 - THEN 视觉上位于上层的文本块被选中
 - AND 选中或移动不改变文本块之间的可见层级
-
-## 已解决与后续观察
-
-- 当前预置样式为正文、标题、注释三档；字号与行高仍可单独调整。
-- 含 emoji 文本的行高表现继续作为上游兼容性观察项（ADR 0005），不扩展为装饰性字效系统。

@@ -1,8 +1,9 @@
 # ADR 0020：CI 生命周期与 main 分支门禁
 
-- 状态：已接受（2026-07-15）
-- 修订：ADR 0011、0019 中 PR 编译检查的平台范围、触发时机与 E2E 定时频率
-- 关联：ADR 0016、0019
+- 状态：已接受
+- 接受日期：2026-07-15
+- 修订：[ADR 0011](0011-testing-strategy.md)、[ADR 0019](0019-cross-platform-maestro-e2e.md) 中 PR 编译检查的平台范围、触发时机与 E2E 定时频率
+- 关联：[ADR 0016](0016-git-workflow.md)、[ADR 0019](0019-cross-platform-maestro-e2e.md)
 
 ## 背景
 
