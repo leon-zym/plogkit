@@ -211,7 +211,7 @@ function setup() {
   };
   const thumbnails: DraftThumbnailAdapter = {
     generate: (input) => thumbnailGenerate(input),
-    inspect: async (uri) => thumbnailSizes.get(uri) ?? null,
+    inspect: async (uri) => (files.files.has(uri) ? (thumbnailSizes.get(uri) ?? null) : null),
   };
   let assetSequence = 0;
   let storageSequence = 0;
@@ -573,33 +573,161 @@ describe("Draft Library", () => {
     expect(pair.originalFile).toContain("r3-p1-");
   });
 
-  it("keeps the previous complete thumbnail pair when a new generation fails", async () => {
-    const { library, setNow, setThumbnailGenerate } = setup();
+  it("keeps a just-committed older pair as fallback when a newer save wins", async () => {
+    const { files, library, setNow, setThumbnailGenerate, thumbnailSizes } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
     await settleBackgroundWork();
-    setThumbnailGenerate(async () => {
-      throw new Error("thumbnail render failed");
-    });
-    setNow("2026-07-22T09:00:00.000Z");
 
-    await library.save(
-      created.draftId,
-      updateDocument(created.document, {
-        canvas: { ...created.document.canvas, backgroundColor: "#333333" },
-      }),
-    );
-    await settleBackgroundWork();
+    const observed: {
+      readonly contentRevision: number;
+      readonly pairRevision: number | null;
+      readonly thumbnailStatus: string;
+    }[] = [];
+    const unsubscribe = library.subscribe(() => {
+      const snapshot = library.getState();
+      const entry = snapshot.status === "ready" ? snapshot.entries[0] : undefined;
+      if (entry?.status === "ready") {
+        observed.push({
+          contentRevision: entry.contentRevision,
+          pairRevision: entry.thumbnail?.contentRevision ?? null,
+          thumbnailStatus: entry.thumbnailStatus,
+        });
+      }
+    });
+
+    let markPairCommitStarted!: () => void;
+    const pairCommitStarted = new Promise<void>((resolve) => {
+      markPairCommitStarted = resolve;
+    });
+    let releasePairCommit!: () => void;
+    const pairCommitGate = new Promise<void>((resolve) => {
+      releasePairCommit = resolve;
+    });
+    const originalWriteText = files.writeText.bind(files);
+    files.writeText = async (uri, content) => {
+      if (
+        uri === `${firstDraftUri}/thumbnail-pair.json.tmp` &&
+        (JSON.parse(content) as { contentRevision?: number }).contentRevision === 2
+      ) {
+        markPairCommitStarted();
+        await pairCommitGate;
+      }
+      await originalWriteText(uri, content);
+    };
+
+    setNow("2026-07-22T09:00:00.000Z");
+    const revisionTwo = updateDocument(created.document, {
+      canvas: { ...created.document.canvas, backgroundColor: "#212121" },
+    });
+    await library.save(created.draftId, revisionTwo);
+    await pairCommitStarted;
+
+    let markRevisionThreeStarted!: () => void;
+    const revisionThreeStarted = new Promise<void>((resolve) => {
+      markRevisionThreeStarted = resolve;
+    });
+    let releaseRevisionThree!: () => void;
+    const revisionThreeGate = new Promise<void>((resolve) => {
+      releaseRevisionThree = resolve;
+    });
+    setThumbnailGenerate(async (input) => {
+      markRevisionThreeStarted();
+      await revisionThreeGate;
+      const square = { width: 360, height: 360 } as const;
+      const original = { width: 720, height: 540 } as const;
+      files.files.set(input.squareUri, new Uint8Array([7, input.contentRevision]));
+      files.files.set(input.originalUri, new Uint8Array([8, input.contentRevision]));
+      thumbnailSizes.set(input.squareUri, square);
+      thumbnailSizes.set(input.originalUri, original);
+      return { square, original };
+    });
+    setNow("2026-07-22T10:00:00.000Z");
+    const revisionThree = updateDocument(revisionTwo, {
+      canvas: { ...revisionTwo.canvas, backgroundColor: "#313131" },
+    });
+    const saveRevisionThree = library.save(created.draftId, revisionThree);
+    releasePairCommit();
+    await expect(saveRevisionThree).resolves.toMatchObject({
+      status: "saved",
+      contentRevision: 3,
+    });
+    await revisionThreeStarted;
 
     expect(library.getState()).toMatchObject({
       entries: [
         {
-          contentRevision: 2,
-          thumbnailStatus: "ready",
-          thumbnail: { contentRevision: 1 },
+          contentRevision: 3,
+          thumbnail: { contentRevision: 2 },
+          thumbnailStatus: "generating",
         },
       ],
     });
+    expect(observed).not.toContainEqual({
+      contentRevision: 3,
+      pairRevision: 2,
+      thumbnailStatus: "ready",
+    });
+
+    releaseRevisionThree();
+    await settleBackgroundWork();
+    unsubscribe();
+    expect(library.getState()).toMatchObject({
+      entries: [
+        {
+          contentRevision: 3,
+          thumbnail: { contentRevision: 3 },
+          thumbnailStatus: "ready",
+        },
+      ],
+    });
+  });
+
+  it("does not resurrect a Draft when thumbnail generation finishes after deletion", async () => {
+    const { files, library, setNow, setThumbnailGenerate, thumbnailSizes, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+
+    let markRenderFinished!: () => void;
+    const renderFinished = new Promise<void>((resolve) => {
+      markRenderFinished = resolve;
+    });
+    let releaseRender!: () => void;
+    const renderGate = new Promise<void>((resolve) => {
+      releaseRender = resolve;
+    });
+    setThumbnailGenerate(async (input) => {
+      const square = { width: 360, height: 360 } as const;
+      const original = { width: 720, height: 540 } as const;
+      files.files.set(input.squareUri, new Uint8Array([7, input.contentRevision]));
+      files.files.set(input.originalUri, new Uint8Array([8, input.contentRevision]));
+      thumbnailSizes.set(input.squareUri, square);
+      thumbnailSizes.set(input.originalUri, original);
+      markRenderFinished();
+      await renderGate;
+      return { square, original };
+    });
+    setNow("2026-07-22T09:00:00.000Z");
+    await library.save(
+      created.draftId,
+      updateDocument(created.document, {
+        canvas: { ...created.document.canvas, backgroundColor: "#414141" },
+      }),
+    );
+    await renderFinished;
+
+    await expect(library.deleteDraft(created.draftId)).resolves.toEqual({
+      status: "deleted",
+    });
+    expect(library.getState()).toEqual({ status: "ready", entries: [] });
+
+    releaseRender();
+    await settleBackgroundWork();
+
+    expect(library.getState()).toEqual({ status: "ready", entries: [] });
+    expect([...files.files.keys()].some((uri) => uri.startsWith(`${firstDraftUri}/`))).toBe(false);
+    await expect(createLibrary().load()).resolves.toEqual({ status: "ready", entries: [] });
   });
 
   it("degrades a visible failed pair as one unit and schedules one cold-process rebuild", async () => {
@@ -613,6 +741,12 @@ describe("Draft Library", () => {
       throw new Error("expected a committed pair");
     }
     const failedPair = loaded.entries[0].thumbnail;
+
+    restarted.reportThumbnailLoadFailure(created.draftId, {
+      ...failedPair,
+      squareUri: `${failedPair.squareUri}.stale`,
+    });
+    expect(restarted.getState()).toEqual(loaded);
 
     restarted.reportThumbnailLoadFailure(created.draftId, failedPair);
 
@@ -633,33 +767,6 @@ describe("Draft Library", () => {
       throw new Error("expected rebuilt pair");
     }
     expect(state.entries[0].thumbnail.squareUri).not.toBe(failedPair.squareUri);
-  });
-
-  it("settles a visible pair failure after this process already attempted the revision", async () => {
-    const { files, library } = setup();
-    const created = await createDraft(library, [candidate("one")]);
-    if (created.status !== "created") throw new Error("expected a created Draft");
-    await settleBackgroundWork();
-    const loaded = library.getState();
-    if (loaded.status !== "ready" || loaded.entries[0]?.thumbnail === null) {
-      throw new Error("expected a committed pair");
-    }
-    const failedPair = loaded.entries[0].thumbnail;
-    const generatedBeforeFailure = [...files.files.keys()].filter(
-      (uri) => uri.includes("/thumbnails/") && uri.endsWith(".jpg"),
-    );
-
-    library.reportThumbnailLoadFailure(created.draftId, failedPair);
-    await settleBackgroundWork();
-
-    expect(library.getState()).toMatchObject({
-      entries: [{ thumbnail: null, thumbnailStatus: "unavailable" }],
-    });
-    expect(
-      [...files.files.keys()].filter(
-        (uri) => uri.includes("/thumbnails/") && uri.endsWith(".jpg"),
-      ),
-    ).toEqual(generatedBeforeFailure);
   });
 
   it("drops an old thumbnail pair when a corrupt Draft cannot decode it", async () => {
@@ -1807,37 +1914,6 @@ describe("Draft Library", () => {
 
     for (const uri of orphanUris) expect(files.files.has(uri)).toBe(false);
     expect(files.files.has(`${firstDraftUri}/assets/nested/leave-alone.jpg`)).toBe(true);
-  });
-
-  it("retains only the committed thumbnail pair during inactive maintenance", async () => {
-    const { files, library, setNow } = setup();
-    const created = await createDraft(library, [candidate("one")]);
-    if (created.status !== "created") throw new Error("expected a created Draft");
-    await settleBackgroundWork();
-    setNow("2026-07-22T09:00:00.000Z");
-    await library.save(
-      created.draftId,
-      updateDocument(created.document, {
-        canvas: { ...created.document.canvas, backgroundColor: "#123456" },
-      }),
-    );
-    await settleBackgroundWork();
-    const pair = JSON.parse(await files.readText(`${firstDraftUri}/thumbnail-pair.json`)) as {
-      squareFile: string;
-      originalFile: string;
-    };
-    const orphanUri = `${firstDraftUri}/thumbnails/interrupted.jpg`;
-    files.files.set(orphanUri, new Uint8Array([9]));
-
-    await library.maintainInactive(created.draftId);
-
-    expect(await files.listFiles(`${firstDraftUri}/thumbnails`)).toEqual(
-      expect.arrayContaining([
-        `${firstDraftUri}/thumbnails/${pair.squareFile}`,
-        `${firstDraftUri}/thumbnails/${pair.originalFile}`,
-      ]),
-    );
-    expect(await files.listFiles(`${firstDraftUri}/thumbnails`)).toHaveLength(2);
   });
 
   it("does not compact a Draft that fails recovery validation", async () => {

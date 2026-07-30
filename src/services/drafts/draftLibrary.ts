@@ -14,6 +14,11 @@ import {
   type RecoverableFileState,
 } from "@/services/persistence/recoverableFile";
 
+import {
+  createDraftThumbnailLifecycle,
+  type DraftThumbnailAttemptSettlement,
+} from "./draftThumbnailLifecycle";
+
 export type ImportCandidateKind = "image" | "livePhoto" | "unsupported";
 
 export interface ImportCandidate {
@@ -292,27 +297,9 @@ interface DraftDeletionRecord {
   readonly draftId: DraftId;
 }
 
-interface DraftThumbnailPairRecord {
-  readonly thumbnailPairSchemaVersion: 1;
-  readonly draftId: DraftId;
-  readonly contentRevision: number;
-  readonly profileVersion: number;
-  readonly squareFile: string;
-  readonly originalFile: string;
-  readonly square: DraftThumbnailSize;
-  readonly original: DraftThumbnailSize;
-}
-
 interface ImportedStagedAsset {
   readonly entry: CatalogEntry;
   readonly image: SourceImage;
-}
-
-interface ThumbnailRequest {
-  readonly id: DraftId;
-  readonly root: DraftRootRecord;
-  readonly catalog: Catalog;
-  readonly uri: string;
 }
 
 type ValidatedAggregate =
@@ -590,63 +577,6 @@ function deletionJson(id: DraftId): string {
   return JSON.stringify({ deletionSchemaVersion: 1, draftId: id });
 }
 
-function parseThumbnailSize(value: unknown, label: string): DraftThumbnailSize {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} thumbnail size is invalid`);
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.width !== "number" ||
-    !Number.isInteger(record.width) ||
-    record.width <= 0 ||
-    typeof record.height !== "number" ||
-    !Number.isInteger(record.height) ||
-    record.height <= 0
-  ) {
-    throw new Error(`${label} thumbnail size is invalid`);
-  }
-  return Object.freeze({ width: record.width, height: record.height });
-}
-
-function parseThumbnailPairJson(json: string): DraftThumbnailPairRecord {
-  const input: unknown = JSON.parse(json);
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error("Draft thumbnail pair must be an object");
-  }
-  const record = input as Record<string, unknown>;
-  if (
-    record.thumbnailPairSchemaVersion !== 1 ||
-    typeof record.draftId !== "string" ||
-    typeof record.contentRevision !== "number" ||
-    !Number.isInteger(record.contentRevision) ||
-    record.contentRevision <= 0 ||
-    typeof record.profileVersion !== "number" ||
-    !Number.isInteger(record.profileVersion) ||
-    record.profileVersion <= 0 ||
-    typeof record.squareFile !== "string" ||
-    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.squareFile) ||
-    typeof record.originalFile !== "string" ||
-    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.originalFile) ||
-    record.squareFile === record.originalFile
-  ) {
-    throw new Error("Draft thumbnail pair schema is invalid");
-  }
-  return Object.freeze({
-    thumbnailPairSchemaVersion: 1,
-    draftId: draftId(record.draftId),
-    contentRevision: record.contentRevision,
-    profileVersion: record.profileVersion,
-    squareFile: record.squareFile,
-    originalFile: record.originalFile,
-    square: parseThumbnailSize(record.square, "square"),
-    original: parseThumbnailSize(record.original, "original"),
-  });
-}
-
-function thumbnailPairJson(record: DraftThumbnailPairRecord): string {
-  return JSON.stringify(record);
-}
-
 function readyListEntry(
   root: DraftRootRecord,
   thumbnail: DraftThumbnailPair | null = null,
@@ -756,9 +686,6 @@ export function createDraftLibrary({
   const draftOperationTails = new Map<DraftId, Promise<void>>();
   const confirmedDeletedIds = new Set<DraftId>();
   const unknownDeletionIds = new Set<DraftId>();
-  const runningThumbnailIds = new Set<DraftId>();
-  const pendingThumbnails = new Map<DraftId, ThumbnailRequest>();
-  const attemptedThumbnailRevisions = new Map<DraftId, Set<number>>();
   let state: DraftLibraryState = Object.freeze({ status: "uninitialized" });
   let loadPromise: Promise<DraftLibraryState> | null = null;
   const pendingReadyUpdates: ((
@@ -874,8 +801,6 @@ export function createDraftLibrary({
   };
 
   const draftUri = (id: DraftId): string => child(draftsUri, storageDraftName(id));
-  const draftThumbnailsUri = (id: DraftId): string => child(draftUri(id), "thumbnails");
-  const thumbnailPairUri = (id: DraftId): string => child(draftUri(id), "thumbnail-pair.json");
   const deletionMarkerUri = (id: DraftId): string =>
     child(deletionsUri, `${storageDraftName(id)}.json`);
 
@@ -908,30 +833,6 @@ export function createDraftLibrary({
       return "invalid";
     }
     return marker.draftId === id ? "valid" : "invalid";
-  };
-
-  const readCommittedThumbnailPair = async (
-    id: DraftId,
-    maximumRevision = Number.MAX_SAFE_INTEGER,
-  ): Promise<DraftThumbnailPair | null> => {
-    const pairUri = thumbnailPairUri(id);
-    const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
-    try {
-      if (!(await recoverFile(files, pairState)) || !(await files.fileExists(pairUri))) return null;
-      const record = parseThumbnailPairJson(await files.readText(pairUri));
-      if (record.draftId !== id || record.contentRevision > maximumRevision) return null;
-      const squareUri = child(draftThumbnailsUri(id), record.squareFile);
-      const originalUri = child(draftThumbnailsUri(id), record.originalFile);
-      if (!(await files.fileExists(squareUri)) || !(await files.fileExists(originalUri))) return null;
-      return Object.freeze({
-        contentRevision: record.contentRevision,
-        profileVersion: record.profileVersion,
-        squareUri,
-        originalUri,
-      });
-    } catch {
-      return null;
-    }
   };
 
   const stageCandidate = async (
@@ -1139,36 +1040,7 @@ export function createDraftLibrary({
       }
     }
 
-    const thumbnailsUri = draftThumbnailsUri(id);
-    let retainedThumbnailUris: ReadonlySet<string>;
-    try {
-      const pairUri = thumbnailPairUri(id);
-      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
-      const recovered = await recoverFile(files, pairState);
-      if (!recovered || !(await files.fileExists(pairUri))) {
-        retainedThumbnailUris = new Set();
-      } else {
-        const pair = parseThumbnailPairJson(await files.readText(pairUri));
-        if (pair.draftId !== id || pair.contentRevision > root.contentRevision) return;
-        retainedThumbnailUris = new Set([
-          child(thumbnailsUri, pair.squareFile),
-          child(thumbnailsUri, pair.originalFile),
-        ]);
-      }
-    } catch {
-      return;
-    }
-    let thumbnailCandidates: readonly string[];
-    try {
-      thumbnailCandidates = await files.listFiles(thumbnailsUri);
-    } catch {
-      return;
-    }
-    for (const candidate of thumbnailCandidates) {
-      if (isDirectChild(thumbnailsUri, candidate) && !retainedThumbnailUris.has(candidate)) {
-        await safeRemoveFile(candidate);
-      }
-    }
+    await thumbnailLifecycle.maintain(id, root.contentRevision);
   };
 
   const readUnserialized = async (id: DraftId): Promise<ReadDraftResult> => {
@@ -1180,176 +1052,83 @@ export function createDraftLibrary({
     return loadAggregate(id);
   };
 
-  const markThumbnailGenerationFinished = (
-    id: DraftId,
-    revision: number,
-    succeeded: boolean,
-  ): void => {
-    if (succeeded) return;
+  const settleThumbnailAttempt = (settlement: DraftThumbnailAttemptSettlement): void => {
     updateReadyEntries((entries) =>
-      entries.map((candidate) =>
-        candidate.draftId === id &&
-        candidate.status === "ready" &&
-        candidate.contentRevision === revision
-          ? Object.freeze({
-              ...candidate,
-              thumbnailStatus: candidate.thumbnail === null ? "unavailable" : "ready",
-            })
-          : candidate,
-      ),
+      entries.map((entry) => {
+        if (
+          entry.draftId !== settlement.draftId ||
+          entry.status !== "ready" ||
+          entry.contentRevision !== settlement.contentRevision
+        ) {
+          return entry;
+        }
+        if (settlement.status === "failed") {
+          return Object.freeze({
+            ...entry,
+            thumbnailStatus: entry.thumbnail === null ? "unavailable" : "ready",
+          });
+        }
+        return Object.freeze({
+          ...entry,
+          thumbnail: settlement.pair,
+          thumbnailStatus: "ready",
+        });
+      }),
     );
   };
 
-  const commitThumbnailPair = async (
-    request: ThumbnailRequest,
-    squareFile: string,
-    originalFile: string,
-    generated: { readonly square: DraftThumbnailSize; readonly original: DraftThumbnailSize },
-  ): Promise<boolean> => {
-    return serializeDraftOperation(request.id, async () => {
-      if (
-        confirmedDeletedIds.has(request.id) ||
-        (await inspectDeletionMarker(request.id)) === "valid" ||
-        (await inspectPublication(request.id)) !== "valid"
-      ) {
-        return false;
-      }
-      const validated = await validateAggregate(request.id);
-      if (
-        validated.status !== "valid" ||
-        validated.root.contentRevision !== request.root.contentRevision
-      ) {
-        return false;
-      }
-      const squareUri = child(draftThumbnailsUri(request.id), squareFile);
-      const originalUri = child(draftThumbnailsUri(request.id), originalFile);
-      const [square, original] = await Promise.all([
-        thumbnails.inspect(squareUri),
-        thumbnails.inspect(originalUri),
-      ]);
-      if (
-        square === null ||
-        original === null ||
-        square.width !== generated.square.width ||
-        square.height !== generated.square.height ||
-        original.width !== generated.original.width ||
-        original.height !== generated.original.height ||
-        square.width !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
-        square.height !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
-        Math.max(original.width, original.height) > DRAFT_THUMBNAIL_PROFILE.originalLongEdge
-      ) {
-        return false;
-      }
-      const record: DraftThumbnailPairRecord = Object.freeze({
-        thumbnailPairSchemaVersion: 1,
-        draftId: request.id,
-        contentRevision: request.root.contentRevision,
-        profileVersion: DRAFT_THUMBNAIL_PROFILE.profileVersion,
-        squareFile,
-        originalFile,
-        square,
-        original,
-      });
-      const pairUri = thumbnailPairUri(request.id);
-      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
-      const json = thumbnailPairJson(record);
-      await recoverFile(files, pairState);
-      await files.writeText(pairState.temporaryUri, json);
-      await commitPreparedFile(
-        files,
-        pairState,
-        async (currentUri) => (await files.readText(currentUri)) === json,
-      );
-      const pair = Object.freeze({
-        contentRevision: record.contentRevision,
-        profileVersion: record.profileVersion,
-        squareUri,
-        originalUri,
-      });
-      updateReadyEntries((entries) =>
-        entries.map((entry) =>
-          entry.draftId === request.id &&
-          entry.status === "ready" &&
-          entry.contentRevision >= pair.contentRevision
-            ? Object.freeze({ ...entry, thumbnail: pair, thumbnailStatus: "ready" })
-            : entry,
-        ),
-      );
-      return true;
-    });
-  };
-
-  const runThumbnailGeneration = async (request: ThumbnailRequest): Promise<void> => {
-    const attempted = attemptedThumbnailRevisions.get(request.id) ?? new Set<number>();
-    attempted.add(request.root.contentRevision);
-    attemptedThumbnailRevisions.set(request.id, attempted);
-    const generationId = assertStorageKey(createThumbnailGenerationId());
-    const prefix = `r${request.root.contentRevision}-p${DRAFT_THUMBNAIL_PROFILE.profileVersion}-${generationId}`;
-    const squareFile = `${prefix}-square.jpg`;
-    const originalFile = `${prefix}-original.jpg`;
-    const squareUri = child(draftThumbnailsUri(request.id), squareFile);
-    const originalUri = child(draftThumbnailsUri(request.id), originalFile);
-    let succeeded = false;
-    try {
-      const generated = await thumbnails.generate({
-        draftId: request.id,
-        contentRevision: request.root.contentRevision,
-        document: request.root.document,
-        assets: createCatalogSnapshot(request.id, request.uri, request.catalog),
-        profile: DRAFT_THUMBNAIL_PROFILE,
-        squareUri,
-        originalUri,
-      });
-      succeeded = await commitThumbnailPair(
-        request,
-        squareFile,
-        originalFile,
-        generated,
-      );
-    } catch {
-      succeeded = false;
-    } finally {
-      markThumbnailGenerationFinished(request.id, request.root.contentRevision, succeeded);
-      runningThumbnailIds.delete(request.id);
-      const pending = pendingThumbnails.get(request.id);
-      pendingThumbnails.delete(request.id);
-      if (pending !== undefined) queueThumbnail(pending);
-    }
-  };
-
-  const queueThumbnail = (request: ThumbnailRequest): void => {
-    const attempted = attemptedThumbnailRevisions.get(request.id);
-    if (attempted?.has(request.root.contentRevision) === true) return;
-    if (runningThumbnailIds.has(request.id)) {
-      const pending = pendingThumbnails.get(request.id);
-      if (pending === undefined || pending.root.contentRevision < request.root.contentRevision) {
-        pendingThumbnails.set(request.id, request);
-      }
-      return;
-    }
-    runningThumbnailIds.add(request.id);
-    void runThumbnailGeneration(request);
-  };
-
-  const scheduleThumbnailFromDisk = async (id: DraftId): Promise<void> => {
-    try {
-      const request = await serializeDraftOperation(
-        id,
-        async (): Promise<ThumbnailRequest | null> => {
-          if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") {
+  const thumbnailLifecycle = createDraftThumbnailLifecycle({
+    files,
+    thumbnails,
+    profile: DRAFT_THUMBNAIL_PROFILE,
+    draftUriFor: draftUri,
+    createGenerationId: createThumbnailGenerationId,
+    host: {
+      capture: (id, exactRevision) =>
+        serializeDraftOperation(id, async () => {
+          if (
+            confirmedDeletedIds.has(id) ||
+            unknownDeletionIds.has(id) ||
+            (await inspectDeletionMarker(id)) === "valid" ||
+            (await inspectPublication(id)) !== "valid"
+          ) {
             return null;
           }
           const validated = await validateAggregate(id);
-          return validated.status === "valid"
-            ? { id, root: validated.root, catalog: validated.catalog, uri: validated.uri }
-            : null;
-        },
-      );
-      if (request !== null) queueThumbnail(request);
-    } catch {
-      // Derived thumbnail scheduling never changes the reliable Draft snapshot.
-    }
-  };
+          if (validated.status !== "valid" || validated.root.contentRevision !== exactRevision) {
+            return null;
+          }
+          return {
+            document: validated.root.document,
+            assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
+          };
+        }),
+      commitPairIfCurrent: (id, exactRevision, commitPair) =>
+        serializeDraftOperation(id, async () => {
+          if (
+            confirmedDeletedIds.has(id) ||
+            unknownDeletionIds.has(id) ||
+            (await inspectDeletionMarker(id)) === "valid" ||
+            (await inspectPublication(id)) !== "valid"
+          ) {
+            return { status: "stale" };
+          }
+          const validated = await validateAggregate(id);
+          if (validated.status !== "valid" || validated.root.contentRevision !== exactRevision) {
+            return { status: "stale" };
+          }
+          const pair = await commitPair();
+          settleThumbnailAttempt({
+            draftId: id,
+            contentRevision: exactRevision,
+            status: "committed",
+            pair,
+          });
+          return { status: "committed" };
+        }),
+      onAttemptFailed: settleThumbnailAttempt,
+    },
+  });
 
   const create = async (
     candidates: readonly ImportCandidate[],
@@ -1508,7 +1287,10 @@ export function createDraftLibrary({
             ? entries
             : [...entries, readyListEntry(root)],
         );
-        queueThumbnail({ id, root, catalog, uri: publishedUri });
+        thumbnailLifecycle.request(id, root.contentRevision, {
+          document: root.document,
+          assets: createCatalogSnapshot(id, publishedUri, catalog),
+        });
         await finishStagingOperation(operationUri);
         return {
           status: "created",
@@ -1630,7 +1412,10 @@ export function createDraftLibrary({
           ),
         ];
       });
-      queueThumbnail({ id, root: nextRoot, catalog: validated.catalog, uri: validated.uri });
+      thumbnailLifecycle.request(id, nextRoot.contentRevision, {
+        document: nextRoot.document,
+        assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
+      });
       return {
         status: "saved",
         document: prospective,
@@ -2007,8 +1792,7 @@ export function createDraftLibrary({
       );
       return;
     }
-    const canSchedule =
-      attemptedThumbnailRevisions.get(id)?.has(entry.contentRevision) !== true;
+    const canSchedule = thumbnailLifecycle.request(id, entry.contentRevision);
     updateReadyEntries((entries) =>
       entries.map((candidate) =>
         candidate.draftId === id && candidate.status === "ready"
@@ -2020,7 +1804,6 @@ export function createDraftLibrary({
           : candidate,
       ),
     );
-    if (canSchedule) void scheduleThumbnailFromDisk(id);
   };
 
   const inspectDraftForList = async (
@@ -2035,7 +1818,7 @@ export function createDraftLibrary({
     }
     const validated = await validateAggregate(id);
     if (validated.status === "valid") {
-      const thumbnail = await readCommittedThumbnailPair(
+      const thumbnail = await thumbnailLifecycle.inspect(
         id,
         validated.root.contentRevision,
       );
@@ -2055,7 +1838,7 @@ export function createDraftLibrary({
       updatedAt: validated.root?.metadata.updatedAt ?? null,
       photoCount: validated.root?.document.sourceImages.length ?? null,
       reason: validated.reason,
-      thumbnail: await readCommittedThumbnailPair(
+      thumbnail: await thumbnailLifecycle.inspect(
         id,
         validated.root?.contentRevision ?? Number.MAX_SAFE_INTEGER,
       ),
@@ -2124,7 +1907,7 @@ export function createDraftLibrary({
         if (ready.status === "ready") {
           for (const entry of ready.entries) {
             if (entry.status === "ready" && entry.thumbnailStatus !== "ready") {
-              void scheduleThumbnailFromDisk(entry.draftId);
+              thumbnailLifecycle.request(entry.draftId, entry.contentRevision);
             }
           }
         }
