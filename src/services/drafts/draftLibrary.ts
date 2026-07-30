@@ -836,14 +836,6 @@ export function createDraftLibrary({
     }
   };
 
-  const originalFileExists = async (uri: string): Promise<boolean> => {
-    try {
-      return await files.fileExists(uri);
-    } catch {
-      return false;
-    }
-  };
-
   const initialize = (): Promise<void> => {
     initializePromise ??= (async () => {
       try {
@@ -1783,9 +1775,19 @@ export function createDraftLibrary({
       return { status: "preview-failed", reason: loaded.reason };
     }
     const uri = draftUri(id);
+    let catalogText: string;
+    try {
+      catalogText = await files.readText(child(uri, "catalog.json"));
+    } catch (error: unknown) {
+      return {
+        status: "preview-failed",
+        reason: "storage-unavailable",
+        message: errorMessage(error),
+      };
+    }
     let catalog: Catalog;
     try {
-      catalog = parseCatalog(await files.readText(child(uri, "catalog.json")));
+      catalog = parseCatalog(catalogText);
     } catch (error: unknown) {
       return {
         status: "preview-failed",
@@ -1799,9 +1801,20 @@ export function createDraftLibrary({
     }
     const originalUri = descriptorUri(uri, entry, "original");
     const previewUri = descriptorUri(uri, entry, "preview");
-    if (originalUri === null || !(await originalFileExists(originalUri))) {
+    if (originalUri === null) {
       return { status: "preview-failed", reason: "original-missing" };
     }
+    let originalExists: boolean;
+    try {
+      originalExists = await files.fileExists(originalUri);
+    } catch (error: unknown) {
+      return {
+        status: "preview-failed",
+        reason: "storage-unavailable",
+        message: errorMessage(error),
+      };
+    }
+    if (!originalExists) return { status: "preview-failed", reason: "original-missing" };
     if (previewUri === null) {
       return { status: "preview-failed", reason: "preview-unavailable" };
     }

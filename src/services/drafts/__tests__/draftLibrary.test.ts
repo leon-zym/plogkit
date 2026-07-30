@@ -20,13 +20,24 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   failMoveDirectoryAfterPartialTo: string | null = null;
   failEnsureDirectory: string | null = null;
   failFileExists: string | null = null;
+  failFileExistsAfter:
+    | { readonly uri: string; remainingSuccessfulCalls: number }
+    | null = null;
   failReadText: string | null = null;
+  failReadTextAfter: { readonly uri: string; remainingSuccessfulCalls: number } | null = null;
   failWriteText: string | null = null;
   failWriteAfterCommit: string | null = null;
   failListDirectories: string | null = null;
 
   async fileExists(uri: string): Promise<boolean> {
     if (this.failFileExists === uri) throw new Error("wrong filesystem node");
+    if (this.failFileExistsAfter?.uri === uri) {
+      if (this.failFileExistsAfter.remainingSuccessfulCalls === 0) {
+        this.failFileExistsAfter = null;
+        throw new Error("file existence temporarily unavailable");
+      }
+      this.failFileExistsAfter.remainingSuccessfulCalls -= 1;
+    }
     return this.files.has(uri);
   }
 
@@ -41,6 +52,13 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
 
   async readText(uri: string): Promise<string> {
     if (this.failReadText === uri) throw new Error("text read temporarily unavailable");
+    if (this.failReadTextAfter?.uri === uri) {
+      if (this.failReadTextAfter.remainingSuccessfulCalls === 0) {
+        this.failReadTextAfter = null;
+        throw new Error("text read temporarily unavailable");
+      }
+      this.failReadTextAfter.remainingSuccessfulCalls -= 1;
+    }
     const value = this.files.get(uri);
     if (typeof value !== "string") throw new Error(`missing text ${uri}`);
     return value;
@@ -1492,6 +1510,42 @@ describe("Draft Library", () => {
       reason: "storage-failed",
     });
     await expect(library.readPreview(created.draftId, image.id)).resolves.toEqual({
+      status: "preview-failed",
+      reason: "storage-unavailable",
+    });
+  });
+
+  it("keeps a late catalog I/O failure distinct from corruption while reading a preview", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const image = created.document.sourceImages[0]!;
+    files.failReadTextAfter = {
+      uri: `${firstDraftUri}/catalog.json`,
+      remainingSuccessfulCalls: 2,
+    };
+
+    await expect(library.readPreview(created.draftId, image.id)).resolves.toMatchObject({
+      status: "preview-failed",
+      reason: "storage-unavailable",
+    });
+  });
+
+  it("keeps a late original probe failure distinct from a missing original", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const image = created.document.sourceImages[0]!;
+    const original = created.assets.resolve(image.id, "original");
+    if (original === null) throw new Error("expected an original descriptor");
+    files.failFileExistsAfter = {
+      uri: original.uri,
+      remainingSuccessfulCalls: 1,
+    };
+
+    await expect(library.readPreview(created.draftId, image.id)).resolves.toMatchObject({
       status: "preview-failed",
       reason: "storage-unavailable",
     });
