@@ -1,14 +1,20 @@
-import type { PlogDocument } from "@/core/document";
+import {
+  cloneDocument,
+  type ImportedAssetId,
+  type PlogDocument,
+} from "@/core/document";
 import {
   commitPreparedFile,
   recoverFile,
+  type RecoverableFileAdapter,
   type RecoverableFileState,
 } from "@/services/persistence/recoverableFile";
 
 import type {
+  AssetDescriptor,
   AssetCatalogSnapshot,
+  AssetUsage,
   DraftId,
-  DraftLibraryFileAdapter,
   DraftThumbnailAdapter,
   DraftThumbnailPair,
   DraftThumbnailProfile,
@@ -44,6 +50,17 @@ export type DraftThumbnailAttemptSettlement =
       readonly status: "failed";
     };
 
+export type DraftThumbnailRequestDisposition =
+  | "scheduled"
+  | "in-progress"
+  | "already-attempted";
+
+export interface DraftThumbnailFileAdapter extends RecoverableFileAdapter {
+  readonly readText: (uri: string) => Promise<string>;
+  readonly writeText: (uri: string, content: string) => Promise<void>;
+  readonly listFiles: (uri: string) => Promise<readonly string[]>;
+}
+
 export interface DraftThumbnailLifecycleHost {
   /** Captures a trusted source through the shared same-Draft gate. */
   readonly capture: (id: DraftId, exactRevision: number) => Promise<DraftThumbnailSource | null>;
@@ -54,24 +71,29 @@ export interface DraftThumbnailLifecycleHost {
   readonly commitPairIfCurrent: (
     id: DraftId,
     exactRevision: number,
+    source: DraftThumbnailSource,
     commitPair: () => Promise<DraftThumbnailPair>,
   ) => Promise<{ readonly status: "committed" } | { readonly status: "stale" }>;
   /** Reports a failed or stale attempt without reading host state. */
   readonly onAttemptFailed: (
     failure: Extract<DraftThumbnailAttemptSettlement, { readonly status: "failed" }>,
   ) => void;
+  /** Removes an empty aggregate recreated by a discarded attempt after confirmed deletion. */
+  readonly cleanupDiscardedGeneration: (id: DraftId) => Promise<void>;
 }
 
 export interface DraftThumbnailLifecycle {
   readonly inspect: (id: DraftId, maximumRevision?: number) => Promise<DraftThumbnailPair | null>;
   /**
-   * Returns true when this process accepted the revision as running or pending work.
+   * A supplied source must have been captured by the host while it owned the
+   * shared same-Draft gate for this exact committed revision. The lifecycle
+   * snapshots it before returning so pending work cannot observe caller mutation.
    */
   readonly request: (
     id: DraftId,
     contentRevision: number,
     source?: DraftThumbnailSource,
-  ) => boolean;
+  ) => DraftThumbnailRequestDisposition;
   /**
    * The caller already owns the shared same-Draft operation gate.
    */
@@ -79,7 +101,7 @@ export interface DraftThumbnailLifecycle {
 }
 
 export interface CreateDraftThumbnailLifecycleOptions {
-  readonly files: DraftLibraryFileAdapter;
+  readonly files: DraftThumbnailFileAdapter;
   readonly thumbnails: DraftThumbnailAdapter;
   readonly profile: DraftThumbnailProfile;
   readonly draftUriFor: (id: DraftId) => string;
@@ -143,6 +165,7 @@ function parseThumbnailPairJson(json: string): DraftThumbnailPairRecord {
   if (
     record.thumbnailPairSchemaVersion !== 1 ||
     typeof record.draftId !== "string" ||
+    record.draftId.length === 0 ||
     typeof record.contentRevision !== "number" ||
     !Number.isInteger(record.contentRevision) ||
     record.contentRevision <= 0 ||
@@ -169,24 +192,6 @@ function parseThumbnailPairJson(json: string): DraftThumbnailPairRecord {
   });
 }
 
-function textFileState(files: DraftLibraryFileAdapter, currentUri: string): RecoverableFileState {
-  return {
-    currentUri,
-    backupUri: `${currentUri}.backup`,
-    temporaryUri: `${currentUri}.tmp`,
-    isValid: async (uri) => {
-      if (!(await files.fileExists(uri))) return false;
-      const text = await files.readText(uri);
-      try {
-        parseThumbnailPairJson(text);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  };
-}
-
 function thumbnailUris(draftUri: string): {
   readonly directoryUri: string;
   readonly pairUri: string;
@@ -209,6 +214,36 @@ function pairFromRecord(
   });
 }
 
+function thumbnailPairState(
+  files: DraftThumbnailFileAdapter,
+  id: DraftId,
+  maximumRevision: number,
+  directoryUri: string,
+  pairUri: string,
+): RecoverableFileState {
+  return {
+    currentUri: pairUri,
+    backupUri: `${pairUri}.backup`,
+    temporaryUri: `${pairUri}.tmp`,
+    isValid: async (uri) => {
+      if (!(await files.fileExists(uri))) return false;
+      const json = await files.readText(uri);
+      let record: DraftThumbnailPairRecord;
+      try {
+        record = parseThumbnailPairJson(json);
+      } catch {
+        return false;
+      }
+      if (record.draftId !== id || record.contentRevision > maximumRevision) return false;
+      const pair = pairFromRecord(directoryUri, record);
+      return (
+        (await files.fileExists(pair.squareUri)) &&
+        (await files.fileExists(pair.originalUri))
+      );
+    },
+  };
+}
+
 function isPositiveSize(size: DraftThumbnailSize): boolean {
   return (
     Number.isInteger(size.width) &&
@@ -216,6 +251,34 @@ function isPositiveSize(size: DraftThumbnailSize): boolean {
     Number.isInteger(size.height) &&
     size.height > 0
   );
+}
+
+const ASSET_USAGES: readonly AssetUsage[] = ["preview", "original", "metadata"];
+
+function snapshotSource(source: DraftThumbnailSource): DraftThumbnailSource {
+  const entries = Object.freeze([...source.assets.entries]);
+  const descriptors = new Map<string, ReadonlyMap<AssetUsage, AssetDescriptor | null>>(
+    entries.map((assetId) => [
+      assetId,
+      new Map(
+        ASSET_USAGES.map((usage) => {
+          const descriptor = source.assets.resolve(assetId, usage);
+          return [
+            usage,
+            descriptor === null ? null : Object.freeze({ ...descriptor }),
+          ] as const;
+        }),
+      ),
+    ]),
+  );
+  return Object.freeze({
+    document: cloneDocument(source.document),
+    assets: Object.freeze({
+      entries,
+      resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
+        descriptors.get(assetId)?.get(usage) ?? null,
+    }),
+  });
 }
 
 export function createDraftThumbnailLifecycle({
@@ -229,13 +292,20 @@ export function createDraftThumbnailLifecycle({
   const running = new Map<DraftId, RunningAttempt>();
   const pending = new Map<DraftId, PendingAttempt>();
   const attempted = new Map<DraftId, Set<number>>();
+  const maintaining = new Set<DraftId>();
 
   const inspect = async (
     id: DraftId,
     maximumRevision = Number.MAX_SAFE_INTEGER,
   ): Promise<DraftThumbnailPair | null> => {
     const { directoryUri, pairUri } = thumbnailUris(draftUriFor(id));
-    const pairState = textFileState(files, pairUri);
+    const pairState = thumbnailPairState(
+      files,
+      id,
+      maximumRevision,
+      directoryUri,
+      pairUri,
+    );
     try {
       if (!(await recoverFile(files, pairState)) || !(await files.fileExists(pairUri))) {
         return null;
@@ -255,7 +325,7 @@ export function createDraftThumbnailLifecycle({
     }
   };
 
-  const maintain = async (id: DraftId, maximumRevision: number): Promise<void> => {
+  const maintainFiles = async (id: DraftId, maximumRevision: number): Promise<void> => {
     const { directoryUri, pairUri } = thumbnailUris(draftUriFor(id));
     const retained = new Set<string>();
     const active = running.get(id);
@@ -265,8 +335,15 @@ export function createDraftThumbnailLifecycle({
     }
 
     try {
-      const pairState = textFileState(files, pairUri);
+      const pairState = thumbnailPairState(
+        files,
+        id,
+        maximumRevision,
+        directoryUri,
+        pairUri,
+      );
       const recovered = await recoverFile(files, pairState);
+      if (!recovered && (await files.fileExists(pairUri))) return;
       if (recovered && (await files.fileExists(pairUri))) {
         const record = parseThumbnailPairJson(await files.readText(pairUri));
         if (record.draftId !== id || record.contentRevision > maximumRevision) return;
@@ -341,7 +418,13 @@ export function createDraftThumbnailLifecycle({
       square,
       original,
     });
-    const pairState = textFileState(files, pairUri);
+    const pairState = thumbnailPairState(
+      files,
+      id,
+      contentRevision,
+      directoryUri,
+      pairUri,
+    );
     const json = JSON.stringify(record);
     await recoverFile(files, pairState);
     await files.writeText(pairState.temporaryUri, json);
@@ -353,11 +436,29 @@ export function createDraftThumbnailLifecycle({
     return pairFromRecord(directoryUri, record);
   };
 
-  const start = (
+  const discardGeneratedFiles = async (
+    id: DraftId,
+    attempt: RunningAttempt,
+  ): Promise<void> => {
+    for (const uri of [attempt.squareUri, attempt.originalUri]) {
+      try {
+        await files.removeFile(uri);
+      } catch {
+        // A later inactive maintenance pass can retry derived orphan cleanup.
+      }
+    }
+    try {
+      await host.cleanupDiscardedGeneration(id);
+    } catch {
+      // Reliable deletion state is owned by the host; cleanup remains best effort.
+    }
+  };
+
+  function start(
     id: DraftId,
     contentRevision: number,
     suppliedSource?: DraftThumbnailSource,
-  ): void => {
+  ): boolean {
     const revisions = attempted.get(id) ?? new Set<number>();
     revisions.add(contentRevision);
     attempted.set(id, revisions);
@@ -382,33 +483,43 @@ export function createDraftThumbnailLifecycle({
       } catch {
         // A malformed injected identity cannot let an observer fail the reliable Draft.
       }
-      return;
+      return false;
     }
 
     void (async () => {
       let committed = false;
+      let commitCallbackStarted = false;
+      let discardGenerated = false;
       try {
         const source = suppliedSource ?? (await host.capture(id, contentRevision));
         if (source !== null) {
-          const generated = await thumbnails.generate({
-            draftId: id,
-            contentRevision,
-            document: source.document,
-            assets: source.assets,
-            profile,
-            squareUri: attempt.squareUri,
-            originalUri: attempt.originalUri,
-          });
-          const outcome = await host.commitPairIfCurrent(id, contentRevision, () =>
-            publishPair(id, contentRevision, squareFile, originalFile, generated),
-          );
-          if (outcome.status === "committed") {
-            committed = true;
+          let generated: Awaited<ReturnType<DraftThumbnailAdapter["generate"]>>;
+          try {
+            generated = await thumbnails.generate({
+              draftId: id,
+              contentRevision,
+              document: source.document,
+              assets: source.assets,
+              profile,
+              squareUri: attempt.squareUri,
+              originalUri: attempt.originalUri,
+            });
+          } catch (error: unknown) {
+            discardGenerated = true;
+            throw error;
           }
+          const outcome = await host.commitPairIfCurrent(id, contentRevision, source, () => {
+            commitCallbackStarted = true;
+            return publishPair(id, contentRevision, squareFile, originalFile, generated);
+          });
+          committed = outcome.status === "committed";
+          if (!committed && !commitCallbackStarted) discardGenerated = true;
         }
       } catch {
+        if (!commitCallbackStarted) discardGenerated = true;
         // Thumbnails are derived data; a failed attempt cannot fail the reliable Draft.
       } finally {
+        if (discardGenerated) await discardGeneratedFiles(id, attempt);
         if (!committed) {
           try {
             host.onAttemptFailed({ draftId: id, contentRevision, status: "failed" });
@@ -417,32 +528,74 @@ export function createDraftThumbnailLifecycle({
           }
         }
         running.delete(id);
-        const next = pending.get(id);
-        pending.delete(id);
-        if (next !== undefined) start(id, next.contentRevision, next.source);
+        startNextPending(id);
       }
     })();
+    return true;
+  }
+
+  function startNextPending(id: DraftId): void {
+    if (running.has(id) || maintaining.has(id)) return;
+    const next = pending.get(id);
+    if (next === undefined) return;
+    pending.delete(id);
+    start(id, next.contentRevision, next.source);
+  }
+
+  const maintain = async (id: DraftId, maximumRevision: number): Promise<void> => {
+    maintaining.add(id);
+    try {
+      await maintainFiles(id, maximumRevision);
+    } finally {
+      maintaining.delete(id);
+      startNextPending(id);
+    }
   };
 
   const request = (
     id: DraftId,
     contentRevision: number,
     source?: DraftThumbnailSource,
-  ): boolean => {
-    if (attempted.get(id)?.has(contentRevision) === true) return false;
+  ): DraftThumbnailRequestDisposition => {
     const active = running.get(id);
-    if (active === undefined) {
-      start(id, contentRevision, source);
-      return true;
-    }
-    if (contentRevision <= active.contentRevision) return false;
     const pendingAttempt = pending.get(id);
-    if (pendingAttempt?.contentRevision === contentRevision) return true;
-    if (pendingAttempt !== undefined && contentRevision < pendingAttempt.contentRevision) {
-      return false;
+    if (
+      active?.contentRevision === contentRevision ||
+      pendingAttempt?.contentRevision === contentRevision
+    ) {
+      return "in-progress";
     }
-    pending.set(id, { contentRevision, ...(source === undefined ? {} : { source }) });
-    return true;
+    if (attempted.get(id)?.has(contentRevision) === true) return "already-attempted";
+    if (active !== undefined && contentRevision <= active.contentRevision) {
+      return "already-attempted";
+    }
+    if (pendingAttempt !== undefined && contentRevision < pendingAttempt.contentRevision) {
+      return "already-attempted";
+    }
+    let capturedSource: DraftThumbnailSource | undefined;
+    try {
+      capturedSource = source === undefined ? undefined : snapshotSource(source);
+    } catch {
+      const revisions = attempted.get(id) ?? new Set<number>();
+      revisions.add(contentRevision);
+      attempted.set(id, revisions);
+      try {
+        host.onAttemptFailed({ draftId: id, contentRevision, status: "failed" });
+      } catch {
+        // An invalid source and a failed observer still cannot fail the reliable Draft.
+      }
+      return "already-attempted";
+    }
+    if (active === undefined && !maintaining.has(id)) {
+      return start(id, contentRevision, capturedSource)
+        ? "scheduled"
+        : "already-attempted";
+    }
+    pending.set(id, {
+      contentRevision,
+      ...(capturedSource === undefined ? {} : { source: capturedSource }),
+    });
+    return "scheduled";
   };
 
   return { inspect, request, maintain };

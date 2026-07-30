@@ -17,6 +17,7 @@ import {
 import {
   createDraftThumbnailLifecycle,
   type DraftThumbnailAttemptSettlement,
+  type DraftThumbnailSource,
 } from "./draftThumbnailLifecycle";
 
 export type ImportCandidateKind = "image" | "livePhoto" | "unsupported";
@@ -662,6 +663,38 @@ function createCatalogSnapshot(
   });
 }
 
+function sameAssetDescriptor(
+  left: AssetDescriptor | null,
+  right: AssetDescriptor | null,
+): boolean {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.draftId === right.draftId &&
+      left.assetId === right.assetId &&
+      left.usage === right.usage &&
+      left.uri === right.uri)
+  );
+}
+
+function isCurrentThumbnailSource(
+  source: DraftThumbnailSource,
+  id: DraftId,
+  uri: string,
+  root: DraftRootRecord,
+  catalog: Catalog,
+): boolean {
+  if (JSON.stringify(source.document) !== JSON.stringify(root.document)) return false;
+  const current = createCatalogSnapshot(id, uri, catalog);
+  return source.document.sourceImages.every((image) =>
+    sameAssetDescriptor(
+      source.assets.resolve(image.id, "original"),
+      current.resolve(image.id, "original"),
+    ),
+  );
+}
+
 function sourceImage(entry: CatalogEntry): SourceImage {
   return Object.freeze({ id: entry.id, width: entry.width, height: entry.height });
 }
@@ -833,6 +866,17 @@ export function createDraftLibrary({
       return "invalid";
     }
     return marker.draftId === id ? "valid" : "invalid";
+  };
+
+  const cleanupDeletedDraft = async (id: DraftId): Promise<void> => {
+    await safeRemoveDirectory(draftUri(id));
+    try {
+      if (!(await files.directoryExists(draftUri(id)))) {
+        await safeRemoveFile(deletionMarkerUri(id));
+      }
+    } catch {
+      // Keep the marker until a later maintenance pass can prove the Draft directory is absent.
+    }
   };
 
   const stageCandidate = async (
@@ -1103,7 +1147,7 @@ export function createDraftLibrary({
             assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
           };
         }),
-      commitPairIfCurrent: (id, exactRevision, commitPair) =>
+      commitPairIfCurrent: (id, exactRevision, source, commitPair) =>
         serializeDraftOperation(id, async () => {
           if (
             confirmedDeletedIds.has(id) ||
@@ -1114,7 +1158,17 @@ export function createDraftLibrary({
             return { status: "stale" };
           }
           const validated = await validateAggregate(id);
-          if (validated.status !== "valid" || validated.root.contentRevision !== exactRevision) {
+          if (
+            validated.status !== "valid" ||
+            validated.root.contentRevision !== exactRevision ||
+            !isCurrentThumbnailSource(
+              source,
+              id,
+              validated.uri,
+              validated.root,
+              validated.catalog,
+            )
+          ) {
             return { status: "stale" };
           }
           const pair = await commitPair();
@@ -1127,6 +1181,10 @@ export function createDraftLibrary({
           return { status: "committed" };
         }),
       onAttemptFailed: settleThumbnailAttempt,
+      cleanupDiscardedGeneration: (id) =>
+        serializeDraftOperation(id, async () => {
+          if (confirmedDeletedIds.has(id)) await cleanupDeletedDraft(id);
+        }),
     },
   });
 
@@ -1250,7 +1308,7 @@ export function createDraftLibrary({
       await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors };
     }
-    return serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
+    const result = await serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
       let publicationStarted = false;
       let publicationCommitted = false;
       let publicationOutcomeUnknown = false;
@@ -1287,10 +1345,6 @@ export function createDraftLibrary({
             ? entries
             : [...entries, readyListEntry(root)],
         );
-        thumbnailLifecycle.request(id, root.contentRevision, {
-          document: root.document,
-          assets: createCatalogSnapshot(id, publishedUri, catalog),
-        });
         await finishStagingOperation(operationUri);
         return {
           status: "created",
@@ -1310,11 +1364,22 @@ export function createDraftLibrary({
         return { status: "create-failed", message: errorMessage(error), errors };
       }
     });
+    if (result.status === "created") {
+      thumbnailLifecycle.request(result.draftId, result.contentRevision, {
+        document: result.document,
+        assets: result.assets,
+      });
+    }
+    return result;
   };
 
   const saveUnserialized = async (
     id: DraftId,
     document: PlogDocument,
+    onThumbnailCommitted: (
+      contentRevision: number,
+      source: DraftThumbnailSource,
+    ) => void,
   ): Promise<SaveDraftResult> => {
     try {
       await initialize();
@@ -1412,7 +1477,7 @@ export function createDraftLibrary({
           ),
         ];
       });
-      thumbnailLifecycle.request(id, nextRoot.contentRevision, {
+      onThumbnailCommitted(nextRoot.contentRevision, {
         document: nextRoot.document,
         assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
       });
@@ -1644,17 +1709,6 @@ export function createDraftLibrary({
     }
   };
 
-  const cleanupDeletedDraft = async (id: DraftId): Promise<void> => {
-    await safeRemoveDirectory(draftUri(id));
-    try {
-      if (!(await files.directoryExists(draftUri(id)))) {
-        await safeRemoveFile(deletionMarkerUri(id));
-      }
-    } catch {
-      // Keep the marker until a later maintenance pass can prove the Draft directory is absent.
-    }
-  };
-
   const commitLogicalDeletion = (id: DraftId): DeleteDraftResult => {
     confirmedDeletedIds.add(id);
     unknownDeletionIds.delete(id);
@@ -1741,7 +1795,18 @@ export function createDraftLibrary({
           : {}),
       };
     }
-    return serializeDraftOperation(id, () => saveUnserialized(id, document));
+    let thumbnailRequest:
+      | { readonly contentRevision: number; readonly source: DraftThumbnailSource }
+      | undefined;
+    const result = await serializeDraftOperation(id, () =>
+      saveUnserialized(id, document, (contentRevision, source) => {
+        thumbnailRequest = { contentRevision, source };
+      }),
+    );
+    if (thumbnailRequest !== undefined) {
+      thumbnailLifecycle.request(id, thumbnailRequest.contentRevision, thumbnailRequest.source);
+    }
+    return result;
   };
   const deleteDraft = async (id: DraftId): Promise<DeleteDraftResult> => {
     const loaded = await loadLibrary();
@@ -1792,7 +1857,8 @@ export function createDraftLibrary({
       );
       return;
     }
-    const canSchedule = thumbnailLifecycle.request(id, entry.contentRevision);
+    const request = thumbnailLifecycle.request(id, entry.contentRevision);
+    const canSchedule = request !== "already-attempted";
     updateReadyEntries((entries) =>
       entries.map((candidate) =>
         candidate.draftId === id && candidate.status === "ready"

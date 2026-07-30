@@ -3,34 +3,28 @@ import { createDocument } from "@/core/document";
 import {
   DRAFT_THUMBNAIL_PROFILE,
   draftId,
-  type DraftId,
-  type DraftLibraryFileAdapter,
   type DraftThumbnailAdapter,
   type DraftThumbnailPair,
 } from "../draftLibrary";
 import {
   createDraftThumbnailLifecycle,
   type DraftThumbnailAttemptSettlement,
+  type DraftThumbnailFileAdapter,
   type DraftThumbnailLifecycleHost,
 } from "../draftThumbnailLifecycle";
 
-class MemoryThumbnailFiles implements DraftLibraryFileAdapter {
+class MemoryThumbnailFiles implements DraftThumbnailFileAdapter {
   readonly files = new Map<string, string | Uint8Array>();
   readonly removals: string[] = [];
   failFileExistsUri: string | null = null;
   failReadTextUri: string | null = null;
   failListFilesUri: string | null = null;
+  beforeListFiles: ((uri: string) => Promise<void>) | null = null;
 
   async fileExists(uri: string): Promise<boolean> {
     if (uri === this.failFileExistsUri) throw new Error("file probe unavailable");
     return this.files.has(uri);
   }
-
-  async directoryExists(): Promise<boolean> {
-    return true;
-  }
-
-  async ensureDirectory(): Promise<void> {}
 
   async readText(uri: string): Promise<string> {
     if (uri === this.failReadTextUri) throw new Error("text read unavailable");
@@ -43,12 +37,6 @@ class MemoryThumbnailFiles implements DraftLibraryFileAdapter {
     this.files.set(uri, content);
   }
 
-  async copy(sourceUri: string, destinationUri: string): Promise<void> {
-    const value = this.files.get(sourceUri);
-    if (value === undefined) throw new Error(`missing ${sourceUri}`);
-    this.files.set(destinationUri, value);
-  }
-
   async moveFile(sourceUri: string, destinationUri: string): Promise<void> {
     const value = this.files.get(sourceUri);
     if (value === undefined) throw new Error(`missing ${sourceUri}`);
@@ -57,23 +45,14 @@ class MemoryThumbnailFiles implements DraftLibraryFileAdapter {
     this.files.set(destinationUri, value);
   }
 
-  async moveDirectory(): Promise<void> {
-    throw new Error("not implemented");
-  }
-
   async removeFile(uri: string): Promise<void> {
     this.removals.push(uri);
     this.files.delete(uri);
   }
 
-  async removeDirectory(): Promise<void> {}
-
-  async listDirectories(): Promise<readonly string[]> {
-    return [];
-  }
-
   async listFiles(uri: string): Promise<readonly string[]> {
     if (uri === this.failListFilesUri) throw new Error("directory listing unavailable");
+    await this.beforeListFiles?.(uri);
     const prefix = `${uri.replace(/\/$/, "")}/`;
     return [...this.files.keys()].filter((candidate) => {
       if (!candidate.startsWith(prefix)) return false;
@@ -114,7 +93,7 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 }
 
 function pairRecord(
-  id: DraftId,
+  id: string,
   contentRevision: number,
   squareFile: string,
   originalFile: string,
@@ -136,8 +115,10 @@ function setup() {
   const sizes = new Map<string, { readonly width: number; readonly height: number }>();
   const settlements: DraftThumbnailAttemptSettlement[] = [];
   let generationSequence = 0;
+  let createGenerationId = () => `generation-${++generationSequence}`;
   let captureAllowed = true;
-  let commitAllowed = true;
+  let commitMode: "committed" | "stale" | "throw-after-commit" = "committed";
+  let commitCallbackCalls = 0;
   let failAttemptObserver = false;
   let generate: DraftThumbnailAdapter["generate"] = async (input) => {
     files.files.set(input.squareUri, Uint8Array.from([7, input.contentRevision]));
@@ -152,9 +133,13 @@ function setup() {
   };
   const host: DraftThumbnailLifecycleHost = {
     capture: async () => (captureAllowed ? SOURCE : null),
-    commitPairIfCurrent: async (_id, _revision, commitPair) => {
-      if (!commitAllowed) return { status: "stale" };
+    commitPairIfCurrent: async (_id, _revision, _source, commitPair) => {
+      if (commitMode === "stale") return { status: "stale" };
+      commitCallbackCalls += 1;
       const pair = await commitPair();
+      if (commitMode === "throw-after-commit") {
+        throw new Error("commit outcome unavailable");
+      }
       settlements.push({
         draftId: _id,
         contentRevision: _revision,
@@ -167,13 +152,14 @@ function setup() {
       settlements.push(failure);
       if (failAttemptObserver) throw new Error("attempt observer failed");
     },
+    cleanupDiscardedGeneration: async () => {},
   };
   const lifecycle = createDraftThumbnailLifecycle({
     files,
     thumbnails,
     profile: DRAFT_THUMBNAIL_PROFILE,
     draftUriFor: (id) => (id === ID ? DRAFT_URI : `${DRAFT_URI}-other`),
-    createGenerationId: () => `generation-${++generationSequence}`,
+    createGenerationId: () => createGenerationId(),
     host,
   });
 
@@ -211,7 +197,14 @@ function setup() {
       captureAllowed = allowed;
     },
     setCommitAllowed: (allowed: boolean) => {
-      commitAllowed = allowed;
+      commitMode = allowed ? "committed" : "stale";
+    },
+    setCommitMode: (mode: "committed" | "stale" | "throw-after-commit") => {
+      commitMode = mode;
+    },
+    getCommitCallbackCalls: () => commitCallbackCalls,
+    setCreateGenerationId: (next: () => string) => {
+      createGenerationId = next;
     },
     setFailAttemptObserver: (failed: boolean) => {
       failAttemptObserver = failed;
@@ -237,11 +230,11 @@ describe("Draft Thumbnail Lifecycle", () => {
       return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
     });
 
-    expect(lifecycle.request(ID, 1)).toBe(true);
-    expect(lifecycle.request(ID, 1)).toBe(false);
-    expect(lifecycle.request(ID, 2)).toBe(true);
-    expect(lifecycle.request(ID, 3)).toBe(true);
-    expect(lifecycle.request(ID, 2)).toBe(false);
+    expect(lifecycle.request(ID, 1)).toBe("scheduled");
+    expect(lifecycle.request(ID, 1)).toBe("in-progress");
+    expect(lifecycle.request(ID, 2)).toBe("scheduled");
+    expect(lifecycle.request(ID, 3)).toBe("scheduled");
+    expect(lifecycle.request(ID, 2)).toBe("already-attempted");
     await waitFor(() => generatedRevisions.length === 1, "first generation");
 
     firstGate.resolve();
@@ -252,8 +245,8 @@ describe("Draft Thumbnail Lifecycle", () => {
       expect.objectContaining({ contentRevision: 1, status: "committed" }),
       expect.objectContaining({ contentRevision: 3, status: "committed" }),
     ]);
-    expect(lifecycle.request(ID, 1)).toBe(false);
-    expect(lifecycle.request(ID, 3)).toBe(false);
+    expect(lifecycle.request(ID, 1)).toBe("already-attempted");
+    expect(lifecycle.request(ID, 3)).toBe("already-attempted");
   });
 
   it("does not serialize thumbnail generation for different Drafts", async () => {
@@ -273,9 +266,9 @@ describe("Draft Thumbnail Lifecycle", () => {
       return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
     });
 
-    expect(lifecycle.request(ID, 1)).toBe(true);
+    expect(lifecycle.request(ID, 1)).toBe("scheduled");
     await firstStarted.promise;
-    expect(lifecycle.request(otherId, 1)).toBe(true);
+    expect(lifecycle.request(otherId, 1)).toBe("scheduled");
     await waitFor(
       () =>
         settlements.some(
@@ -311,8 +304,8 @@ describe("Draft Thumbnail Lifecycle", () => {
       return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
     });
 
-    expect(lifecycle.request(ID, 1)).toBe(true);
-    expect(lifecycle.request(ID, 2)).toBe(true);
+    expect(lifecycle.request(ID, 1)).toBe("scheduled");
+    expect(lifecycle.request(ID, 2)).toBe("scheduled");
     await waitFor(() => settlements.length === 2, "failure and pending success");
 
     expect(settlements).toEqual([
@@ -325,7 +318,7 @@ describe("Draft Thumbnail Lifecycle", () => {
     const beforeGeneration = setup();
     beforeGeneration.setCaptureAllowed(false);
 
-    expect(beforeGeneration.lifecycle.request(ID, 1)).toBe(true);
+    expect(beforeGeneration.lifecycle.request(ID, 1)).toBe("scheduled");
     await waitFor(() => beforeGeneration.settlements.length === 1, "capture rejection settlement");
     expect(beforeGeneration.settlements).toEqual([
       { draftId: ID, contentRevision: 1, status: "failed" },
@@ -335,7 +328,7 @@ describe("Draft Thumbnail Lifecycle", () => {
     const beforeCommit = setup();
     beforeCommit.setCommitAllowed(false);
 
-    expect(beforeCommit.lifecycle.request(ID, 2)).toBe(true);
+    expect(beforeCommit.lifecycle.request(ID, 2)).toBe("scheduled");
     await waitFor(() => beforeCommit.settlements.length === 1, "commit rejection settlement");
     expect(beforeCommit.settlements).toEqual([
       { draftId: ID, contentRevision: 2, status: "failed" },
@@ -361,7 +354,7 @@ describe("Draft Thumbnail Lifecycle", () => {
       return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
     });
 
-    expect(lifecycle.request(ID, 4)).toBe(true);
+    expect(lifecycle.request(ID, 4)).toBe("scheduled");
     await squareWritten.promise;
     const orphanUri = `${THUMBNAILS_URI}/interrupted.jpg`;
     files.files.set(orphanUri, Uint8Array.from([9]));
@@ -421,6 +414,286 @@ describe("Draft Thumbnail Lifecycle", () => {
     expect(files.removals).not.toContain(orphanUri);
   });
 
+  it("recovers the valid backup when the current pair belongs to no Draft", async () => {
+    const { files, lifecycle, seedPair } = setup();
+    const backup = seedPair(2, "backup");
+    files.files.set(
+      PAIR_URI,
+      pairRecord("", 1, "unowned-square.jpg", "unowned-original.jpg"),
+    );
+
+    await expect(lifecycle.inspect(ID, 2)).resolves.toEqual(backup);
+    expect(files.files.has(`${PAIR_URI}.backup`)).toBe(false);
+    expect(JSON.parse(await files.readText(PAIR_URI))).toMatchObject({
+      draftId: ID,
+      contentRevision: 2,
+    });
+  });
+
+  it("preserves current and backup candidates when reading the current pair is unavailable", async () => {
+    const { files, lifecycle, seedPair } = setup();
+    const backup = seedPair(1, "backup");
+    const current = seedPair(2);
+    files.failReadTextUri = PAIR_URI;
+
+    await expect(lifecycle.inspect(ID, 2)).resolves.toBeNull();
+
+    files.failReadTextUri = null;
+    expect(JSON.parse(await files.readText(PAIR_URI))).toMatchObject({
+      draftId: ID,
+      contentRevision: current.contentRevision,
+    });
+    expect(JSON.parse(await files.readText(`${PAIR_URI}.backup`))).toMatchObject({
+      draftId: ID,
+      contentRevision: backup.contentRevision,
+    });
+  });
+
+  it.each([
+    {
+      label: "belongs to another Draft",
+      currentId: "draft:foreign",
+      currentRevision: 2,
+      maximumRevision: 2,
+      squareExists: true,
+      originalExists: true,
+    },
+    {
+      label: "is newer than the recovered Draft",
+      currentId: ID,
+      currentRevision: 3,
+      maximumRevision: 2,
+      squareExists: true,
+      originalExists: true,
+    },
+    {
+      label: "is missing one representation",
+      currentId: ID,
+      currentRevision: 2,
+      maximumRevision: 2,
+      squareExists: true,
+      originalExists: false,
+    },
+  ])(
+    "recovers a complete backup when the schema-valid current pair $label",
+    async ({
+      currentId,
+      currentRevision,
+      maximumRevision,
+      squareExists,
+      originalExists,
+    }) => {
+      const { files, lifecycle, seedPair } = setup();
+      const backup = seedPair(1, "backup");
+      const squareFile = "invalid-current-square.jpg";
+      const originalFile = "invalid-current-original.jpg";
+      const squareUri = `${THUMBNAILS_URI}/${squareFile}`;
+      const originalUri = `${THUMBNAILS_URI}/${originalFile}`;
+      files.files.set(
+        PAIR_URI,
+        pairRecord(currentId, currentRevision, squareFile, originalFile),
+      );
+      if (squareExists) files.files.set(squareUri, Uint8Array.from([7]));
+      if (originalExists) files.files.set(originalUri, Uint8Array.from([8]));
+
+      await expect(lifecycle.inspect(ID, maximumRevision)).resolves.toEqual(backup);
+      expect(files.files.has(`${PAIR_URI}.backup`)).toBe(false);
+      expect(JSON.parse(await files.readText(PAIR_URI))).toMatchObject({
+        draftId: ID,
+        contentRevision: 1,
+      });
+    },
+  );
+
+  it("retains a pending attempt that starts while maintenance is enumerating orphans", async () => {
+    const { files, lifecycle, settlements, seedPair, setGenerate, sizes } = setup();
+    const committed = seedPair(1);
+    const oldStarted = deferred();
+    const failOld = deferred();
+    const maintenanceReachedListing = deferred();
+    const continueMaintenance = deferred();
+    const pendingSquareWritten = deferred();
+    const finishPending = deferred();
+    let pendingSquareUri = "";
+
+    setGenerate(async (input) => {
+      if (input.contentRevision === 2) {
+        oldStarted.resolve();
+        await failOld.promise;
+        throw new Error("old generation failed");
+      }
+      pendingSquareUri = input.squareUri;
+      files.files.set(input.squareUri, Uint8Array.from([7]));
+      sizes.set(input.squareUri, SQUARE_SIZE);
+      pendingSquareWritten.resolve();
+      await finishPending.promise;
+      files.files.set(input.originalUri, Uint8Array.from([8]));
+      sizes.set(input.originalUri, ORIGINAL_SIZE);
+      return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
+    });
+    files.beforeListFiles = async (uri) => {
+      if (uri !== THUMBNAILS_URI) return;
+      files.beforeListFiles = null;
+      maintenanceReachedListing.resolve();
+      await continueMaintenance.promise;
+    };
+
+    expect(lifecycle.request(ID, 2)).toBe("scheduled");
+    await oldStarted.promise;
+    expect(lifecycle.request(ID, 3)).toBe("scheduled");
+    const maintenance = lifecycle.maintain(ID, 3);
+    await maintenanceReachedListing.promise;
+
+    failOld.resolve();
+    await waitFor(
+      () =>
+        settlements.some(
+          (settlement) =>
+            settlement.contentRevision === 2 && settlement.status === "failed",
+        ),
+      "old failed settlement",
+    );
+    continueMaintenance.resolve();
+    await maintenance;
+    await pendingSquareWritten.promise;
+
+    expect(files.files.has(pendingSquareUri)).toBe(true);
+    expect(files.removals).not.toContain(pendingSquareUri);
+    expect(files.files.has(committed.squareUri)).toBe(true);
+    expect(files.files.has(committed.originalUri)).toBe(true);
+
+    finishPending.resolve();
+    await waitFor(
+      () =>
+        settlements.some(
+          (settlement) =>
+            settlement.contentRevision === 3 && settlement.status === "committed",
+        ),
+      "pending pair settlement",
+    );
+    await expect(lifecycle.inspect(ID, 3)).resolves.toMatchObject({
+      contentRevision: 3,
+    });
+  });
+
+  it("reports whether a revision is scheduled, in progress, or already attempted", async () => {
+    const running = setup();
+    const started = deferred();
+    const finish = deferred();
+    running.setGenerate(async (input) => {
+      started.resolve();
+      await finish.promise;
+      running.files.files.set(input.squareUri, Uint8Array.from([7]));
+      running.files.files.set(input.originalUri, Uint8Array.from([8]));
+      running.sizes.set(input.squareUri, SQUARE_SIZE);
+      running.sizes.set(input.originalUri, ORIGINAL_SIZE);
+      return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
+    });
+
+    expect(running.lifecycle.request(ID, 1)).toBe("scheduled");
+    await started.promise;
+    expect(running.lifecycle.request(ID, 1)).toBe("in-progress");
+    finish.resolve();
+    await waitFor(() => running.settlements.length === 1, "completed attempt");
+    expect(running.lifecycle.request(ID, 1)).toBe("already-attempted");
+
+    const invalidIdentity = setup();
+    invalidIdentity.setCreateGenerationId(() => "../unsafe");
+
+    expect(invalidIdentity.lifecycle.request(ID, 2)).toBe("already-attempted");
+    expect(invalidIdentity.settlements).toEqual([
+      { draftId: ID, contentRevision: 2, status: "failed" },
+    ]);
+    expect(invalidIdentity.lifecycle.request(ID, 2)).toBe("already-attempted");
+  });
+
+  it("detaches a supplied source before pending work can observe caller mutation", async () => {
+    const { files, lifecycle, settlements, setGenerate, sizes } = setup();
+    const firstStarted = deferred();
+    const releaseFirst = deferred();
+    let renderedBackground = "";
+    setGenerate(async (input) => {
+      if (input.contentRevision === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else {
+        renderedBackground = input.document.canvas.backgroundColor;
+      }
+      files.files.set(input.squareUri, Uint8Array.from([7]));
+      files.files.set(input.originalUri, Uint8Array.from([8]));
+      sizes.set(input.squareUri, SQUARE_SIZE);
+      sizes.set(input.originalUri, ORIGINAL_SIZE);
+      return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
+    });
+    const supplied = {
+      document: createDocument(),
+      assets: SOURCE.assets,
+    };
+
+    expect(lifecycle.request(ID, 1)).toBe("scheduled");
+    await firstStarted.promise;
+    expect(lifecycle.request(ID, 2, supplied)).toBe("scheduled");
+    (supplied.document.canvas as { backgroundColor: string }).backgroundColor = "#000000";
+    releaseFirst.resolve();
+    await waitFor(() => settlements.length === 2, "detached source settlement");
+
+    expect(renderedBackground).toBe("#FFFFFF");
+  });
+
+  it("cleans up a definitely stale generation but preserves an unknown commit outcome", async () => {
+    const stale = setup();
+    stale.setCommitMode("stale");
+    let staleSquareUri = "";
+    let staleOriginalUri = "";
+    stale.setGenerate(async (input) => {
+      staleSquareUri = input.squareUri;
+      staleOriginalUri = input.originalUri;
+      stale.files.files.set(input.squareUri, Uint8Array.from([7]));
+      stale.files.files.set(input.originalUri, Uint8Array.from([8]));
+      stale.sizes.set(input.squareUri, SQUARE_SIZE);
+      stale.sizes.set(input.originalUri, ORIGINAL_SIZE);
+      return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
+    });
+
+    expect(stale.lifecycle.request(ID, 1)).toBe("scheduled");
+    await waitFor(() => stale.settlements.length === 1, "stale attempt settlement");
+
+    expect(stale.getCommitCallbackCalls()).toBe(0);
+    expect(stale.files.files.has(staleSquareUri)).toBe(false);
+    expect(stale.files.files.has(staleOriginalUri)).toBe(false);
+    expect(stale.files.removals).toEqual(
+      expect.arrayContaining([staleSquareUri, staleOriginalUri]),
+    );
+
+    const unknown = setup();
+    unknown.setCommitMode("throw-after-commit");
+    let unknownSquareUri = "";
+    let unknownOriginalUri = "";
+    unknown.setGenerate(async (input) => {
+      unknownSquareUri = input.squareUri;
+      unknownOriginalUri = input.originalUri;
+      unknown.files.files.set(input.squareUri, Uint8Array.from([7]));
+      unknown.files.files.set(input.originalUri, Uint8Array.from([8]));
+      unknown.sizes.set(input.squareUri, SQUARE_SIZE);
+      unknown.sizes.set(input.originalUri, ORIGINAL_SIZE);
+      return { square: SQUARE_SIZE, original: ORIGINAL_SIZE };
+    });
+
+    expect(unknown.lifecycle.request(ID, 2)).toBe("scheduled");
+    await waitFor(() => unknown.settlements.length === 1, "unknown attempt settlement");
+
+    expect(unknown.getCommitCallbackCalls()).toBe(1);
+    expect(unknown.files.files.has(unknownSquareUri)).toBe(true);
+    expect(unknown.files.files.has(unknownOriginalUri)).toBe(true);
+    expect(unknown.files.removals).not.toContain(unknownSquareUri);
+    expect(unknown.files.removals).not.toContain(unknownOriginalUri);
+    await expect(unknown.lifecycle.inspect(ID, 2)).resolves.toMatchObject({
+      contentRevision: 2,
+      squareUri: unknownSquareUri,
+      originalUri: unknownOriginalUri,
+    });
+  });
+
   it("recovers a valid old pair and keeps it when a newer generated pair fails validation", async () => {
     const { files, lifecycle, settlements, seedPair, setGenerate, sizes } = setup();
     const oldPair = seedPair(1, "backup");
@@ -437,7 +710,7 @@ describe("Draft Thumbnail Lifecycle", () => {
       return { square: invalidSquare, original: ORIGINAL_SIZE };
     });
 
-    expect(lifecycle.request(ID, 2)).toBe(true);
+    expect(lifecycle.request(ID, 2)).toBe("scheduled");
     await waitFor(() => settlements.length === 1, "invalid pair settlement");
 
     expect(settlements).toEqual([{ draftId: ID, contentRevision: 2, status: "failed" }]);
