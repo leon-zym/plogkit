@@ -16,6 +16,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   readonly directories = new Set<string>();
   failMoveTo: string | null = null;
   failMoveAfterDestinationRemovalTo: string | null = null;
+  interruptMoveAfterDestinationRemovalTo: string | null = null;
   failMoveAfterCopyTo: string | null = null;
   interruptMoveAfterCopyTo: string | null = null;
   storageInterrupted = false;
@@ -88,6 +89,12 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
       this.files.delete(destinationUri);
       throw new Error("move failed after destination removal");
     }
+    if (this.interruptMoveAfterDestinationRemovalTo === destinationUri) {
+      this.interruptMoveAfterDestinationRemovalTo = null;
+      this.files.delete(destinationUri);
+      this.storageInterrupted = true;
+      throw new Error("process interrupted after move removed its destination");
+    }
     if (this.files.has(destinationUri)) throw new Error("destination already exists");
     if (this.interruptMoveAfterCopyTo === destinationUri) {
       this.interruptMoveAfterCopyTo = null;
@@ -136,6 +143,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   }
 
   async removeDirectory(uri: string): Promise<void> {
+    if (this.storageInterrupted) throw new Error("storage interrupted");
     this.directories.delete(uri);
     for (const path of [...this.files.keys()]) {
       if (path.startsWith(`${uri}/`)) this.files.delete(path);
@@ -1573,6 +1581,139 @@ describe("Draft Library", () => {
       status: "ready",
       assets: { entries: ["provider:item/../1", "provider:item/../2"] },
     });
+  });
+
+  it("preserves a partially committed ingest batch when the catalog outcome is unknown", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const catalogUri = `${firstDraftUri}/catalog.json`;
+    const moveFile = files.moveFile.bind(files);
+    let catalogCommitAttempts = 0;
+    files.moveFile = async (sourceUri, destinationUri) => {
+      if (destinationUri === catalogUri) {
+        catalogCommitAttempts += 1;
+        if (catalogCommitAttempts === 2) files.interruptMoveAfterCopyTo = catalogUri;
+      }
+      await moveFile(sourceUri, destinationUri);
+    };
+    const withMetadata = {
+      ...candidate("later"),
+      exif: { Make: "Plog Camera", Model: "Architecture Review" },
+    };
+
+    const result = await library.ingest(created.draftId, [
+      candidate("two"),
+      withMetadata,
+      candidate("bad"),
+    ]);
+    expect(result).toMatchObject({
+      status: "ingest-failed",
+      imported: [],
+      errors: [],
+      message: "process interrupted after move copied its destination",
+    });
+    expect(result).not.toHaveProperty("assets");
+    expect(library.getState()).toMatchObject({ status: "storage-failed" });
+    expect(
+      [...files.files.keys()].filter(
+        (uri) =>
+          uri.startsWith(`${firstDraftUri}/`) &&
+          (uri.includes("asset-2") || uri.includes("asset-3")),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        `${firstDraftUri}/assets/asset-2.jpg`,
+        `${firstDraftUri}/previews/asset-2.jpg`,
+        `${firstDraftUri}/assets/asset-3.jpg`,
+        `${firstDraftUri}/previews/asset-3.jpg`,
+        `${firstDraftUri}/metadata/asset-3.json`,
+      ]),
+    );
+    expect(
+      [...files.files.keys()].some(
+        (uri) => uri.startsWith(`${firstDraftUri}/`) && uri.includes("asset-4"),
+      ),
+    ).toBe(false);
+    expect(files.files.has(catalogUri)).toBe(true);
+    expect(files.files.has(`${catalogUri}.backup`)).toBe(true);
+    expect(files.files.has(`${catalogUri}.tmp`)).toBe(true);
+    expect(
+      [...files.directories].some((uri) =>
+        uri.startsWith("memory://library/staging/operation-"),
+      ),
+    ).toBe(true);
+
+    files.storageInterrupted = false;
+    const restarted = await createLibrary().read(created.draftId);
+    expect(restarted).toMatchObject({
+      status: "ready",
+      assets: {
+        entries: ["provider:item/../1", "provider:item/../2", "provider:item/../3"],
+      },
+    });
+    if (restarted.status !== "ready") throw new Error("expected a recovered Draft");
+    for (const [assetId, usages] of [
+      ["provider:item/../2", ["original", "preview"]],
+      ["provider:item/../3", ["original", "preview", "metadata"]],
+    ] as const) {
+      for (const usage of usages) {
+        const descriptor = restarted.assets.resolve(importedAssetId(assetId), usage);
+        if (descriptor === null) throw new Error(`expected recovered ${usage} descriptor`);
+        expect(files.files.has(descriptor.uri)).toBe(true);
+      }
+    }
+    expect(files.files.has(`${catalogUri}.backup`)).toBe(false);
+    expect(files.files.has(`${catalogUri}.tmp`)).toBe(false);
+    expect(
+      [...files.directories].some((uri) =>
+        uri.startsWith("memory://library/staging/operation-"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps unknown candidate files until restart proves that the old catalog won", async () => {
+    const { files, library, createLibrary } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const catalogUri = `${firstDraftUri}/catalog.json`;
+    files.interruptMoveAfterDestinationRemovalTo = catalogUri;
+    const withMetadata = {
+      ...candidate("two"),
+      exif: { Make: "Plog Camera", Model: "Rollback Proof" },
+    };
+
+    await expect(library.ingest(created.draftId, [withMetadata])).resolves.toMatchObject({
+      status: "ingest-failed",
+      imported: [],
+      errors: [],
+      message: "process interrupted after move removed its destination",
+    });
+    expect(library.getState()).toMatchObject({ status: "storage-failed" });
+    const candidateUris = [
+      `${firstDraftUri}/assets/asset-2.jpg`,
+      `${firstDraftUri}/previews/asset-2.jpg`,
+      `${firstDraftUri}/metadata/asset-2.json`,
+    ];
+    for (const uri of candidateUris) expect(files.files.has(uri)).toBe(true);
+    expect(files.files.has(catalogUri)).toBe(false);
+    expect(files.files.has(`${catalogUri}.backup`)).toBe(true);
+    expect(files.files.has(`${catalogUri}.tmp`)).toBe(true);
+
+    files.storageInterrupted = false;
+    const restarted = createLibrary();
+    await expect(restarted.read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      assets: { entries: ["provider:item/../1"] },
+    });
+    for (const uri of candidateUris) expect(files.files.has(uri)).toBe(true);
+    expect(files.files.has(`${catalogUri}.backup`)).toBe(false);
+    expect(files.files.has(`${catalogUri}.tmp`)).toBe(false);
+
+    await restarted.maintainInactive(created.draftId);
+    for (const uri of candidateUris) expect(files.files.has(uri)).toBe(false);
   });
 
   it("serializes reads and inactive maintenance behind an in-flight save for the same Draft", async () => {

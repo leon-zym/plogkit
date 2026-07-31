@@ -10,6 +10,7 @@ import type { MetadataPolicy } from "@/core/exportPolicy";
 import { extractImageMetadata, type ImageMetadataSidecar } from "@/services/image-import/metadata";
 import {
   commitPreparedFile,
+  commitPreparedFileWithOutcome,
   recoverFile,
   type RecoverableFileState,
 } from "@/services/persistence/recoverableFile";
@@ -1521,6 +1522,7 @@ export function createDraftLibrary({
     }
     const imported: IngestedAsset[] = [];
     const errors: DraftImportError[] = [];
+    let unknownCatalogCommit: { readonly error: unknown } | null = null;
     const usedIds = new Set(catalog.entries.map(({ id: assetId }) => assetId));
     const usedStorageKeys = new Set(catalog.entries.map(({ storageKey }) => storageKey));
     const operationUri = child(stagingUri, assertStorageKey(createOperationId()));
@@ -1581,11 +1583,16 @@ export function createDraftLibrary({
           const nextCatalogJson = catalogJson(nextCatalog.entries);
           await recoverFile(files, catalogState);
           await files.writeText(catalogState.temporaryUri, nextCatalogJson);
-          await commitPreparedFile(
+          const commit = await commitPreparedFileWithOutcome(
             files,
             catalogState,
             async (currentUri) => (await files.readText(currentUri)) === nextCatalogJson,
           );
+          if (commit.status === "not-committed") throw commit.error;
+          if (commit.status === "unknown") {
+            unknownCatalogCommit = { error: commit.error };
+            break;
+          }
           catalog = nextCatalog;
           imported.push({ image: staged.image, sourceKind: entry.sourceKind });
           usedIds.add(entry.id);
@@ -1599,6 +1606,16 @@ export function createDraftLibrary({
       } finally {
         await safeRemoveDirectory(itemUri);
       }
+    }
+    if (unknownCatalogCommit !== null) {
+      await finishStagingOperation(operationUri);
+      installStorageFailure(unknownCatalogCommit.error);
+      return {
+        status: "ingest-failed",
+        imported: [],
+        errors,
+        message: errorMessage(unknownCatalogCommit.error),
+      };
     }
     for (let index = 9; index < candidates.length; index += 1) {
       errors.push({
