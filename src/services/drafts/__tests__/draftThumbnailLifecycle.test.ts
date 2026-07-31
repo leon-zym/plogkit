@@ -20,13 +20,33 @@ class MemoryThumbnailFiles implements DraftThumbnailFileAdapter {
   failReadTextUri: string | null = null;
   failListFilesUri: string | null = null;
   beforeListFiles: ((uri: string) => Promise<void>) | null = null;
+  private interrupted = false;
+  private moveInterruption: {
+    readonly destinationUri: string;
+    readonly timing: "before" | "after-copy" | "after";
+  } | null = null;
+
+  private assertAvailable(): void {
+    if (this.interrupted) throw new Error("storage interrupted");
+  }
+
+  interruptMove(destinationUri: string, timing: "before" | "after-copy" | "after"): void {
+    this.moveInterruption = { destinationUri, timing };
+  }
+
+  resumeStorage(): void {
+    this.interrupted = false;
+    this.moveInterruption = null;
+  }
 
   async fileExists(uri: string): Promise<boolean> {
+    this.assertAvailable();
     if (uri === this.failFileExistsUri) throw new Error("file probe unavailable");
     return this.files.has(uri);
   }
 
   async readText(uri: string): Promise<string> {
+    this.assertAvailable();
     if (uri === this.failReadTextUri) throw new Error("text read unavailable");
     const value = this.files.get(uri);
     if (typeof value !== "string") throw new Error(`missing text ${uri}`);
@@ -34,23 +54,42 @@ class MemoryThumbnailFiles implements DraftThumbnailFileAdapter {
   }
 
   async writeText(uri: string, content: string): Promise<void> {
+    this.assertAvailable();
     this.files.set(uri, content);
   }
 
   async moveFile(sourceUri: string, destinationUri: string): Promise<void> {
+    this.assertAvailable();
+    const interruption =
+      this.moveInterruption?.destinationUri === destinationUri ? this.moveInterruption : null;
+    if (interruption?.timing === "before") {
+      this.interrupted = true;
+      throw new Error("process interrupted before move");
+    }
     const value = this.files.get(sourceUri);
     if (value === undefined) throw new Error(`missing ${sourceUri}`);
     if (this.files.has(destinationUri)) throw new Error(`destination exists ${destinationUri}`);
+    if (interruption?.timing === "after-copy") {
+      this.files.set(destinationUri, value);
+      this.interrupted = true;
+      throw new Error("process interrupted after move copied its destination");
+    }
     this.files.delete(sourceUri);
     this.files.set(destinationUri, value);
+    if (interruption?.timing === "after") {
+      this.interrupted = true;
+      throw new Error("process interrupted after move");
+    }
   }
 
   async removeFile(uri: string): Promise<void> {
+    this.assertAvailable();
     this.removals.push(uri);
     this.files.delete(uri);
   }
 
   async listFiles(uri: string): Promise<readonly string[]> {
+    this.assertAvailable();
     if (uri === this.failListFilesUri) throw new Error("directory listing unavailable");
     await this.beforeListFiles?.(uri);
     const prefix = `${uri.replace(/\/$/, "")}/`;
@@ -110,6 +149,12 @@ function pairRecord(
   });
 }
 
+function storedPairRevision(files: MemoryThumbnailFiles, uri: string): number | null {
+  const value = files.files.get(uri);
+  if (typeof value !== "string") return null;
+  return (JSON.parse(value) as { readonly contentRevision: number }).contentRevision;
+}
+
 function setup() {
   const files = new MemoryThumbnailFiles();
   const sizes = new Map<string, { readonly width: number; readonly height: number }>();
@@ -154,14 +199,16 @@ function setup() {
     },
     cleanupDiscardedGeneration: async () => {},
   };
-  const lifecycle = createDraftThumbnailLifecycle({
-    files,
-    thumbnails,
-    profile: DRAFT_THUMBNAIL_PROFILE,
-    draftUriFor: (id) => (id === ID ? DRAFT_URI : `${DRAFT_URI}-other`),
-    createGenerationId: () => createGenerationId(),
-    host,
-  });
+  const createLifecycle = () =>
+    createDraftThumbnailLifecycle({
+      files,
+      thumbnails,
+      profile: DRAFT_THUMBNAIL_PROFILE,
+      draftUriFor: (id) => (id === ID ? DRAFT_URI : `${DRAFT_URI}-other`),
+      createGenerationId: () => createGenerationId(),
+      host,
+    });
+  const lifecycle = createLifecycle();
 
   const seedPair = (
     contentRevision: number,
@@ -190,6 +237,7 @@ function setup() {
   return {
     files,
     lifecycle,
+    restartLifecycle: createLifecycle,
     settlements,
     sizes,
     seedPair,
@@ -245,6 +293,13 @@ describe("Draft Thumbnail Lifecycle", () => {
       expect.objectContaining({ contentRevision: 1, status: "committed" }),
       expect.objectContaining({ contentRevision: 3, status: "committed" }),
     ]);
+    const committedPairs = settlements.flatMap((settlement) =>
+      settlement.status === "committed" ? [settlement.pair] : [],
+    );
+    expect(committedPairs[0]?.squareUri).toContain("/r1-p1-");
+    expect(committedPairs[0]?.originalUri).toContain("/r1-p1-");
+    expect(committedPairs[1]?.squareUri).toContain("/r3-p1-");
+    expect(committedPairs[1]?.originalUri).toContain("/r3-p1-");
     expect(lifecycle.request(ID, 1)).toBe("already-attempted");
     expect(lifecycle.request(ID, 3)).toBe("already-attempted");
   });
@@ -447,6 +502,104 @@ describe("Draft Thumbnail Lifecycle", () => {
       draftId: ID,
       contentRevision: backup.contentRevision,
     });
+  });
+
+  it.each([
+    {
+      label: "before moving current to backup",
+      destinationUri: `${PAIR_URI}.backup`,
+      timing: "before",
+      interruptedState: { current: 1, backup: null, temporary: 2 },
+      recoveredRevision: 1,
+    },
+    {
+      label: "after copying current to backup",
+      destinationUri: `${PAIR_URI}.backup`,
+      timing: "after-copy",
+      interruptedState: { current: 1, backup: 1, temporary: 2 },
+      recoveredRevision: 1,
+    },
+    {
+      label: "after moving current to backup",
+      destinationUri: `${PAIR_URI}.backup`,
+      timing: "after",
+      interruptedState: { current: null, backup: 1, temporary: 2 },
+      recoveredRevision: 1,
+    },
+    {
+      label: "after copying temporary to current",
+      destinationUri: PAIR_URI,
+      timing: "after-copy",
+      interruptedState: { current: 2, backup: 1, temporary: 2 },
+      recoveredRevision: 2,
+    },
+    {
+      label: "after moving temporary to current",
+      destinationUri: PAIR_URI,
+      timing: "after",
+      interruptedState: { current: 2, backup: 1, temporary: null },
+      recoveredRevision: 2,
+    },
+  ] as const)(
+    "recovers the pair on restart when storage stops $label",
+    async ({ destinationUri, timing, interruptedState, recoveredRevision }) => {
+      const { files, lifecycle, restartLifecycle, seedPair, settlements } = setup();
+      seedPair(1);
+      files.interruptMove(destinationUri, timing);
+
+      expect(lifecycle.request(ID, 2)).toBe("scheduled");
+      await waitFor(
+        () =>
+          settlements.some(
+            (settlement) => settlement.contentRevision === 2 && settlement.status === "failed",
+          ),
+        "interrupted pair settlement",
+      );
+      files.resumeStorage();
+
+      expect({
+        current: storedPairRevision(files, PAIR_URI),
+        backup: storedPairRevision(files, `${PAIR_URI}.backup`),
+        temporary: storedPairRevision(files, `${PAIR_URI}.tmp`),
+      }).toEqual(interruptedState);
+
+      await expect(restartLifecycle().inspect(ID, 2)).resolves.toMatchObject({
+        contentRevision: recoveredRevision,
+        profileVersion: DRAFT_THUMBNAIL_PROFILE.profileVersion,
+      });
+      expect(storedPairRevision(files, PAIR_URI)).toBe(recoveredRevision);
+      expect(files.files.has(`${PAIR_URI}.backup`)).toBe(false);
+      expect(files.files.has(`${PAIR_URI}.tmp`)).toBe(false);
+    },
+  );
+
+  it("promotes the prepared first pair when storage stops before its only move", async () => {
+    const { files, lifecycle, restartLifecycle, settlements } = setup();
+    files.interruptMove(PAIR_URI, "before");
+
+    expect(lifecycle.request(ID, 1)).toBe("scheduled");
+    await waitFor(
+      () =>
+        settlements.some(
+          (settlement) => settlement.contentRevision === 1 && settlement.status === "failed",
+        ),
+      "interrupted first pair settlement",
+    );
+    files.resumeStorage();
+
+    expect({
+      current: storedPairRevision(files, PAIR_URI),
+      backup: storedPairRevision(files, `${PAIR_URI}.backup`),
+      temporary: storedPairRevision(files, `${PAIR_URI}.tmp`),
+    }).toEqual({ current: null, backup: null, temporary: 1 });
+
+    await expect(restartLifecycle().inspect(ID, 1)).resolves.toMatchObject({
+      contentRevision: 1,
+      profileVersion: DRAFT_THUMBNAIL_PROFILE.profileVersion,
+    });
+    expect(storedPairRevision(files, PAIR_URI)).toBe(1);
+    expect(files.files.has(`${PAIR_URI}.backup`)).toBe(false);
+    expect(files.files.has(`${PAIR_URI}.tmp`)).toBe(false);
   });
 
   it.each([

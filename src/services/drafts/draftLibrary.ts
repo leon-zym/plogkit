@@ -1834,6 +1834,8 @@ export function createDraftLibrary({
   const maintainInactive = (id: DraftId): Promise<void> =>
     serializeDraftOperation(id, () => maintainInactiveUnserialized(id));
 
+  // A visible decode failure changes the authoritative list projection, so
+  // identity matching and status updates stay here; the lifecycle only schedules rebuilds.
   const reportThumbnailLoadFailure = (id: DraftId, pair: DraftThumbnailPair): void => {
     if (state.status !== "ready") return;
     const entry = state.entries.find((candidate) => candidate.draftId === id);

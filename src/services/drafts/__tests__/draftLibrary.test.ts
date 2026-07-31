@@ -17,6 +17,8 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   failMoveTo: string | null = null;
   failMoveAfterDestinationRemovalTo: string | null = null;
   failMoveAfterCopyTo: string | null = null;
+  interruptMoveAfterCopyTo: string | null = null;
+  storageInterrupted = false;
   failMoveDirectoryAfterPartialTo: string | null = null;
   failEnsureDirectory: string | null = null;
   failFileExists: string | null = null;
@@ -30,6 +32,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   failListDirectories: string | null = null;
 
   async fileExists(uri: string): Promise<boolean> {
+    if (this.storageInterrupted) throw new Error("storage interrupted");
     if (this.failFileExists === uri) throw new Error("wrong filesystem node");
     if (this.failFileExistsAfter?.uri === uri) {
       if (this.failFileExistsAfter.remainingSuccessfulCalls === 0) {
@@ -77,6 +80,7 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
   }
 
   async moveFile(sourceUri: string, destinationUri: string): Promise<void> {
+    if (this.storageInterrupted) throw new Error("storage interrupted");
     if (this.failMoveTo === destinationUri) throw new Error("publication failed");
     const value = this.files.get(sourceUri);
     if (value === undefined) throw new Error(`missing ${sourceUri}`);
@@ -85,6 +89,12 @@ class MemoryDraftFiles implements DraftLibraryFileAdapter {
       throw new Error("move failed after destination removal");
     }
     if (this.files.has(destinationUri)) throw new Error("destination already exists");
+    if (this.interruptMoveAfterCopyTo === destinationUri) {
+      this.interruptMoveAfterCopyTo = null;
+      this.files.set(destinationUri, value);
+      this.storageInterrupted = true;
+      throw new Error("process interrupted after move copied its destination");
+    }
     if (this.failMoveAfterCopyTo === destinationUri) {
       this.files.set(destinationUri, value);
       throw new Error("move copied destination but could not delete source");
@@ -175,6 +185,12 @@ async function settleBackgroundWork(): Promise<void> {
   for (let index = 0; index < 30; index += 1) await Promise.resolve();
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   for (let index = 0; index < 10; index += 1) await Promise.resolve();
+}
+
+function storedPairRevision(files: MemoryDraftFiles, uri: string): number | null {
+  const value = files.files.get(uri);
+  if (typeof value !== "string") return null;
+  return (JSON.parse(value) as { readonly contentRevision: number }).contentRevision;
 }
 
 function setup() {
@@ -642,14 +658,87 @@ describe("Draft Library", () => {
         },
       ],
     });
-    const pair = JSON.parse(await files.readText(`${firstDraftUri}/thumbnail-pair.json`)) as {
-      contentRevision: number;
-      squareFile: string;
-      originalFile: string;
-    };
-    expect(pair).toMatchObject({ contentRevision: 3 });
-    expect(pair.squareFile).toContain("r3-p1-");
-    expect(pair.originalFile).toContain("r3-p1-");
+  });
+
+  it("installs the recovered pair into the authoritative snapshot after restart", async () => {
+    const { files, library, createLibrary, setNow } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const initial = library.getState();
+    if (
+      initial.status !== "ready" ||
+      initial.entries[0]?.status !== "ready" ||
+      initial.entries[0].thumbnail === null
+    ) {
+      throw new Error("expected the initial thumbnail pair");
+    }
+    const initialPair = initial.entries[0].thumbnail;
+    let markInterruptedAttemptSettled!: () => void;
+    const interruptedAttemptSettled = new Promise<void>((resolve) => {
+      markInterruptedAttemptSettled = resolve;
+    });
+    const unsubscribe = library.subscribe(() => {
+      const state = library.getState();
+      const entry = state.status === "ready" ? state.entries[0] : undefined;
+      if (
+        entry?.status === "ready" &&
+        entry.contentRevision === 2 &&
+        entry.thumbnail?.contentRevision === 1 &&
+        entry.thumbnailStatus === "ready"
+      ) {
+        markInterruptedAttemptSettled();
+      }
+    });
+    const pairUri = `${firstDraftUri}/thumbnail-pair.json`;
+    files.interruptMoveAfterCopyTo = pairUri;
+    setNow("2026-07-22T09:00:00.000Z");
+
+    await expect(
+      library.save(
+        created.draftId,
+        updateDocument(created.document, {
+          canvas: { ...created.document.canvas, backgroundColor: "#101010" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "saved", contentRevision: 2 });
+    await interruptedAttemptSettled;
+    unsubscribe();
+
+    expect(files.storageInterrupted).toBe(true);
+    expect(library.getState()).toMatchObject({
+      entries: [
+        {
+          contentRevision: 2,
+          thumbnail: initialPair,
+          thumbnailStatus: "ready",
+        },
+      ],
+    });
+    files.storageInterrupted = false;
+    expect({
+      current: storedPairRevision(files, pairUri),
+      backup: storedPairRevision(files, `${pairUri}.backup`),
+      temporary: storedPairRevision(files, `${pairUri}.tmp`),
+    }).toEqual({ current: 2, backup: 1, temporary: 2 });
+
+    const restarted = createLibrary();
+    const loaded = await restarted.load();
+
+    expect(loaded).toMatchObject({
+      status: "ready",
+      entries: [
+        {
+          contentRevision: 2,
+          thumbnail: { contentRevision: 2, profileVersion: 1 },
+          thumbnailStatus: "ready",
+        },
+      ],
+    });
+    expect(restarted.getState()).toEqual(loaded);
+    expect(storedPairRevision(files, pairUri)).toBe(2);
+    expect(files.files.has(`${pairUri}.backup`)).toBe(false);
+    expect(files.files.has(`${pairUri}.tmp`)).toBe(false);
   });
 
   it("never publishes a stale supplied-source pair while the newest render is pending", async () => {
@@ -694,16 +783,6 @@ describe("Draft Library", () => {
     const revisionTwoGate = new Promise<void>((resolve) => {
       releaseRevisionTwo = resolve;
     });
-    const attemptedPairWrites: number[] = [];
-    const originalWriteText = files.writeText.bind(files);
-    files.writeText = async (uri, content) => {
-      if (uri === `${firstDraftUri}/thumbnail-pair.json.tmp`) {
-        attemptedPairWrites.push(
-          (JSON.parse(content) as { readonly contentRevision: number }).contentRevision,
-        );
-      }
-      await originalWriteText(uri, content);
-    };
     let markRevisionThreeStarted!: () => void;
     const revisionThreeStarted = new Promise<void>((resolve) => {
       markRevisionThreeStarted = resolve;
@@ -759,11 +838,8 @@ describe("Draft Library", () => {
         },
       ],
     });
-    expect(JSON.parse(await files.readText(`${firstDraftUri}/thumbnail-pair.json`))).toMatchObject({
-      contentRevision: 1,
-    });
-    expect(attemptedPairWrites).not.toContain(2);
     expect(observed.some(({ pairRevision }) => pairRevision === 2)).toBe(false);
+    expect(storedPairRevision(files, `${firstDraftUri}/thumbnail-pair.json`)).toBe(1);
 
     releaseRevisionThree();
     await revisionThreeCommitted;
