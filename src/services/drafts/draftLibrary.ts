@@ -114,10 +114,12 @@ export interface AssetDescriptor {
   readonly uri: string;
 }
 
-export interface AssetCatalogSnapshot {
+export interface AssetAccessSnapshot {
   readonly entries: readonly ImportedAssetId[];
   readonly resolve: (assetId: ImportedAssetId, usage: AssetUsage) => AssetDescriptor | null;
 }
+
+export type AssetCatalogSnapshot = AssetAccessSnapshot;
 
 export interface DraftImportError {
   readonly index: number;
@@ -189,13 +191,30 @@ export interface IngestedAsset {
   readonly sourceKind: Exclude<ImportCandidateKind, "unsupported">;
 }
 
-export interface IngestAssetsResult {
-  readonly status: "ingested" | "ingest-failed";
+export interface ConfirmedAssetPublication {
   readonly imported: readonly IngestedAsset[];
-  readonly errors: readonly DraftImportError[];
-  readonly assets?: AssetCatalogSnapshot;
-  readonly message?: string;
+  readonly resolve: (assetId: ImportedAssetId, usage: AssetUsage) => AssetDescriptor | null;
 }
+
+export type IngestAssetsResult =
+  | {
+      readonly status: "ingested";
+      readonly imported: readonly IngestedAsset[];
+      readonly errors: readonly DraftImportError[];
+      readonly assets: AssetCatalogSnapshot;
+    }
+  | {
+      readonly status: "ingest-unknown";
+      readonly confirmed: ConfirmedAssetPublication;
+      readonly errors: readonly DraftImportError[];
+      readonly message: string;
+    }
+  | {
+      readonly status: "ingest-failed";
+      readonly imported: readonly [];
+      readonly errors: readonly DraftImportError[];
+      readonly message?: string;
+    };
 
 export type ReadPreviewResult =
   | {
@@ -661,6 +680,21 @@ function createCatalogSnapshot(
         ? null
         : Object.freeze({ draftId: id, assetId, usage, uri });
     },
+  });
+}
+
+function createConfirmedAssetPublication(
+  id: DraftId,
+  draftUri: string,
+  catalog: Catalog,
+  imported: readonly IngestedAsset[],
+): ConfirmedAssetPublication {
+  const assets = createCatalogSnapshot(id, draftUri, catalog);
+  const confirmedIds = new Set(imported.map(({ image }) => image.id));
+  return Object.freeze({
+    imported: Object.freeze([...imported]),
+    resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
+      confirmedIds.has(assetId) ? assets.resolve(assetId, usage) : null,
   });
 }
 
@@ -1522,7 +1556,9 @@ export function createDraftLibrary({
     }
     const imported: IngestedAsset[] = [];
     const errors: DraftImportError[] = [];
-    let unknownCatalogCommit: { readonly error: unknown } | null = null;
+    let unknownCatalogCommit:
+      | { readonly error: unknown; readonly index: number }
+      | null = null;
     const usedIds = new Set(catalog.entries.map(({ id: assetId }) => assetId));
     const usedStorageKeys = new Set(catalog.entries.map(({ storageKey }) => storageKey));
     const operationUri = child(stagingUri, assertStorageKey(createOperationId()));
@@ -1590,7 +1626,13 @@ export function createDraftLibrary({
           );
           if (commit.status === "not-committed") throw commit.error;
           if (commit.status === "unknown") {
-            unknownCatalogCommit = { error: commit.error };
+            unknownCatalogCommit = { error: commit.error, index };
+            installStorageFailure(commit.error);
+            errors.push({
+              index,
+              sourceUri: candidate.uri,
+              message: errorMessage(commit.error),
+            });
             break;
           }
           catalog = nextCatalog;
@@ -1608,11 +1650,24 @@ export function createDraftLibrary({
       }
     }
     if (unknownCatalogCommit !== null) {
+      for (
+        let index = unknownCatalogCommit.index + 1;
+        index < candidates.length;
+        index += 1
+      ) {
+        errors.push({
+          index,
+          sourceUri: candidates[index]?.uri ?? "",
+          message:
+            index >= 9
+              ? "image limit is 9"
+              : "not attempted because catalog recovery is required",
+        });
+      }
       await finishStagingOperation(operationUri);
-      installStorageFailure(unknownCatalogCommit.error);
       return {
-        status: "ingest-failed",
-        imported: [],
+        status: "ingest-unknown",
+        confirmed: createConfirmedAssetPublication(id, uri, catalog, imported),
         errors,
         message: errorMessage(unknownCatalogCommit.error),
       };

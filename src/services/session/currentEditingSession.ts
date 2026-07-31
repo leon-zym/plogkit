@@ -11,8 +11,9 @@ import {
 } from "@/core/editing";
 import { SKIA_EXPORT_CAPABILITIES } from "@/services/export/capabilities";
 import type {
-  AssetCatalogSnapshot,
+  AssetAccessSnapshot,
   AssetUsage,
+  ConfirmedAssetPublication,
   DraftId,
   DraftImportError,
   DraftLibrary,
@@ -26,7 +27,7 @@ export interface CurrentEditingSessionHandle {
   readonly draftId: DraftId;
   readonly contentRevision: number;
   readonly editing: EditCommitModule;
-  readonly assets: AssetCatalogSnapshot;
+  readonly assets: AssetAccessSnapshot;
   readonly preparePreviews: () => Promise<PrepareSessionPreviewsResult>;
   readonly addImages: (
     candidates: readonly ImportCandidate[],
@@ -52,6 +53,9 @@ export type SessionAssetMutationResult =
       readonly imported: readonly IngestedAsset[];
       readonly errors: readonly DraftImportError[];
       readonly commit: EditResult | null;
+      readonly storage:
+        | { readonly status: "reliable" }
+        | { readonly status: "recovery-required"; readonly message: string };
     }
   | {
       readonly status: "publish-failed";
@@ -110,7 +114,7 @@ interface ActiveSession {
 interface SessionState {
   readonly draftId: DraftId;
   active: boolean;
-  assets: AssetCatalogSnapshot;
+  assets: AssetAccessSnapshot;
   contentRevision: number;
   revision: number;
   dirtyRevision: number;
@@ -124,13 +128,25 @@ interface SessionState {
   deletion: "none" | "in-progress" | "unknown";
 }
 
-function createStableAssetAccess(state: SessionState): AssetCatalogSnapshot {
+function createStableAssetAccess(state: SessionState): AssetAccessSnapshot {
   return Object.freeze({
     get entries() {
       return state.assets.entries;
     },
     resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
       state.assets.resolve(assetId, usage),
+  });
+}
+
+function extendAssetAccess(
+  current: AssetAccessSnapshot,
+  confirmed: ConfirmedAssetPublication,
+): AssetAccessSnapshot {
+  const importedIds = confirmed.imported.map(({ image }) => image.id);
+  return Object.freeze({
+    entries: Object.freeze([...current.entries, ...importedIds]),
+    resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
+      confirmed.resolve(assetId, usage) ?? current.resolve(assetId, usage),
   });
 }
 
@@ -221,7 +237,7 @@ export function createCurrentEditingSession({
   const createActive = (
     id: DraftId,
     document: PlogDocument,
-    assets: AssetCatalogSnapshot,
+    assets: AssetAccessSnapshot,
     contentRevision: number,
   ): ActiveSession => {
     const state: SessionState = {
@@ -313,6 +329,7 @@ export function createCurrentEditingSession({
             imported: [],
             errors: overflow,
             commit: null,
+            storage: { status: "reliable" },
           };
         }
         const published = await library.ingest(id, accepted);
@@ -325,8 +342,22 @@ export function createCurrentEditingSession({
             ...(published.message === undefined ? {} : { message: published.message }),
           };
         }
-        if (published.assets === undefined) {
-          throw new Error("Draft Library ingest must return its published catalog snapshot");
+        if (published.status === "ingest-unknown") {
+          state.assets = extendAssetAccess(state.assets, published.confirmed);
+          const commit =
+            published.confirmed.imported.length === 0
+              ? null
+              : editController.commitPublishedAssets({
+                  type: "add",
+                  images: published.confirmed.imported.map(({ image }) => image),
+                });
+          return {
+            status: "completed",
+            imported: published.confirmed.imported,
+            errors: [...published.errors, ...overflow],
+            commit,
+            storage: { status: "recovery-required", message: published.message },
+          };
         }
         state.assets = published.assets;
         const commit =
@@ -341,6 +372,7 @@ export function createCurrentEditingSession({
           imported: published.imported,
           errors: [...published.errors, ...overflow],
           commit,
+          storage: { status: "reliable" },
         };
       } finally {
         finishAssetOperation(state);
@@ -359,6 +391,7 @@ export function createCurrentEditingSession({
             imported: [],
             errors: [],
             commit: { status: "rejected", code: "entity-not-found" },
+            storage: { status: "reliable" },
           };
         }
         const published = await library.ingest(id, [candidate]);
@@ -371,8 +404,19 @@ export function createCurrentEditingSession({
             ...(published.message === undefined ? {} : { message: published.message }),
           };
         }
-        if (published.assets === undefined) {
-          throw new Error("Draft Library ingest must return its published catalog snapshot");
+        if (published.status === "ingest-unknown") {
+          if (published.confirmed.imported.length !== 0) {
+            throw new Error(
+              "single-image replacement cannot have a confirmed prefix before recovery",
+            );
+          }
+          return {
+            status: "completed",
+            imported: [],
+            errors: published.errors,
+            commit: null,
+            storage: { status: "recovery-required", message: published.message },
+          };
         }
         if (published.imported.length > 1) {
           throw new Error("single-image replacement published more than one asset");
@@ -392,6 +436,7 @@ export function createCurrentEditingSession({
           imported: published.imported,
           errors: published.errors,
           commit,
+          storage: { status: "reliable" },
         };
       } finally {
         finishAssetOperation(state);

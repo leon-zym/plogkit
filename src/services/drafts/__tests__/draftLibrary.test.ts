@@ -1583,6 +1583,54 @@ describe("Draft Library", () => {
     });
   });
 
+  it("invalidates the authoritative state before unknown ingest cleanup settles", async () => {
+    const { files, library } = setup();
+    const created = await createDraft(library, [candidate("one")]);
+    if (created.status !== "created") throw new Error("expected a created Draft");
+    await settleBackgroundWork();
+    const catalogUri = `${firstDraftUri}/catalog.json`;
+    files.interruptMoveAfterCopyTo = catalogUri;
+    const removeDirectory = files.removeDirectory.bind(files);
+    let markCleanupStarted!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      markCleanupStarted = resolve;
+    });
+    let releaseCleanup!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    let shouldPauseCleanup = true;
+    files.removeDirectory = async (uri) => {
+      if (
+        shouldPauseCleanup &&
+        uri.startsWith("memory://library/staging/operation-")
+      ) {
+        shouldPauseCleanup = false;
+        markCleanupStarted();
+        await cleanupGate;
+      }
+      await removeDirectory(uri);
+    };
+
+    let ingestSettled = false;
+    const ingesting = library.ingest(created.draftId, [candidate("two")]);
+    void ingesting.then(() => {
+      ingestSettled = true;
+    });
+    await cleanupStarted;
+
+    expect(ingestSettled).toBe(false);
+    expect(library.getState()).toMatchObject({ status: "storage-failed" });
+
+    releaseCleanup();
+    await expect(ingesting).resolves.toMatchObject({
+      status: "ingest-unknown",
+      confirmed: { imported: [] },
+      errors: [{ index: 0, sourceUri: "picker://two.jpg" }],
+      message: "process interrupted after move copied its destination",
+    });
+  });
+
   it("preserves a partially committed ingest batch when the catalog outcome is unknown", async () => {
     const { files, library, createLibrary } = setup();
     const created = await createDraft(library, [candidate("one")]);
@@ -1609,12 +1657,29 @@ describe("Draft Library", () => {
       candidate("bad"),
     ]);
     expect(result).toMatchObject({
-      status: "ingest-failed",
-      imported: [],
-      errors: [],
+      status: "ingest-unknown",
+      confirmed: {
+        imported: [{ image: { id: "provider:item/../2" } }],
+      },
+      errors: [
+        { index: 1, sourceUri: "picker://later.jpg" },
+        { index: 2, sourceUri: "picker://bad.jpg" },
+      ],
       message: "process interrupted after move copied its destination",
     });
     expect(result).not.toHaveProperty("assets");
+    if (result.status !== "ingest-unknown") {
+      throw new Error("expected an unknown catalog outcome");
+    }
+    expect(
+      result.confirmed.resolve(importedAssetId("provider:item/../2"), "original"),
+    ).toMatchObject({ assetId: "provider:item/../2" });
+    expect(
+      result.confirmed.resolve(importedAssetId("provider:item/../1"), "original"),
+    ).toBeNull();
+    expect(
+      result.confirmed.resolve(importedAssetId("provider:item/../3"), "original"),
+    ).toBeNull();
     expect(library.getState()).toMatchObject({ status: "storage-failed" });
     expect(
       [...files.files.keys()].filter(
@@ -1646,7 +1711,8 @@ describe("Draft Library", () => {
     ).toBe(true);
 
     files.storageInterrupted = false;
-    const restarted = await createLibrary().read(created.draftId);
+    const restartedLibrary = createLibrary();
+    const restarted = await restartedLibrary.read(created.draftId);
     expect(restarted).toMatchObject({
       status: "ready",
       assets: {
@@ -1671,31 +1737,72 @@ describe("Draft Library", () => {
         uri.startsWith("memory://library/staging/operation-"),
       ),
     ).toBe(false);
+
+    const confirmed = result.confirmed.imported[0];
+    if (confirmed === undefined) throw new Error("expected a confirmed asset");
+    const documentWithConfirmedAsset = updateDocument(created.document, {
+      sourceImages: [...created.document.sourceImages, confirmed.image],
+      stitch: {
+        ...created.document.stitch,
+        order: [...created.document.stitch.order, confirmed.image.id],
+      },
+    });
+    await expect(
+      restartedLibrary.save(created.draftId, documentWithConfirmedAsset),
+    ).resolves.toMatchObject({ status: "saved" });
+    await restartedLibrary.maintainInactive(created.draftId);
+    await expect(restartedLibrary.read(created.draftId)).resolves.toMatchObject({
+      status: "ready",
+      assets: {
+        entries: ["provider:item/../1", "provider:item/../2"],
+      },
+    });
+    expect(files.files.has(`${firstDraftUri}/assets/asset-2.jpg`)).toBe(true);
+    expect(files.files.has(`${firstDraftUri}/previews/asset-2.jpg`)).toBe(true);
+    expect(files.files.has(`${firstDraftUri}/assets/asset-3.jpg`)).toBe(false);
+    expect(files.files.has(`${firstDraftUri}/previews/asset-3.jpg`)).toBe(false);
+    expect(files.files.has(`${firstDraftUri}/metadata/asset-3.json`)).toBe(false);
   });
 
-  it("keeps unknown candidate files until restart proves that the old catalog won", async () => {
+  it("keeps the confirmed prefix when restart proves that the old catalog won", async () => {
     const { files, library, createLibrary } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
     await settleBackgroundWork();
     const catalogUri = `${firstDraftUri}/catalog.json`;
-    files.interruptMoveAfterDestinationRemovalTo = catalogUri;
+    const moveFile = files.moveFile.bind(files);
+    let catalogCommitAttempts = 0;
+    files.moveFile = async (sourceUri, destinationUri) => {
+      if (destinationUri === catalogUri) {
+        catalogCommitAttempts += 1;
+        if (catalogCommitAttempts === 2) {
+          files.interruptMoveAfterDestinationRemovalTo = catalogUri;
+        }
+      }
+      await moveFile(sourceUri, destinationUri);
+    };
     const withMetadata = {
-      ...candidate("two"),
+      ...candidate("later"),
       exif: { Make: "Plog Camera", Model: "Rollback Proof" },
     };
 
-    await expect(library.ingest(created.draftId, [withMetadata])).resolves.toMatchObject({
-      status: "ingest-failed",
-      imported: [],
-      errors: [],
+    const result = await library.ingest(created.draftId, [
+      candidate("two"),
+      withMetadata,
+    ]);
+    expect(result).toMatchObject({
+      status: "ingest-unknown",
+      confirmed: {
+        imported: [{ image: { id: "provider:item/../2" } }],
+      },
+      errors: [{ index: 1, sourceUri: "picker://later.jpg" }],
       message: "process interrupted after move removed its destination",
     });
     expect(library.getState()).toMatchObject({ status: "storage-failed" });
     const candidateUris = [
-      `${firstDraftUri}/assets/asset-2.jpg`,
-      `${firstDraftUri}/previews/asset-2.jpg`,
-      `${firstDraftUri}/metadata/asset-2.json`,
+      `${firstDraftUri}/assets/asset-3.jpg`,
+      `${firstDraftUri}/previews/asset-3.jpg`,
+      `${firstDraftUri}/metadata/asset-3.json`,
     ];
     for (const uri of candidateUris) expect(files.files.has(uri)).toBe(true);
     expect(files.files.has(catalogUri)).toBe(false);
@@ -1706,14 +1813,31 @@ describe("Draft Library", () => {
     const restarted = createLibrary();
     await expect(restarted.read(created.draftId)).resolves.toMatchObject({
       status: "ready",
-      assets: { entries: ["provider:item/../1"] },
+      assets: { entries: ["provider:item/../1", "provider:item/../2"] },
     });
     for (const uri of candidateUris) expect(files.files.has(uri)).toBe(true);
     expect(files.files.has(`${catalogUri}.backup`)).toBe(false);
     expect(files.files.has(`${catalogUri}.tmp`)).toBe(false);
 
+    if (result.status !== "ingest-unknown") {
+      throw new Error("expected an unknown catalog outcome");
+    }
+    const confirmed = result.confirmed.imported[0];
+    if (confirmed === undefined) throw new Error("expected a confirmed asset");
+    const documentWithConfirmedAsset = updateDocument(created.document, {
+      sourceImages: [...created.document.sourceImages, confirmed.image],
+      stitch: {
+        ...created.document.stitch,
+        order: [...created.document.stitch.order, confirmed.image.id],
+      },
+    });
+    await expect(
+      restarted.save(created.draftId, documentWithConfirmedAsset),
+    ).resolves.toMatchObject({ status: "saved" });
     await restarted.maintainInactive(created.draftId);
     for (const uri of candidateUris) expect(files.files.has(uri)).toBe(false);
+    expect(files.files.has(`${firstDraftUri}/assets/asset-2.jpg`)).toBe(true);
+    expect(files.files.has(`${firstDraftUri}/previews/asset-2.jpg`)).toBe(true);
   });
 
   it("serializes reads and inactive maintenance behind an in-flight save for the same Draft", async () => {
@@ -2343,7 +2467,7 @@ describe("Draft Library", () => {
       imported: [{ image: { id: "provider:item/../3", width: 4000, height: 3000 } }],
       errors: [{ index: 0, sourceUri: "picker://bad.jpg", message: "preview decode failed" }],
     });
-    if (result.assets === undefined) throw new Error("expected a catalog snapshot");
+    if (result.status !== "ingested") throw new Error("expected an ingested batch");
     expect(originalSnapshot.entries).toEqual(["provider:item/../1"]);
     expect(result.assets.entries).toEqual(["provider:item/../1", "provider:item/../3"]);
     expect(
@@ -2431,10 +2555,9 @@ describe("Draft Library", () => {
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
     const ingested = await library.ingest(created.draftId, [candidate("two")]);
+    if (ingested.status !== "ingested") throw new Error("expected an ingested batch");
     const removed = ingested.imported[0]?.image;
-    if (removed === undefined || ingested.assets === undefined) {
-      throw new Error("expected an ingested asset");
-    }
+    if (removed === undefined) throw new Error("expected an ingested asset");
     const removedOriginal = ingested.assets.resolve(removed.id, "original");
     if (removedOriginal === null) throw new Error("expected original descriptor");
     const latest = updateDocument(created.document, {

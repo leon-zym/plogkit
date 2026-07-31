@@ -123,10 +123,19 @@ class MemoryDraftLibrary implements DraftLibrary {
     return { status: "saved", ...draftVersionFacts, document };
   }
 
-  async ingest(id: DraftId, candidates: readonly ImportCandidate[]) {
-    return this.ingestImplementation === null
-      ? { status: "ingested" as const, imported: [], errors: [] }
-      : this.ingestImplementation(id, candidates);
+  async ingest(
+    id: DraftId,
+    candidates: readonly ImportCandidate[],
+  ): Promise<IngestAssetsResult> {
+    if (this.ingestImplementation !== null) {
+      return this.ingestImplementation(id, candidates);
+    }
+    return {
+      status: "ingested",
+      imported: [],
+      errors: [],
+      assets: this.aggregates.get(id)?.assets ?? createAssets(id, []),
+    };
   }
 
   async readPreview() {
@@ -861,6 +870,82 @@ describe("current editing session", () => {
     expect(library.saveCalls).toHaveLength(2);
   });
 
+  it("commits the confirmed add prefix once when catalog recovery is required", async () => {
+    const { library, session } = setup(10_000);
+    const opened = await session.open(firstDraftId);
+    if (opened.status !== "opened") throw new Error("expected an open session");
+    const addedImageId = importedAssetId("asset:confirmed");
+    const unknownImageId = importedAssetId("asset:unknown");
+    library.ingestImplementation = async () => ({
+      status: "ingest-unknown",
+      confirmed: {
+        imported: [
+          {
+            image: { id: addedImageId, width: 800, height: 600 },
+            sourceKind: "image",
+          },
+        ],
+        resolve: (assetId, usage) =>
+          assetId === addedImageId
+            ? {
+                draftId: firstDraftId,
+                assetId,
+                usage,
+                uri: `memory://${firstDraftId}/${assetId}/${usage}`,
+              }
+            : null,
+      },
+      errors: [
+        {
+          index: 1,
+          sourceUri: "picker://unknown.jpg",
+          message: "catalog recovery is required",
+        },
+      ],
+      message: "storage outcome is unknown",
+    });
+    let commitNotifications = 0;
+    let confirmedResolvedAtCommit = false;
+    const unsubscribe = opened.handle.editing.subscribe(() => {
+      commitNotifications += 1;
+      confirmedResolvedAtCommit =
+        opened.handle.assets.resolve(addedImageId, "original")?.assetId === addedImageId;
+    });
+
+    const result = await opened.handle.addImages([
+      candidate("picker://confirmed.jpg"),
+      candidate("picker://unknown.jpg"),
+    ]);
+    unsubscribe();
+
+    expect(result).toMatchObject({
+      status: "completed",
+      storage: {
+        status: "recovery-required",
+        message: "storage outcome is unknown",
+      },
+      imported: [{ image: { id: addedImageId } }],
+      errors: [{ index: 1, sourceUri: "picker://unknown.jpg" }],
+      commit: { status: "changed", revision: 1 },
+    });
+    expect(commitNotifications).toBe(1);
+    expect(confirmedResolvedAtCommit).toBe(true);
+    expect(opened.handle.editing.read().document.sourceImages.map(({ id }) => id)).toEqual([
+      firstImageId,
+      addedImageId,
+    ]);
+    expect(opened.handle.assets.resolve(firstImageId, "original")).not.toBeNull();
+    expect(opened.handle.assets.resolve(addedImageId, "original")).not.toBeNull();
+    expect(opened.handle.assets.resolve(unknownImageId, "original")).toBeNull();
+
+    await session.flush();
+    expect(library.saveCalls).toHaveLength(1);
+    expect(library.saveCalls[0]?.document.sourceImages.map(({ id }) => id)).toEqual([
+      firstImageId,
+      addedImageId,
+    ]);
+  });
+
   it("reports overflow before ingest and commits the successful capacity-limited batch", async () => {
     const { library, session } = setup(10_000);
     const existingImages = Array.from({ length: 8 }, (_, index) => ({
@@ -1115,5 +1200,46 @@ describe("current editing session", () => {
     expect(result).toMatchObject({ status: "completed", imported: [], commit: null });
     expect(opened.handle.editing.read()).toMatchObject({ revision: 0, canUndo: false });
     expect(opened.handle.editing.read().document.sourceImages[0]?.id).toBe(firstImageId);
+  });
+
+  it("does not replace an image when its only catalog commit requires recovery", async () => {
+    const { library, session } = setup(10_000);
+    const opened = await session.open(firstDraftId);
+    if (opened.status !== "opened") throw new Error("expected an open session");
+    const originalUri = opened.handle.assets.resolve(firstImageId, "original")?.uri;
+    library.ingestImplementation = async () => ({
+      status: "ingest-unknown",
+      confirmed: {
+        imported: [],
+        resolve: () => null,
+      },
+      errors: [
+        {
+          index: 0,
+          sourceUri: "picker://unknown.jpg",
+          message: "catalog recovery is required",
+        },
+      ],
+      message: "storage outcome is unknown",
+    });
+
+    const result = await opened.handle.replaceImage(
+      firstImageId,
+      candidate("picker://unknown.jpg"),
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      storage: {
+        status: "recovery-required",
+        message: "storage outcome is unknown",
+      },
+      imported: [],
+      errors: [{ index: 0, sourceUri: "picker://unknown.jpg" }],
+      commit: null,
+    });
+    expect(opened.handle.editing.read()).toMatchObject({ revision: 0, canUndo: false });
+    expect(opened.handle.editing.read().document.sourceImages[0]?.id).toBe(firstImageId);
+    expect(opened.handle.assets.resolve(firstImageId, "original")?.uri).toBe(originalUri);
   });
 });
