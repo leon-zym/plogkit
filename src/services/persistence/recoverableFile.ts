@@ -11,6 +11,11 @@ export interface RecoverableFileState {
   readonly isValid: (uri: string) => Promise<boolean>;
 }
 
+export type CommitPreparedFileOutcome =
+  | { readonly status: "committed" }
+  | { readonly status: "not-committed"; readonly error: unknown }
+  | { readonly status: "unknown"; readonly error: unknown };
+
 async function exists(files: RecoverableFileAdapter, uri: string): Promise<boolean> {
   return files.fileExists(uri);
 }
@@ -68,11 +73,11 @@ export async function recoverFile(
   return false;
 }
 
-export async function commitPreparedFile(
+export async function commitPreparedFileWithOutcome(
   files: RecoverableFileAdapter,
   state: RecoverableFileState,
   isPreparedCurrent: (uri: string) => Promise<boolean>,
-): Promise<void> {
+): Promise<CommitPreparedFileOutcome> {
   try {
     if (await exists(files, state.currentUri)) {
       await files.moveFile(state.currentUri, state.backupUri);
@@ -82,20 +87,44 @@ export async function commitPreparedFile(
       throw new Error("replacement did not produce a valid current file");
     }
     await bestEffortRemove(files, state.backupUri);
+    return { status: "committed" };
   } catch (error: unknown) {
-    let recovered = false;
+    let recovered: boolean;
     try {
       recovered = await recoverFile(files, state);
     } catch {
-      // Preserve every remaining candidate for restart recovery.
-    }
-    if (recovered) {
       try {
-        if (await isPreparedCurrent(state.currentUri)) return;
+        if (await isValid(state, state.currentUri)) {
+          return (await isPreparedCurrent(state.currentUri))
+            ? { status: "committed" }
+            : { status: "not-committed", error };
+        }
+        if (await isValid(state, state.backupUri)) {
+          return { status: "not-committed", error };
+        }
+        return (await isValid(state, state.temporaryUri))
+          ? { status: "unknown", error }
+          : { status: "not-committed", error };
       } catch {
-        // The original move failure remains the observable transaction result.
+        return { status: "unknown", error };
       }
     }
-    throw error;
+    if (!recovered) return { status: "not-committed", error };
+    try {
+      return (await isPreparedCurrent(state.currentUri))
+        ? { status: "committed" }
+        : { status: "not-committed", error };
+    } catch {
+      return { status: "unknown", error };
+    }
   }
+}
+
+export async function commitPreparedFile(
+  files: RecoverableFileAdapter,
+  state: RecoverableFileState,
+  isPreparedCurrent: (uri: string) => Promise<boolean>,
+): Promise<void> {
+  const outcome = await commitPreparedFileWithOutcome(files, state, isPreparedCurrent);
+  if (outcome.status !== "committed") throw outcome.error;
 }

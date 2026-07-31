@@ -1,4 +1,5 @@
 import {
+  commitPreparedFileWithOutcome,
   recoverFile,
   type RecoverableFileAdapter,
   type RecoverableFileState,
@@ -6,6 +7,8 @@ import {
 
 class MemoryFiles implements RecoverableFileAdapter {
   readonly entries = new Map<string, string>();
+  failMoveTo: string | null = null;
+  failMoveAfterCopyTo: string | null = null;
 
   async fileExists(uri: string): Promise<boolean> {
     return this.entries.has(uri);
@@ -15,6 +18,15 @@ class MemoryFiles implements RecoverableFileAdapter {
     const value = this.entries.get(sourceUri);
     if (value === undefined) throw new Error(`missing ${sourceUri}`);
     if (this.entries.has(destinationUri)) throw new Error(`destination exists ${destinationUri}`);
+    if (this.failMoveTo === destinationUri) {
+      this.failMoveTo = null;
+      throw new Error("move failed");
+    }
+    if (this.failMoveAfterCopyTo === destinationUri) {
+      this.failMoveAfterCopyTo = null;
+      this.entries.set(destinationUri, value);
+      throw new Error("move copied destination but retained source");
+    }
     this.entries.delete(sourceUri);
     this.entries.set(destinationUri, value);
   }
@@ -90,5 +102,67 @@ describe("recoverFile", () => {
     expect(files.entries.get(currentUri)).toBe("broken");
     expect(files.entries.has(backupUri)).toBe(false);
     expect(files.entries.has(temporaryUri)).toBe(false);
+  });
+});
+
+describe("commitPreparedFileWithOutcome", () => {
+  it("reports committed when recovery confirms the prepared current", async () => {
+    const files = new MemoryFiles();
+    files.entries.set(currentUri, "old");
+    files.entries.set(temporaryUri, "new");
+    files.failMoveAfterCopyTo = currentUri;
+
+    await expect(
+      commitPreparedFileWithOutcome(
+        files,
+        state(files),
+        async (uri) => files.entries.get(uri) === "new",
+      ),
+    ).resolves.toEqual({ status: "committed" });
+    expect(files.entries.get(currentUri)).toBe("new");
+    expect(files.entries.has(backupUri)).toBe(false);
+    expect(files.entries.has(temporaryUri)).toBe(false);
+  });
+
+  it("reports not committed when recovery restores the previous current", async () => {
+    const files = new MemoryFiles();
+    files.entries.set(currentUri, "old");
+    files.entries.set(temporaryUri, "new");
+    files.failMoveTo = currentUri;
+
+    const outcome = await commitPreparedFileWithOutcome(
+      files,
+      state(files),
+      async (uri) => files.entries.get(uri) === "new",
+    );
+
+    expect(outcome).toMatchObject({ status: "not-committed" });
+    expect(files.entries.get(currentUri)).toBe("old");
+    expect(files.entries.has(backupUri)).toBe(false);
+    expect(files.entries.has(temporaryUri)).toBe(false);
+  });
+
+  it("reports unknown and preserves candidates when recovery cannot classify the result", async () => {
+    const files = new MemoryFiles();
+    files.entries.set(currentUri, "old");
+    files.entries.set(temporaryUri, "new");
+    files.failMoveAfterCopyTo = currentUri;
+    const uncertainState: RecoverableFileState = {
+      ...state(files),
+      isValid: async () => {
+        throw new Error("validation unavailable");
+      },
+    };
+
+    const outcome = await commitPreparedFileWithOutcome(
+      files,
+      uncertainState,
+      async (uri) => files.entries.get(uri) === "new",
+    );
+
+    expect(outcome).toMatchObject({ status: "unknown" });
+    expect(files.entries.get(currentUri)).toBe("new");
+    expect(files.entries.get(backupUri)).toBe("old");
+    expect(files.entries.get(temporaryUri)).toBe("new");
   });
 });

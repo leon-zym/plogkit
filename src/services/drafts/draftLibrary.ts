@@ -10,9 +10,16 @@ import type { MetadataPolicy } from "@/core/exportPolicy";
 import { extractImageMetadata, type ImageMetadataSidecar } from "@/services/image-import/metadata";
 import {
   commitPreparedFile,
+  commitPreparedFileWithOutcome,
   recoverFile,
   type RecoverableFileState,
 } from "@/services/persistence/recoverableFile";
+
+import {
+  createDraftThumbnailLifecycle,
+  type DraftThumbnailAttemptSettlement,
+  type DraftThumbnailSource,
+} from "./draftThumbnailLifecycle";
 
 export type ImportCandidateKind = "image" | "livePhoto" | "unsupported";
 
@@ -107,10 +114,12 @@ export interface AssetDescriptor {
   readonly uri: string;
 }
 
-export interface AssetCatalogSnapshot {
+export interface AssetAccessSnapshot {
   readonly entries: readonly ImportedAssetId[];
   readonly resolve: (assetId: ImportedAssetId, usage: AssetUsage) => AssetDescriptor | null;
 }
+
+export type AssetCatalogSnapshot = AssetAccessSnapshot;
 
 export interface DraftImportError {
   readonly index: number;
@@ -182,13 +191,30 @@ export interface IngestedAsset {
   readonly sourceKind: Exclude<ImportCandidateKind, "unsupported">;
 }
 
-export interface IngestAssetsResult {
-  readonly status: "ingested" | "ingest-failed";
+export interface ConfirmedAssetPublication {
   readonly imported: readonly IngestedAsset[];
-  readonly errors: readonly DraftImportError[];
-  readonly assets?: AssetCatalogSnapshot;
-  readonly message?: string;
+  readonly resolve: (assetId: ImportedAssetId, usage: AssetUsage) => AssetDescriptor | null;
 }
+
+export type IngestAssetsResult =
+  | {
+      readonly status: "ingested";
+      readonly imported: readonly IngestedAsset[];
+      readonly errors: readonly DraftImportError[];
+      readonly assets: AssetCatalogSnapshot;
+    }
+  | {
+      readonly status: "ingest-unknown";
+      readonly confirmed: ConfirmedAssetPublication;
+      readonly errors: readonly DraftImportError[];
+      readonly message: string;
+    }
+  | {
+      readonly status: "ingest-failed";
+      readonly imported: readonly [];
+      readonly errors: readonly DraftImportError[];
+      readonly message?: string;
+    };
 
 export type ReadPreviewResult =
   | {
@@ -292,27 +318,9 @@ interface DraftDeletionRecord {
   readonly draftId: DraftId;
 }
 
-interface DraftThumbnailPairRecord {
-  readonly thumbnailPairSchemaVersion: 1;
-  readonly draftId: DraftId;
-  readonly contentRevision: number;
-  readonly profileVersion: number;
-  readonly squareFile: string;
-  readonly originalFile: string;
-  readonly square: DraftThumbnailSize;
-  readonly original: DraftThumbnailSize;
-}
-
 interface ImportedStagedAsset {
   readonly entry: CatalogEntry;
   readonly image: SourceImage;
-}
-
-interface ThumbnailRequest {
-  readonly id: DraftId;
-  readonly root: DraftRootRecord;
-  readonly catalog: Catalog;
-  readonly uri: string;
 }
 
 type ValidatedAggregate =
@@ -590,63 +598,6 @@ function deletionJson(id: DraftId): string {
   return JSON.stringify({ deletionSchemaVersion: 1, draftId: id });
 }
 
-function parseThumbnailSize(value: unknown, label: string): DraftThumbnailSize {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} thumbnail size is invalid`);
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.width !== "number" ||
-    !Number.isInteger(record.width) ||
-    record.width <= 0 ||
-    typeof record.height !== "number" ||
-    !Number.isInteger(record.height) ||
-    record.height <= 0
-  ) {
-    throw new Error(`${label} thumbnail size is invalid`);
-  }
-  return Object.freeze({ width: record.width, height: record.height });
-}
-
-function parseThumbnailPairJson(json: string): DraftThumbnailPairRecord {
-  const input: unknown = JSON.parse(json);
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error("Draft thumbnail pair must be an object");
-  }
-  const record = input as Record<string, unknown>;
-  if (
-    record.thumbnailPairSchemaVersion !== 1 ||
-    typeof record.draftId !== "string" ||
-    typeof record.contentRevision !== "number" ||
-    !Number.isInteger(record.contentRevision) ||
-    record.contentRevision <= 0 ||
-    typeof record.profileVersion !== "number" ||
-    !Number.isInteger(record.profileVersion) ||
-    record.profileVersion <= 0 ||
-    typeof record.squareFile !== "string" ||
-    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.squareFile) ||
-    typeof record.originalFile !== "string" ||
-    !/^[A-Za-z0-9_-]+\.jpg$/.test(record.originalFile) ||
-    record.squareFile === record.originalFile
-  ) {
-    throw new Error("Draft thumbnail pair schema is invalid");
-  }
-  return Object.freeze({
-    thumbnailPairSchemaVersion: 1,
-    draftId: draftId(record.draftId),
-    contentRevision: record.contentRevision,
-    profileVersion: record.profileVersion,
-    squareFile: record.squareFile,
-    originalFile: record.originalFile,
-    square: parseThumbnailSize(record.square, "square"),
-    original: parseThumbnailSize(record.original, "original"),
-  });
-}
-
-function thumbnailPairJson(record: DraftThumbnailPairRecord): string {
-  return JSON.stringify(record);
-}
-
 function readyListEntry(
   root: DraftRootRecord,
   thumbnail: DraftThumbnailPair | null = null,
@@ -732,6 +683,53 @@ function createCatalogSnapshot(
   });
 }
 
+function createConfirmedAssetPublication(
+  id: DraftId,
+  draftUri: string,
+  catalog: Catalog,
+  imported: readonly IngestedAsset[],
+): ConfirmedAssetPublication {
+  const assets = createCatalogSnapshot(id, draftUri, catalog);
+  const confirmedIds = new Set(imported.map(({ image }) => image.id));
+  return Object.freeze({
+    imported: Object.freeze([...imported]),
+    resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
+      confirmedIds.has(assetId) ? assets.resolve(assetId, usage) : null,
+  });
+}
+
+function sameAssetDescriptor(
+  left: AssetDescriptor | null,
+  right: AssetDescriptor | null,
+): boolean {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.draftId === right.draftId &&
+      left.assetId === right.assetId &&
+      left.usage === right.usage &&
+      left.uri === right.uri)
+  );
+}
+
+function isCurrentThumbnailSource(
+  source: DraftThumbnailSource,
+  id: DraftId,
+  uri: string,
+  root: DraftRootRecord,
+  catalog: Catalog,
+): boolean {
+  if (JSON.stringify(source.document) !== JSON.stringify(root.document)) return false;
+  const current = createCatalogSnapshot(id, uri, catalog);
+  return source.document.sourceImages.every((image) =>
+    sameAssetDescriptor(
+      source.assets.resolve(image.id, "original"),
+      current.resolve(image.id, "original"),
+    ),
+  );
+}
+
 function sourceImage(entry: CatalogEntry): SourceImage {
   return Object.freeze({ id: entry.id, width: entry.width, height: entry.height });
 }
@@ -756,9 +754,6 @@ export function createDraftLibrary({
   const draftOperationTails = new Map<DraftId, Promise<void>>();
   const confirmedDeletedIds = new Set<DraftId>();
   const unknownDeletionIds = new Set<DraftId>();
-  const runningThumbnailIds = new Set<DraftId>();
-  const pendingThumbnails = new Map<DraftId, ThumbnailRequest>();
-  const attemptedThumbnailRevisions = new Map<DraftId, Set<number>>();
   let state: DraftLibraryState = Object.freeze({ status: "uninitialized" });
   let loadPromise: Promise<DraftLibraryState> | null = null;
   const pendingReadyUpdates: ((
@@ -836,14 +831,6 @@ export function createDraftLibrary({
     }
   };
 
-  const originalFileExists = async (uri: string): Promise<boolean> => {
-    try {
-      return await files.fileExists(uri);
-    } catch {
-      return false;
-    }
-  };
-
   const initialize = (): Promise<void> => {
     initializePromise ??= (async () => {
       try {
@@ -882,8 +869,6 @@ export function createDraftLibrary({
   };
 
   const draftUri = (id: DraftId): string => child(draftsUri, storageDraftName(id));
-  const draftThumbnailsUri = (id: DraftId): string => child(draftUri(id), "thumbnails");
-  const thumbnailPairUri = (id: DraftId): string => child(draftUri(id), "thumbnail-pair.json");
   const deletionMarkerUri = (id: DraftId): string =>
     child(deletionsUri, `${storageDraftName(id)}.json`);
 
@@ -918,27 +903,14 @@ export function createDraftLibrary({
     return marker.draftId === id ? "valid" : "invalid";
   };
 
-  const readCommittedThumbnailPair = async (
-    id: DraftId,
-    maximumRevision = Number.MAX_SAFE_INTEGER,
-  ): Promise<DraftThumbnailPair | null> => {
-    const pairUri = thumbnailPairUri(id);
-    const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
+  const cleanupDeletedDraft = async (id: DraftId): Promise<void> => {
+    await safeRemoveDirectory(draftUri(id));
     try {
-      if (!(await recoverFile(files, pairState)) || !(await files.fileExists(pairUri))) return null;
-      const record = parseThumbnailPairJson(await files.readText(pairUri));
-      if (record.draftId !== id || record.contentRevision > maximumRevision) return null;
-      const squareUri = child(draftThumbnailsUri(id), record.squareFile);
-      const originalUri = child(draftThumbnailsUri(id), record.originalFile);
-      if (!(await files.fileExists(squareUri)) || !(await files.fileExists(originalUri))) return null;
-      return Object.freeze({
-        contentRevision: record.contentRevision,
-        profileVersion: record.profileVersion,
-        squareUri,
-        originalUri,
-      });
+      if (!(await files.directoryExists(draftUri(id)))) {
+        await safeRemoveFile(deletionMarkerUri(id));
+      }
     } catch {
-      return null;
+      // Keep the marker until a later maintenance pass can prove the Draft directory is absent.
     }
   };
 
@@ -1147,36 +1119,7 @@ export function createDraftLibrary({
       }
     }
 
-    const thumbnailsUri = draftThumbnailsUri(id);
-    let retainedThumbnailUris: ReadonlySet<string>;
-    try {
-      const pairUri = thumbnailPairUri(id);
-      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
-      const recovered = await recoverFile(files, pairState);
-      if (!recovered || !(await files.fileExists(pairUri))) {
-        retainedThumbnailUris = new Set();
-      } else {
-        const pair = parseThumbnailPairJson(await files.readText(pairUri));
-        if (pair.draftId !== id || pair.contentRevision > root.contentRevision) return;
-        retainedThumbnailUris = new Set([
-          child(thumbnailsUri, pair.squareFile),
-          child(thumbnailsUri, pair.originalFile),
-        ]);
-      }
-    } catch {
-      return;
-    }
-    let thumbnailCandidates: readonly string[];
-    try {
-      thumbnailCandidates = await files.listFiles(thumbnailsUri);
-    } catch {
-      return;
-    }
-    for (const candidate of thumbnailCandidates) {
-      if (isDirectChild(thumbnailsUri, candidate) && !retainedThumbnailUris.has(candidate)) {
-        await safeRemoveFile(candidate);
-      }
-    }
+    await thumbnailLifecycle.maintain(id, root.contentRevision);
   };
 
   const readUnserialized = async (id: DraftId): Promise<ReadDraftResult> => {
@@ -1188,176 +1131,97 @@ export function createDraftLibrary({
     return loadAggregate(id);
   };
 
-  const markThumbnailGenerationFinished = (
-    id: DraftId,
-    revision: number,
-    succeeded: boolean,
-  ): void => {
-    if (succeeded) return;
+  const settleThumbnailAttempt = (settlement: DraftThumbnailAttemptSettlement): void => {
     updateReadyEntries((entries) =>
-      entries.map((candidate) =>
-        candidate.draftId === id &&
-        candidate.status === "ready" &&
-        candidate.contentRevision === revision
-          ? Object.freeze({
-              ...candidate,
-              thumbnailStatus: candidate.thumbnail === null ? "unavailable" : "ready",
-            })
-          : candidate,
-      ),
+      entries.map((entry) => {
+        if (
+          entry.draftId !== settlement.draftId ||
+          entry.status !== "ready" ||
+          entry.contentRevision !== settlement.contentRevision
+        ) {
+          return entry;
+        }
+        if (settlement.status === "failed") {
+          return Object.freeze({
+            ...entry,
+            thumbnailStatus: entry.thumbnail === null ? "unavailable" : "ready",
+          });
+        }
+        return Object.freeze({
+          ...entry,
+          thumbnail: settlement.pair,
+          thumbnailStatus: "ready",
+        });
+      }),
     );
   };
 
-  const commitThumbnailPair = async (
-    request: ThumbnailRequest,
-    squareFile: string,
-    originalFile: string,
-    generated: { readonly square: DraftThumbnailSize; readonly original: DraftThumbnailSize },
-  ): Promise<boolean> => {
-    return serializeDraftOperation(request.id, async () => {
-      if (
-        confirmedDeletedIds.has(request.id) ||
-        (await inspectDeletionMarker(request.id)) === "valid" ||
-        (await inspectPublication(request.id)) !== "valid"
-      ) {
-        return false;
-      }
-      const validated = await validateAggregate(request.id);
-      if (
-        validated.status !== "valid" ||
-        validated.root.contentRevision !== request.root.contentRevision
-      ) {
-        return false;
-      }
-      const squareUri = child(draftThumbnailsUri(request.id), squareFile);
-      const originalUri = child(draftThumbnailsUri(request.id), originalFile);
-      const [square, original] = await Promise.all([
-        thumbnails.inspect(squareUri),
-        thumbnails.inspect(originalUri),
-      ]);
-      if (
-        square === null ||
-        original === null ||
-        square.width !== generated.square.width ||
-        square.height !== generated.square.height ||
-        original.width !== generated.original.width ||
-        original.height !== generated.original.height ||
-        square.width !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
-        square.height !== DRAFT_THUMBNAIL_PROFILE.squareSize ||
-        Math.max(original.width, original.height) > DRAFT_THUMBNAIL_PROFILE.originalLongEdge
-      ) {
-        return false;
-      }
-      const record: DraftThumbnailPairRecord = Object.freeze({
-        thumbnailPairSchemaVersion: 1,
-        draftId: request.id,
-        contentRevision: request.root.contentRevision,
-        profileVersion: DRAFT_THUMBNAIL_PROFILE.profileVersion,
-        squareFile,
-        originalFile,
-        square,
-        original,
-      });
-      const pairUri = thumbnailPairUri(request.id);
-      const pairState = textFileState(files, pairUri, parseThumbnailPairJson);
-      const json = thumbnailPairJson(record);
-      await recoverFile(files, pairState);
-      await files.writeText(pairState.temporaryUri, json);
-      await commitPreparedFile(
-        files,
-        pairState,
-        async (currentUri) => (await files.readText(currentUri)) === json,
-      );
-      const pair = Object.freeze({
-        contentRevision: record.contentRevision,
-        profileVersion: record.profileVersion,
-        squareUri,
-        originalUri,
-      });
-      updateReadyEntries((entries) =>
-        entries.map((entry) =>
-          entry.draftId === request.id &&
-          entry.status === "ready" &&
-          entry.contentRevision >= pair.contentRevision
-            ? Object.freeze({ ...entry, thumbnail: pair, thumbnailStatus: "ready" })
-            : entry,
-        ),
-      );
-      return true;
-    });
-  };
-
-  const runThumbnailGeneration = async (request: ThumbnailRequest): Promise<void> => {
-    const attempted = attemptedThumbnailRevisions.get(request.id) ?? new Set<number>();
-    attempted.add(request.root.contentRevision);
-    attemptedThumbnailRevisions.set(request.id, attempted);
-    const generationId = assertStorageKey(createThumbnailGenerationId());
-    const prefix = `r${request.root.contentRevision}-p${DRAFT_THUMBNAIL_PROFILE.profileVersion}-${generationId}`;
-    const squareFile = `${prefix}-square.jpg`;
-    const originalFile = `${prefix}-original.jpg`;
-    const squareUri = child(draftThumbnailsUri(request.id), squareFile);
-    const originalUri = child(draftThumbnailsUri(request.id), originalFile);
-    let succeeded = false;
-    try {
-      const generated = await thumbnails.generate({
-        draftId: request.id,
-        contentRevision: request.root.contentRevision,
-        document: request.root.document,
-        assets: createCatalogSnapshot(request.id, request.uri, request.catalog),
-        profile: DRAFT_THUMBNAIL_PROFILE,
-        squareUri,
-        originalUri,
-      });
-      succeeded = await commitThumbnailPair(
-        request,
-        squareFile,
-        originalFile,
-        generated,
-      );
-    } catch {
-      succeeded = false;
-    } finally {
-      markThumbnailGenerationFinished(request.id, request.root.contentRevision, succeeded);
-      runningThumbnailIds.delete(request.id);
-      const pending = pendingThumbnails.get(request.id);
-      pendingThumbnails.delete(request.id);
-      if (pending !== undefined) queueThumbnail(pending);
-    }
-  };
-
-  const queueThumbnail = (request: ThumbnailRequest): void => {
-    const attempted = attemptedThumbnailRevisions.get(request.id);
-    if (attempted?.has(request.root.contentRevision) === true) return;
-    if (runningThumbnailIds.has(request.id)) {
-      const pending = pendingThumbnails.get(request.id);
-      if (pending === undefined || pending.root.contentRevision < request.root.contentRevision) {
-        pendingThumbnails.set(request.id, request);
-      }
-      return;
-    }
-    runningThumbnailIds.add(request.id);
-    void runThumbnailGeneration(request);
-  };
-
-  const scheduleThumbnailFromDisk = async (id: DraftId): Promise<void> => {
-    try {
-      const request = await serializeDraftOperation(
-        id,
-        async (): Promise<ThumbnailRequest | null> => {
-          if (confirmedDeletedIds.has(id) || (await inspectDeletionMarker(id)) === "valid") {
+  const thumbnailLifecycle = createDraftThumbnailLifecycle({
+    files,
+    thumbnails,
+    profile: DRAFT_THUMBNAIL_PROFILE,
+    draftUriFor: draftUri,
+    createGenerationId: createThumbnailGenerationId,
+    host: {
+      capture: (id, exactRevision) =>
+        serializeDraftOperation(id, async () => {
+          if (
+            confirmedDeletedIds.has(id) ||
+            unknownDeletionIds.has(id) ||
+            (await inspectDeletionMarker(id)) === "valid" ||
+            (await inspectPublication(id)) !== "valid"
+          ) {
             return null;
           }
           const validated = await validateAggregate(id);
-          return validated.status === "valid"
-            ? { id, root: validated.root, catalog: validated.catalog, uri: validated.uri }
-            : null;
-        },
-      );
-      if (request !== null) queueThumbnail(request);
-    } catch {
-      // Derived thumbnail scheduling never changes the reliable Draft snapshot.
-    }
-  };
+          if (validated.status !== "valid" || validated.root.contentRevision !== exactRevision) {
+            return null;
+          }
+          return {
+            document: validated.root.document,
+            assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
+          };
+        }),
+      commitPairIfCurrent: (id, exactRevision, source, commitPair) =>
+        serializeDraftOperation(id, async () => {
+          if (
+            confirmedDeletedIds.has(id) ||
+            unknownDeletionIds.has(id) ||
+            (await inspectDeletionMarker(id)) === "valid" ||
+            (await inspectPublication(id)) !== "valid"
+          ) {
+            return { status: "stale" };
+          }
+          const validated = await validateAggregate(id);
+          if (
+            validated.status !== "valid" ||
+            validated.root.contentRevision !== exactRevision ||
+            !isCurrentThumbnailSource(
+              source,
+              id,
+              validated.uri,
+              validated.root,
+              validated.catalog,
+            )
+          ) {
+            return { status: "stale" };
+          }
+          const pair = await commitPair();
+          settleThumbnailAttempt({
+            draftId: id,
+            contentRevision: exactRevision,
+            status: "committed",
+            pair,
+          });
+          return { status: "committed" };
+        }),
+      onAttemptFailed: settleThumbnailAttempt,
+      cleanupDiscardedGeneration: (id) =>
+        serializeDraftOperation(id, async () => {
+          if (confirmedDeletedIds.has(id)) await cleanupDeletedDraft(id);
+        }),
+    },
+  });
 
   const create = async (
     candidates: readonly ImportCandidate[],
@@ -1479,7 +1343,7 @@ export function createDraftLibrary({
       await finishStagingOperation(operationUri);
       return { status: "create-failed", message: errorMessage(error), errors };
     }
-    return serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
+    const result = await serializeDraftOperation(id, async (): Promise<CreateDraftResult> => {
       let publicationStarted = false;
       let publicationCommitted = false;
       let publicationOutcomeUnknown = false;
@@ -1516,7 +1380,6 @@ export function createDraftLibrary({
             ? entries
             : [...entries, readyListEntry(root)],
         );
-        queueThumbnail({ id, root, catalog, uri: publishedUri });
         await finishStagingOperation(operationUri);
         return {
           status: "created",
@@ -1536,11 +1399,22 @@ export function createDraftLibrary({
         return { status: "create-failed", message: errorMessage(error), errors };
       }
     });
+    if (result.status === "created") {
+      thumbnailLifecycle.request(result.draftId, result.contentRevision, {
+        document: result.document,
+        assets: result.assets,
+      });
+    }
+    return result;
   };
 
   const saveUnserialized = async (
     id: DraftId,
     document: PlogDocument,
+    onThumbnailCommitted: (
+      contentRevision: number,
+      source: DraftThumbnailSource,
+    ) => void,
   ): Promise<SaveDraftResult> => {
     try {
       await initialize();
@@ -1638,7 +1512,10 @@ export function createDraftLibrary({
           ),
         ];
       });
-      queueThumbnail({ id, root: nextRoot, catalog: validated.catalog, uri: validated.uri });
+      onThumbnailCommitted(nextRoot.contentRevision, {
+        document: nextRoot.document,
+        assets: createCatalogSnapshot(id, validated.uri, validated.catalog),
+      });
       return {
         status: "saved",
         document: prospective,
@@ -1679,6 +1556,9 @@ export function createDraftLibrary({
     }
     const imported: IngestedAsset[] = [];
     const errors: DraftImportError[] = [];
+    let unknownCatalogCommit:
+      | { readonly error: unknown; readonly index: number }
+      | null = null;
     const usedIds = new Set(catalog.entries.map(({ id: assetId }) => assetId));
     const usedStorageKeys = new Set(catalog.entries.map(({ storageKey }) => storageKey));
     const operationUri = child(stagingUri, assertStorageKey(createOperationId()));
@@ -1739,11 +1619,22 @@ export function createDraftLibrary({
           const nextCatalogJson = catalogJson(nextCatalog.entries);
           await recoverFile(files, catalogState);
           await files.writeText(catalogState.temporaryUri, nextCatalogJson);
-          await commitPreparedFile(
+          const commit = await commitPreparedFileWithOutcome(
             files,
             catalogState,
             async (currentUri) => (await files.readText(currentUri)) === nextCatalogJson,
           );
+          if (commit.status === "not-committed") throw commit.error;
+          if (commit.status === "unknown") {
+            unknownCatalogCommit = { error: commit.error, index };
+            installStorageFailure(commit.error);
+            errors.push({
+              index,
+              sourceUri: candidate.uri,
+              message: errorMessage(commit.error),
+            });
+            break;
+          }
           catalog = nextCatalog;
           imported.push({ image: staged.image, sourceKind: entry.sourceKind });
           usedIds.add(entry.id);
@@ -1757,6 +1648,29 @@ export function createDraftLibrary({
       } finally {
         await safeRemoveDirectory(itemUri);
       }
+    }
+    if (unknownCatalogCommit !== null) {
+      for (
+        let index = unknownCatalogCommit.index + 1;
+        index < candidates.length;
+        index += 1
+      ) {
+        errors.push({
+          index,
+          sourceUri: candidates[index]?.uri ?? "",
+          message:
+            index >= 9
+              ? "image limit is 9"
+              : "not attempted because catalog recovery is required",
+        });
+      }
+      await finishStagingOperation(operationUri);
+      return {
+        status: "ingest-unknown",
+        confirmed: createConfirmedAssetPublication(id, uri, catalog, imported),
+        errors,
+        message: errorMessage(unknownCatalogCommit.error),
+      };
     }
     for (let index = 9; index < candidates.length; index += 1) {
       errors.push({
@@ -1783,9 +1697,19 @@ export function createDraftLibrary({
       return { status: "preview-failed", reason: loaded.reason };
     }
     const uri = draftUri(id);
+    let catalogText: string;
+    try {
+      catalogText = await files.readText(child(uri, "catalog.json"));
+    } catch (error: unknown) {
+      return {
+        status: "preview-failed",
+        reason: "storage-unavailable",
+        message: errorMessage(error),
+      };
+    }
     let catalog: Catalog;
     try {
-      catalog = parseCatalog(await files.readText(child(uri, "catalog.json")));
+      catalog = parseCatalog(catalogText);
     } catch (error: unknown) {
       return {
         status: "preview-failed",
@@ -1799,9 +1723,20 @@ export function createDraftLibrary({
     }
     const originalUri = descriptorUri(uri, entry, "original");
     const previewUri = descriptorUri(uri, entry, "preview");
-    if (originalUri === null || !(await originalFileExists(originalUri))) {
+    if (originalUri === null) {
       return { status: "preview-failed", reason: "original-missing" };
     }
+    let originalExists: boolean;
+    try {
+      originalExists = await files.fileExists(originalUri);
+    } catch (error: unknown) {
+      return {
+        status: "preview-failed",
+        reason: "storage-unavailable",
+        message: errorMessage(error),
+      };
+    }
+    if (!originalExists) return { status: "preview-failed", reason: "original-missing" };
     if (previewUri === null) {
       return { status: "preview-failed", reason: "preview-unavailable" };
     }
@@ -1843,17 +1778,6 @@ export function createDraftLibrary({
         reason: "preview-unavailable",
         message: errorMessage(error),
       };
-    }
-  };
-
-  const cleanupDeletedDraft = async (id: DraftId): Promise<void> => {
-    await safeRemoveDirectory(draftUri(id));
-    try {
-      if (!(await files.directoryExists(draftUri(id)))) {
-        await safeRemoveFile(deletionMarkerUri(id));
-      }
-    } catch {
-      // Keep the marker until a later maintenance pass can prove the Draft directory is absent.
     }
   };
 
@@ -1943,7 +1867,18 @@ export function createDraftLibrary({
           : {}),
       };
     }
-    return serializeDraftOperation(id, () => saveUnserialized(id, document));
+    let thumbnailRequest:
+      | { readonly contentRevision: number; readonly source: DraftThumbnailSource }
+      | undefined;
+    const result = await serializeDraftOperation(id, () =>
+      saveUnserialized(id, document, (contentRevision, source) => {
+        thumbnailRequest = { contentRevision, source };
+      }),
+    );
+    if (thumbnailRequest !== undefined) {
+      thumbnailLifecycle.request(id, thumbnailRequest.contentRevision, thumbnailRequest.source);
+    }
+    return result;
   };
   const deleteDraft = async (id: DraftId): Promise<DeleteDraftResult> => {
     const loaded = await loadLibrary();
@@ -1971,6 +1906,8 @@ export function createDraftLibrary({
   const maintainInactive = (id: DraftId): Promise<void> =>
     serializeDraftOperation(id, () => maintainInactiveUnserialized(id));
 
+  // A visible decode failure changes the authoritative list projection, so
+  // identity matching and status updates stay here; the lifecycle only schedules rebuilds.
   const reportThumbnailLoadFailure = (id: DraftId, pair: DraftThumbnailPair): void => {
     if (state.status !== "ready") return;
     const entry = state.entries.find((candidate) => candidate.draftId === id);
@@ -1994,8 +1931,8 @@ export function createDraftLibrary({
       );
       return;
     }
-    const canSchedule =
-      attemptedThumbnailRevisions.get(id)?.has(entry.contentRevision) !== true;
+    const request = thumbnailLifecycle.request(id, entry.contentRevision);
+    const canSchedule = request !== "already-attempted";
     updateReadyEntries((entries) =>
       entries.map((candidate) =>
         candidate.draftId === id && candidate.status === "ready"
@@ -2007,7 +1944,6 @@ export function createDraftLibrary({
           : candidate,
       ),
     );
-    if (canSchedule) void scheduleThumbnailFromDisk(id);
   };
 
   const inspectDraftForList = async (
@@ -2022,7 +1958,7 @@ export function createDraftLibrary({
     }
     const validated = await validateAggregate(id);
     if (validated.status === "valid") {
-      const thumbnail = await readCommittedThumbnailPair(
+      const thumbnail = await thumbnailLifecycle.inspect(
         id,
         validated.root.contentRevision,
       );
@@ -2042,7 +1978,7 @@ export function createDraftLibrary({
       updatedAt: validated.root?.metadata.updatedAt ?? null,
       photoCount: validated.root?.document.sourceImages.length ?? null,
       reason: validated.reason,
-      thumbnail: await readCommittedThumbnailPair(
+      thumbnail: await thumbnailLifecycle.inspect(
         id,
         validated.root?.contentRevision ?? Number.MAX_SAFE_INTEGER,
       ),
@@ -2111,7 +2047,7 @@ export function createDraftLibrary({
         if (ready.status === "ready") {
           for (const entry of ready.entries) {
             if (entry.status === "ready" && entry.thumbnailStatus !== "ready") {
-              void scheduleThumbnailFromDisk(entry.draftId);
+              thumbnailLifecycle.request(entry.draftId, entry.contentRevision);
             }
           }
         }
