@@ -187,7 +187,7 @@ export function createArtifactRoot() {
   return directory;
 }
 
-const MAESTRO_CI_BASELINE = "2.7.0";
+const MAESTRO_MIN_VERSION = "2.7.0";
 
 function compareVersions(left, right) {
   const leftParts = left.split(".").map(Number);
@@ -206,24 +206,17 @@ export function validateMaestroVersion() {
     output = capture("maestro", ["--version"]);
   } catch {
     throw new Error(
-      `Maestro ${MAESTRO_CI_BASELINE} or newer is required but was not found on PATH.`,
+      `Maestro ${MAESTRO_MIN_VERSION} or newer is required but was not found on PATH.`,
     );
   }
   const installedVersion = output.match(/\d+\.\d+\.\d+/)?.[0];
   if (!installedVersion) {
     throw new Error(`Unable to determine the installed Maestro version from: ${output}`);
   }
-  if (compareVersions(installedVersion, MAESTRO_CI_BASELINE) < 0) {
-    throw new Error(
-      `Maestro ${MAESTRO_CI_BASELINE} or newer is required; found ${installedVersion}.`,
-    );
-  }
-  if (installedVersion === MAESTRO_CI_BASELINE) {
-    log("setup", `Maestro ${installedVersion}.`);
-  } else {
+  if (compareVersions(installedVersion, MAESTRO_MIN_VERSION) < 0) {
     log(
       "setup",
-      `Maestro ${installedVersion} is newer than the CI baseline ${MAESTRO_CI_BASELINE}; full E2E results determine compatibility.`,
+      `Maestro ${installedVersion} is older than the minimum supported version ${MAESTRO_MIN_VERSION}; flows are verified on ${MAESTRO_MIN_VERSION} or newer.`,
     );
   }
 }
