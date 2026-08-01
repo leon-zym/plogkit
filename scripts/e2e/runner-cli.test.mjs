@@ -13,41 +13,31 @@ function writeExecutable(path, contents) {
   chmodSync(path, 0o755);
 }
 
-test("Android build phase rejects Maestro versions older than the supported baseline", () => {
+test("a Maestro version older than the minimum warns and the run continues past the version check", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-version-"));
   const binaries = join(directory, "bin");
-  const adbLog = join(directory, "adb-commands.log");
   mkdirSync(binaries);
   writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.6.1'\n");
-  writeExecutable(
-    join(binaries, "adb"),
-    `#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_ADB_LOG"
-`,
-  );
 
   const result = spawnSync(
     process.execPath,
-    ["scripts/e2e/run.mjs", "android", "--phase", "build"],
+    ["scripts/e2e/run.mjs", "android", "--phase", "test", "--flow", "runner-version-probe"],
     {
       cwd: root,
       encoding: "utf8",
       env: {
         ...process.env,
-        ANDROID_HOME: "",
-        ANDROID_SDK_ROOT: "",
-        FAKE_ADB_LOG: adbLog,
         PATH: `${binaries}:${process.env.PATH}`,
       },
     },
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Maestro 2\.7\.0 or newer is required; found 2\.6\.1/);
-  assert.equal(existsSync(adbLog), false);
+  assert.match(result.stdout, /Maestro 2\.6\.1 is older than the minimum supported version 2\.7\.0/);
+  assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
 });
 
-test("a newer local Maestro version reaches deterministic CLI validation", () => {
+test("a Maestro version at or above the minimum passes without a version notice", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-newer-version-"));
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
@@ -67,8 +57,7 @@ test("a newer local Maestro version reaches deterministic CLI validation", () =>
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /Maestro 2\.8\.1 is newer than the CI baseline 2\.7\.0/);
-  assert.doesNotMatch(result.stderr, /Maestro 2\.7\.0 or newer is required/);
+  assert.doesNotMatch(result.stdout, /Maestro \d+\.\d+\.\d+/);
   assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
 });
 
