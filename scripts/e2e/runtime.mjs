@@ -411,9 +411,15 @@ export async function runMaestroSuite(options) {
 const APP_CRASH_PATTERNS =
   /\b(app\s+(stopped|not\s+running|crash)|FATAL\s+EXCEPTION|AndroidRuntime|SIGABRT|SIGSEGV|EXC_CRASH|EXC_BAD_ACCESS)\b/i;
 const XCTEST_DRIVER_PATTERNS =
-  /\b(kAXErrorInvalidUIElement|AXErrorInvalidUIElement|hierarchy\s+(failed|error)|cannot\s+determine\s+UI)\b|XCTest.{0,100}\b(failed|error|timed?\s*out|unavailable)\b/i;
+  /\b(kAXErrorInvalidUIElement|AXErrorInvalidUIElement|hierarchy\s+(failed|error)|cannot\s+determine\s+UI)\b|\bXCTest.{0,100}\b(failed|error|timed?\s*out|unavailable)\b/i;
+const BENIGN_XCTEST_PENDING_RECORD_PATTERN =
+  /\bXCTestDriver:\s+Recorded pending request for target session\b.*\btimeout\b/i;
+const XCTEST_FAILURE_TERMS = /\b(failed|error|timed\s*out|unavailable)\b/i;
 const METRO_FAILURE_PATTERNS =
-  /\b(?:Metro|packager).{0,100}\b(?:exited|failed|error|unavailable|not\s+running)\b|\b(?:exited|failed|error|unavailable).{0,100}\b(?:Metro|packager)\b|\b(?:bundling\s+failed|ECONNREFUSED(?:\s+127\.0\.0\.1)?:8081)\b/i;
+  /\b(?:Metro|packager).{0,100}\b(?:exited|failed|error|unavailable|not\s+running)\b|\b(?:exited|failed|error|unavailable).{0,100}\b(?:Metro|packager)\b|\b(?:bundling\s+failed|ERR_STREAM_PREMATURE_CLOSE|ECONNREFUSED(?:\s+127\.0\.0\.1)?:8081)\b/i;
+const COLD_BUNDLE_PROGRESS_PATTERN = /\bBundling\s+\d{1,3}%/i;
+const WARMUP_HOME_SCREEN_FAILURE_PATTERN =
+  /\bAssertion is false:\s*(?:id:\s*)?home-screen is visible\b/i;
 const SYSTEM_UI_PATTERNS =
   /\b(System\s+UI\s+(?:(?:isn['’]t|is\s+not)\s+responding|has\s+stopped)|Application\s+Not\s+Responding:\s*System\s+UI|AppNotRespondingDialog|android:id\/aerr_(?:close|wait)|device\s+(offline|not\s+found)|simulator\s+(unavailable|failed|error)|emulator\s+(exited|failed))\b|(?:ANR|not\s+responding).{0,100}com\.android\.systemui|com\.android\.systemui.{0,100}(?:ANR|not\s+responding)/i;
 const BUSINESS_ASSERTION_PATTERNS =
@@ -441,10 +447,28 @@ function readArtifactEvidence(directory) {
   return evidence.join("\n");
 }
 
+function withoutBenignXCTestPendingRecords(message) {
+  return message
+    .split(/\r?\n/)
+    .filter(
+      (line) =>
+        !BENIGN_XCTEST_PENDING_RECORD_PATTERN.test(line) || XCTEST_FAILURE_TERMS.test(line),
+    )
+    .join("\n");
+}
+
 export function classifyFailure(message) {
-  if (METRO_FAILURE_PATTERNS.test(message)) return "metro";
+  if (
+    METRO_FAILURE_PATTERNS.test(message) ||
+    (COLD_BUNDLE_PROGRESS_PATTERN.test(message) &&
+      WARMUP_HOME_SCREEN_FAILURE_PATTERN.test(message))
+  ) {
+    return "metro";
+  }
   if (SYSTEM_UI_PATTERNS.test(message)) return "system-ui";
-  if (XCTEST_DRIVER_PATTERNS.test(message)) return "xctest-driver";
+  if (XCTEST_DRIVER_PATTERNS.test(withoutBenignXCTestPendingRecords(message))) {
+    return "xctest-driver";
+  }
   if (APP_CRASH_PATTERNS.test(message)) return "app-crash";
   if (BUSINESS_ASSERTION_PATTERNS.test(message)) return "business-assertion";
   return "business-assertion";
