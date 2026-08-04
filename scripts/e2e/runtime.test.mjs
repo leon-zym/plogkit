@@ -211,6 +211,68 @@ test("failure classification covers Metro, app crashes, and root-cause priority"
   assert.equal(classifyFailure("System UI isn't responding\nFATAL EXCEPTION: main"), "system-ui");
 });
 
+test("a real XCTest timeout remains a driver failure", () => {
+  assert.equal(
+    classifyFailure("XCTest timed out waiting for the application to become idle"),
+    "xctest-driver",
+  );
+});
+
+test("explicit XCTestDriver failures remain driver failures", async (context) => {
+  const cases = [
+    ["communication failure", "XCTestDriver failed to communicate with testmanagerd"],
+    ["driver timeout", "XCTestDriver timed out waiting for the target session"],
+    ["driver unavailable", "XCTestDriver unavailable while resolving the hierarchy"],
+    [
+      "failed pending request",
+      "XCTestDriver: Recorded pending request for target session <session> with timeout 120.0; failed to communicate",
+    ],
+  ];
+
+  for (const [name, evidence] of cases) {
+    await context.test(name, () => {
+      assert.equal(classifyFailure(evidence), "xctest-driver");
+    });
+  }
+});
+
+test("an XCTest pending-request record is not itself a driver failure", () => {
+  const benignXCTestArtifact = [
+    "XCTestDriver: Recorded pending request for target session <session> with timeout 120.0",
+    "Assertion is false: id: home-screen is visible",
+  ].join("\n");
+
+  assert.equal(classifyFailure(benignXCTestArtifact), "business-assertion");
+});
+
+test("a cold-bundle warm-up is classified as Metro infrastructure", () => {
+  const coldBundleArtifact = [
+    "XCTestDriver: Recorded pending request for target session <session> with timeout 120.0",
+    "Bundling 71%…",
+    "Assertion is false: id: home-screen is visible",
+  ].join("\n");
+
+  assert.equal(classifyFailure(coldBundleArtifact), "metro");
+});
+
+test("bundle progress alone does not override an unrelated business assertion", () => {
+  assert.equal(
+    classifyFailure("Bundling 71%…\nAssertion is false: id: editor-canvas is visible"),
+    "business-assertion",
+  );
+});
+
+test("a premature-close signature takes priority over benign XCTest session records", () => {
+  const metroTransportArtifact = [
+    "Error [ERR_STREAM_PREMATURE_CLOSE]: Premature close",
+    "XCTestDriver: Recorded pending request for target session <session> with timeout 120.0",
+    "Searching for development servers…",
+    "Assertion is false: id: home-screen is visible",
+  ].join("\n");
+
+  assert.equal(classifyFailure(metroTransportArtifact), "metro");
+});
+
 test("iOS diagnostics copy only fresh relevant reports and isolate per-file failures", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-diagnostic-reports-"));
   const reports = join(directory, "reports");
