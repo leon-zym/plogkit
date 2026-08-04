@@ -18,6 +18,7 @@
     "test:reliability-soak:evidence": "node scripts/reliability-soak/run.mjs evidence",
     "test:reliability-soak:replay": "node scripts/reliability-soak/run.mjs replay",
     "test:render": "jest --config jest.render.config.js --runInBand",
+    "measure:render": "node scripts/render-measurement.mjs",
     "e2e": "node scripts/e2e/run.mjs all",
     "e2e:ios": "node scripts/e2e/run.mjs ios",
     "e2e:android": "node scripts/e2e/run.mjs android",

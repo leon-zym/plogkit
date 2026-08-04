@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md) 和 [ADR 0039](../adr/0039-native-node-orchestration-tests.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md) 和 [ADR 0039](../adr/0039-native-node-orchestration-tests.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -66,16 +66,17 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 
 ## 命令
 
-| 命令                      | 作用                                       |
-| ------------------------- | ------------------------------------------ |
-| `pnpm check`              | 类型检查和 lint                            |
-| `pnpm test`               | App、核心逻辑和组件测试                    |
-| `pnpm test:orchestration` | 宿主 Node 编排器的纯 Node 逻辑测试         |
-| `pnpm test:render`        | L3 golden 测试                             |
-| `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4          |
-| `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4       |
-| `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4    |
-| `pnpm verify`             | 聚合静态、Node、App 和渲染验证，提交前运行 |
+| 命令                      | 作用                                                 |
+| ------------------------- | ---------------------------------------------------- |
+| `pnpm check`              | 类型检查和 lint                                      |
+| `pnpm test`               | App、核心逻辑和组件测试                              |
+| `pnpm test:orchestration` | 宿主 Node 编排器的纯 Node 逻辑测试                   |
+| `pnpm test:render`        | L3 golden 测试                                       |
+| `pnpm measure:render`     | 先验证 L3，再生成资格门禁的 Mac / CanvasKit 工程测量 |
+| `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4                    |
+| `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4                 |
+| `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4              |
+| `pnpm verify`             | 聚合静态、Node、App 和渲染验证，提交前运行           |
 
 可靠性 profile 使用以下独立命令；固定输入、artifact 与结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
 
@@ -99,3 +100,5 @@ E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 
 | 提交前               | 运行 `pnpm verify`；渲染变化必须检查实际图片和 diff 后再更新 golden                                  |
 | 设备敏感变更的 PR 前 | 系统 UI 或单平台行为变化运行对应平台完整 L4；关键跨端流程、原生配置、持久化或导出变化运行完整双端 L4 |
 | 里程碑或发布候选版本 | 运行完整双端 L4 和手动 CI E2E，并完成双端真机冒烟                                                    |
+
+render / export / thumbnail policy、Skia runtime、measurement fixture 或 toolchain 变更后，变更负责人运行 `PLOGKIT_RENDER_MEASUREMENT_PROFILE=smoke pnpm measure:render`。高风险图像链路改动或 release candidate 前，在 clean、isolated、交流电宿主机运行 full profile。measurement artifacts 保持 Git ignored；需要跨人或异步复核时附到对应 Issue 或 CI job artifact。该协议是手动工程测量，不属于自动 CI 性能门禁。
