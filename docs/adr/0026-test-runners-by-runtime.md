@@ -1,7 +1,8 @@
 # ADR 0026：验证层级与测试运行器边界
 
-- 状态：已接受
+- 状态：部分修订
 - 接受日期：2026-07-21
+- 后继：[ADR 0039](0039-native-node-orchestration-tests.md)
 - 修订：[ADR 0011](0011-testing-strategy.md) 中 CI 作为第五层，以及“jest-expo 单一运行器”与“单一 Jest 运行器”的适用范围
 - 关联：[ADR 0019](0019-cross-platform-maestro-e2e.md)
 
