@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "stateStatuses": ["ready"],
+  "recoveryStatuses": ["converged-after-restart"],
+  "typedFailureResults": [
+    "recovery-failed:storage-unavailable",
+    "storage-failed",
+    "create-failed",
+    "flush-failed",
+    "delete-failed",
+    "delete-unknown",
+    "open-failed:old-handle-active"
+  ],
+  "operations": {
+    "create": { "results": ["created", "opened"], "faults": [] },
+    "save": { "results": ["flushed"], "faults": [] },
+    "ingest": { "results": ["completed", "flushed"], "faults": [] },
+    "switch": { "results": ["opened", "created"], "faults": [] },
+    "delete": { "results": ["deleted"], "faults": [] },
+    "restart": { "results": ["ready"], "faults": [] },
+    "read-failure": {
+      "results": ["recovery-failed:storage-unavailable"],
+      "faults": ["read"]
+    },
+    "probe-failure": {
+      "results": ["recovery-failed:storage-unavailable"],
+      "faults": ["probe"]
+    },
+    "list-failure": { "results": ["storage-failed"], "faults": ["list"] },
+    "write-failure": {
+      "results": ["create-failed"],
+      "faults": ["publication-marker", "write-before"]
+    },
+    "replacement-before": {
+      "results": ["flush-failed"],
+      "faults": ["replacement-before"]
+    },
+    "replacement-after-remove": {
+      "results": ["flush-failed"],
+      "faults": ["replacement-after-remove"]
+    },
+    "replacement-after-copy": {
+      "results": ["flushed"],
+      "faults": ["replacement-after-copy"]
+    },
+    "publication-failure": {
+      "results": ["create-failed"],
+      "faults": ["publication-marker", "write-before"]
+    },
+    "publication-unknown": {
+      "results": ["create-failed"],
+      "faults": ["publication-marker", "write-committed-unknown"]
+    },
+    "directory-publication": {
+      "results": ["create-failed"],
+      "faults": ["directory-publication"]
+    },
+    "deletion-failure": {
+      "results": ["delete-failed"],
+      "faults": ["deletion-marker", "write-before"]
+    },
+    "deletion-unknown": {
+      "results": ["delete-unknown"],
+      "faults": ["delete-unknown-retry", "deletion-marker", "write-committed-unknown"]
+    },
+    "interrupted-replacement": {
+      "results": ["flush-failed"],
+      "faults": ["replacement-interrupted"]
+    },
+    "cleanup-failure": { "results": ["deleted"], "faults": ["cleanup"] },
+    "stale-thumbnail": {
+      "results": ["stale-completion-ignored"],
+      "faults": ["stale-async-completion"]
+    },
+    "noop-save": { "results": ["revision-unchanged", "created"], "faults": [] },
+    "switch-failure": {
+      "results": ["open-failed:old-handle-active"],
+      "faults": ["probe", "switch-failure-preserves-handle"]
+    },
+    "dirty-save-new-edit": {
+      "results": ["newest-edit-persisted"],
+      "faults": ["dirty-save-new-edit"]
+    },
+    "switch-validation-new-edit": {
+      "results": ["new-edit-flushed-before-switch"],
+      "faults": ["switch-validation-new-edit"]
+    },
+    "ingest-switch-delete": {
+      "results": ["switch-busy+ingest-drained+deleted"],
+      "faults": ["ingest-switch-delete"]
+    },
+    "autosave": {
+      "results": ["timer-autosaved-before-switch+new-session-preserved"],
+      "faults": ["autosave-switch-interleaving"]
+    }
+  }
+}
