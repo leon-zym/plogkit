@@ -21,6 +21,7 @@ TypeScript strict 和 ESLint 提供最快反馈。代码格式遵循 Prettier �
 - React Native Testing Library 用于组件交互测试。
 - `src/core` 的文档模型、布局计算、撤销栈和预设逻辑不依赖原生环境。
 - 服务层通过明确接口隔离文件、相册和编码能力，测试正常路径、失败处理和资源释放。
+- Draft Library 与 Current Editing Session 的确定性故障注入、可靠性 profile 和结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
 
 ### L3 Skia 无头渲染回归
 
@@ -75,6 +76,16 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 | `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4       |
 | `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4    |
 | `pnpm verify`             | 聚合静态、Node、App 和渲染验证，提交前运行 |
+
+可靠性 profile 使用以下独立命令；固定输入、artifact 与结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
+
+| 命令                                                  | 作用                                                  |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| `pnpm test:reliability-soak`                          | 固定 1,000 个状态机步骤的快速可靠性回归               |
+| `pnpm test:reliability-soak:evidence`                 | 运行并重放 25,000 个状态机步骤，生成 ignored artifact |
+| `pnpm test:reliability-soak:replay -- <seed> [steps]` | 重放一条确定性可靠性轨迹                              |
+
+Draft Library、Current Editing Session、recoverable persistence 或相关 adapter 变更必须运行 quick。高风险持久化/并发改动合并前及 release candidate 验收时运行 evidence，并将 ignored artifact 附到对应 Issue 或 CI run。
 
 E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或盲目延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)。
 
