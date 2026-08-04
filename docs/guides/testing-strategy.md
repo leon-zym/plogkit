@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md) 和 [ADR 0026](../adr/0026-test-runners-by-runtime.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md) 和 [ADR 0039](../adr/0039-native-node-orchestration-tests.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -17,7 +17,7 @@ TypeScript strict 和 ESLint 提供最快反馈。代码格式遵循 Prettier �
 
 ### L2 单元与组件测试
 
-- App 单元/组件测试使用 jest-expo；E2E runner 的纯 Node 逻辑使用 Node 内置测试运行器。
+- App、core、services、组件和无头渲染的功能行为使用现有 Jest 配置；仅宿主 Node CLI、环境、子进程、文件系统、探针和 artifact 编排使用 Node 内置测试运行器。编排器测试不构成新的验证层级。
 - React Native Testing Library 用于组件交互测试。
 - `src/core` 的文档模型、布局计算、撤销栈和预设逻辑不依赖原生环境。
 - 服务层通过明确接口隔离文件、相册和编码能力，测试正常路径、失败处理和资源释放。
@@ -65,16 +65,16 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 
 ## 命令
 
-| 命令                   | 作用                                       |
-| ---------------------- | ------------------------------------------ |
-| `pnpm check`           | 类型检查和 lint                            |
-| `pnpm test`            | App、核心逻辑和组件测试                    |
-| `pnpm test:e2e-runner` | E2E runner 的纯 Node 逻辑测试              |
-| `pnpm test:render`     | L3 golden 测试                             |
-| `pnpm e2e`             | 重置专用双端设备并运行两端完整 L4          |
-| `pnpm e2e:ios`         | 重置专用 iOS Simulator 并运行完整 L4       |
-| `pnpm e2e:android`     | 重置专用 Android Emulator 并运行完整 L4    |
-| `pnpm verify`          | 聚合静态、Node、App 和渲染验证，提交前运行 |
+| 命令                      | 作用                                       |
+| ------------------------- | ------------------------------------------ |
+| `pnpm check`              | 类型检查和 lint                            |
+| `pnpm test`               | App、核心逻辑和组件测试                    |
+| `pnpm test:orchestration` | 宿主 Node 编排器的纯 Node 逻辑测试         |
+| `pnpm test:render`        | L3 golden 测试                             |
+| `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4          |
+| `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4       |
+| `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4    |
+| `pnpm verify`             | 聚合静态、Node、App 和渲染验证，提交前运行 |
 
 E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或盲目延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)。
 
