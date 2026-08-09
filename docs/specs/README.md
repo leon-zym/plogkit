@@ -18,7 +18,8 @@ Spec 是活文档，用户可观察行为变化时先更新对应 Spec。
 
 ## Scenario
 
-- Scenario 标题使用 `#### Scenario: <名称>`。正文采用 BDD 范式，至少包含一个 GIVEN、WHEN 和 THEN；AND 可选。
+- Scenario 标题使用 `#### Scenario FNN-SNN: <名称>`，其中 `FNN-SNN` 是仓库内唯一、标题调整时保持不变的稳定标识；编号一经分配不复用，新增 Scenario 使用该功能下一个未使用编号。
+- 正文采用 BDD 范式，至少包含一个 GIVEN、WHEN 和 THEN；AND 可选。
 - Scenario 描述可观察行为，不描述实现过程。失败、取消、恢复和重启后的结果只要能从产品外部判定，就可以写入 Scenario。
 
 ## 状态

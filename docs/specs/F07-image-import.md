@@ -15,32 +15,32 @@
 
 ### 需求 1：选图与导入
 
-#### Scenario: 多选导入
+#### Scenario F07-S01: 多选导入
 
 - GIVEN 用户在首页点击选图
 - WHEN 用户在系统选择器中选中 3 张有效且本地可读取的照片并确认
 - THEN 应用创建草稿，并在 Editor 中展示全部 3 张图片
 
-#### Scenario: 一次最多选择九张图片
+#### Scenario F07-S02: 一次最多选择九张图片
 
 - GIVEN 用户从首页打开系统照片选择器
 - WHEN 用户选择图片
 - THEN 一次最多可以确认 9 张图片
 
-#### Scenario: 系统照片选择器不要求完整相册权限
+#### Scenario F07-S03: 系统照片选择器不要求完整相册权限
 
 - GIVEN 应用未获得完整相册访问权限
 - WHEN 用户从首页打开系统照片选择器并选择照片
 - THEN 用户仍可确认选中的照片并完成导入
 
-#### Scenario: 部分失败保留同批次成功图片
+#### Scenario F07-S04: 部分失败保留同批次成功图片
 
 - GIVEN 用户选择的 3 张图片中有 1 张在导入时失败
 - WHEN 另外 2 张图片导入成功
 - THEN 应用创建只包含 2 张成功图片的草稿并进入 Editor
 - AND 应用明确提示失败项，不丢弃同批次中已经成功的图片
 
-#### Scenario: 取消或全部失败不创建草稿
+#### Scenario F07-S05: 取消或全部失败不创建草稿
 
 - GIVEN 用户开始从外部图片候选创建草稿
 - WHEN 用户取消，或所有候选均导入失败
@@ -48,20 +48,20 @@
 
 ### 需求 2：特殊资产
 
-#### Scenario: Live Photo 取静帧
+#### Scenario F07-S06: Live Photo 取静帧
 
 - GIVEN 用户选中一张 Live Photo
 - WHEN 导入完成
 - THEN 编辑与导出使用该 Live Photo 的封面静帧
 
-#### Scenario: iCloud 资产等待下载
+#### Scenario F07-S07: iCloud 资产等待下载
 
 - GIVEN 用户选中一张仅存于 iCloud 的照片
 - WHEN 导入开始
 - THEN 界面显示下载进行中，下载完成后继续导入流程
 - AND 下载超时或失败时给出明确提示，已成功的图片不受影响
 
-#### Scenario: 替换图片可以在当前会话撤销
+#### Scenario F07-S08: 替换图片可以在当前会话撤销
 
 - 状态：已确认
 - Issue：[Issue #53](https://github.com/leon-zym/plogkit/issues/53)
@@ -71,7 +71,7 @@
 
 ### 需求 3：来源解耦
 
-#### Scenario: 原图删除不影响再编辑
+#### Scenario F07-S09: 原图删除不影响再编辑
 
 - GIVEN 一个已保存的编辑会话
 - WHEN 用户在系统相册中删除了原始照片后重新打开应用
