@@ -1,0 +1,1222 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "F01-S01",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-add-text.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S02",
+      "exception": {
+        "reason": "现有测试未验证多个文本块同时显示且可分别选中编辑。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/79",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F01-S03",
+      "exception": {
+        "reason": "现有测试未通过用户编辑流程验证非空文本内容替换。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/79",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F01-S04",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "removes text when a replacement draft has empty content"
+        }
+      ]
+    },
+    {
+      "id": "F01-S05",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/textLayoutCanvasKit.test.js",
+          "test": "lays out CJK fallback, automatic wrapping, and explicit hard breaks"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-chinese-auto-wrap.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S06",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/textLayoutCanvasKit.test.js",
+          "test": "lays out CJK fallback, automatic wrapping, and explicit hard breaks"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-explicit-line-breaks.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S07",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/textLayoutCanvasKit.test.js",
+          "test": "uses Paragraph line height and keeps missing emoji fallback geometry finite"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-unicode-fallback.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S08",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/components/__tests__/TextPanel.test.tsx",
+          "test": "publishes style changes for immediate canvas preview"
+        },
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "undoes and redoes edit commits while clearing an active preview"
+        }
+      ]
+    },
+    {
+      "id": "F01-S09",
+      "exception": {
+        "reason": "现有测试未验证选择预置样式后继续独立调整字号与行高。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/79",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F01-S10",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/components/__tests__/TextPanel.test.tsx",
+          "test": "uses distinct visible labels for each text alignment"
+        },
+        {
+          "level": "L3",
+          "file": "render-tests/textLayoutCanvasKit.test.js",
+          "test": "uses Paragraph line height and keeps missing emoji fallback geometry finite"
+        },
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "undoes and redoes edit commits while clearing an active preview"
+        }
+      ]
+    },
+    {
+      "id": "F01-S11",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "applies a text style as one edit commit"
+        },
+        {
+          "level": "L3",
+          "file": "render-tests/headlessGolden.test.js",
+          "test": "renders the shared scene deterministically"
+        }
+      ]
+    },
+    {
+      "id": "F01-S12",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-add-text.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S13",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/textLayoutCanvasKit.test.js",
+          "test": "derives horizontal bounds from left, center, and right aligned line metrics"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-chinese-auto-wrap.yaml"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-explicit-line-breaks.yaml"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-right-aligned-small-text.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S14",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/textLayoutGeometry.test.ts",
+          "test": "keeps the selection box on visual bounds while expanding only touch bounds to 44pt"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f01-right-aligned-small-text.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F01-S15",
+      "exception": {
+        "reason": "现有测试只验证 overlay 层级，未验证重叠区域选中及移动后层级不变。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/79",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F02-S01",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f02-background.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F02-S02",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/__tests__/layout.test.ts",
+          "test": "centers a wide source inside a square frame"
+        },
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "changes the canvas ratio through a semantic intent"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f02-background.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F02-S03",
+      "exception": {
+        "reason": "现有测试未从固定比例切换回原始比例并断言画布结果。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/80",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F03-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/__tests__/layout.test.ts",
+          "test": "lays out vertical images at a common width in document order"
+        },
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/scene.test.ts",
+          "test": "reuses core vertical layout and preserves image order and spacing"
+        }
+      ]
+    },
+    {
+      "id": "F03-S02",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/__tests__/layout.test.ts",
+          "test": "uses equal square cells for a two-column adaptive grid"
+        },
+        {
+          "level": "L2",
+          "file": "src/core/__tests__/layout.test.ts",
+          "test": "leaves an odd final grid item in the leading column"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f03-stitch-images.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F03-S03",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "projects a preview without creating an edit commit"
+        },
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/scene.test.ts",
+          "test": "reuses core vertical layout and preserves image order and spacing"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f03-stitch-images.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F03-S04",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "reorders every source image atomically"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f03-stitch-images.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F03-S05",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/scene.test.ts",
+          "test": "reuses core vertical layout and preserves image order and spacing"
+        },
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/scene.test.ts",
+          "test": "keeps text in logical coordinates for scaled Paragraph rendering"
+        },
+        {
+          "level": "L3",
+          "file": "render-tests/headlessGolden.test.js",
+          "test": "renders the shared scene deterministically"
+        }
+      ]
+    },
+    {
+      "id": "F04-S01",
+      "exception": {
+        "reason": "现有面板测试未同时断言原始、社交与紧凑三种预设。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/81",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F04-S02",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/exportBackend.test.js",
+          "test": "matches the shared renderer pixels and preserves the requested static encoding"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f04-export.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F04-S03",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/render/__tests__/scene.test.ts",
+          "test": "derives original export resolution from source pixels, not preview pixels"
+        }
+      ]
+    },
+    {
+      "id": "F04-S04",
+      "exception": {
+        "reason": "尺寸策略单测覆盖上限公式，但没有验证 9 张原图的实际导出资源边界与无崩溃结果。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/81",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F04-S05",
+      "exception": {
+        "reason": "现有测试只断言 SDR policy，未检查 Display P3 输入的实际输出色彩空间。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/81",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F04-S06",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/__tests__/document.test.ts",
+          "test": "creates the complete document with stable defaults"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/exif.test.ts",
+          "test": "strips an existing EXIF segment containing GPS before reinjection"
+        }
+      ]
+    },
+    {
+      "id": "F04-S07",
+      "exception": {
+        "reason": "现有测试未组合验证草稿级 metadata 选择重开后保留且全局默认不变。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/81",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F04-S08",
+      "exception": {
+        "reason": "现有测试未验证导出完成后继续编辑并再次导出更新后的图片。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/81",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F04-S09",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "switches preset and normalizes format and metadata as one edit commit"
+        }
+      ]
+    },
+    {
+      "id": "F04-S10",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/components/__tests__/ExportPanel.test.tsx",
+          "test": "hides format selection for a single-format preset"
+        }
+      ]
+    },
+    {
+      "id": "F04-S11",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/components/__tests__/ExportPanel.test.tsx",
+          "test": "shows the formats projected for a multi-format preset"
+        },
+        {
+          "level": "L3",
+          "file": "render-tests/exportBackend.test.js",
+          "test": "matches the shared renderer pixels and preserves the requested static encoding"
+        }
+      ]
+    },
+    {
+      "id": "F04-S12",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/components/__tests__/ExportPanel.test.tsx",
+          "test": "explains an unsupported policy and prevents export"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/pipeline.test.ts",
+          "test": "returns preset-unavailable without inventing preset or backend revisions"
+        }
+      ]
+    },
+    {
+      "id": "F04-S13",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/expoDestination.test.ts",
+          "test": "publishes only the PreparedExport and returns its system asset identity"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/pipeline.test.ts",
+          "test": "sweeps crash orphans and removes the PreparedExport after Photos publication"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f04-export.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F04-S14",
+      "evidence": [
+        {
+          "level": "L3",
+          "file": "render-tests/exportBackend.test.js",
+          "test": "preserves renderer cancellation phase without writing a PreparedExport"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/pipeline.test.ts",
+          "test": "returns a typed staging failure and cleans when PreparedExport cannot be written"
+        }
+      ]
+    },
+    {
+      "id": "F04-S15",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/export/__tests__/pipeline.test.ts",
+          "test": "retries required staging initialization after a transient failure"
+        }
+      ]
+    },
+    {
+      "id": "F05-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "reports entity effects when undo and redo add or remove text"
+        }
+      ]
+    },
+    {
+      "id": "F05-S02",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "keeps only the latest forty edit commits in undo history"
+        }
+      ]
+    },
+    {
+      "id": "F05-S03",
+      "exception": {
+        "reason": "现有测试未覆盖滑杆连续预览、松手提交与一次撤销的完整交互。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/82",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F05-S04",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "does not create an edit commit when an intent changes nothing"
+        }
+      ]
+    },
+    {
+      "id": "F05-S05",
+      "exception": {
+        "reason": "现有测试未在新编辑会话的 Header seam 断言撤销按钮禁用。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/82",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F05-S06",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/core/editing/__tests__/editCommitModule.test.ts",
+          "test": "clears the redo branch after a new edit commit"
+        }
+      ]
+    },
+    {
+      "id": "F06-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "debounces successful Edit Commits and autosaves the latest document once"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f06-session-persistence.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F06-S02",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "opens the exact selected Draft and prepares its previews"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f06-session-persistence.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F06-S03",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f06-session-persistence.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F06-S04",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "rejects a corrupt catalog and an unresolved document reference"
+        },
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "requires the normal-Draft action menu and confirmation, but corrupt tap goes to confirmation"
+        }
+      ]
+    },
+    {
+      "id": "F06-S05",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "preserves the original handle when the target Draft cannot open"
+        },
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "keeps the current session when switching to another Draft fails"
+        }
+      ]
+    },
+    {
+      "id": "F06-S06",
+      "exception": {
+        "reason": "现有测试未模拟应用进入后台数分钟后返回并断言编辑状态。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/85",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F06-S07",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "reuses the same-process session and undo history for the same Draft"
+        }
+      ]
+    },
+    {
+      "id": "F06-S08",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "preserves history for idempotent open and resets it after switching away"
+        }
+      ]
+    },
+    {
+      "id": "F06-S09",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/editor.test.tsx",
+          "test": "stays in the editor after a flush failure and navigates after retry succeeds"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "returns a typed flush failure without discarding the latest document"
+        }
+      ]
+    },
+    {
+      "id": "F06-S10",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "recovers the previous document after replacement removes the destination and fails"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/persistence/__tests__/recoverableFile.test.ts",
+          "test": "reports not committed when recovery restores the previous current"
+        }
+      ]
+    },
+    {
+      "id": "F07-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "publishes a successful add batch before one Edit Commit and undoes it in one step"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f07-image-import.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F07-S02",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "reports overflow before ingest and commits the successful capacity-limited batch"
+        }
+      ]
+    },
+    {
+      "id": "F07-S03",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f07-image-import.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F07-S04",
+      "exception": {
+        "reason": "底层测试覆盖部分成功 contract，但未验证进入 Editor 后向用户明确提示失败项。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/84",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F07-S05",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "does not allocate or expose a Draft when selection is cancelled or all items fail"
+        },
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "returns picker cancellation before loading settings or creating a Draft"
+        }
+      ]
+    },
+    {
+      "id": "F07-S06",
+      "exception": {
+        "reason": "现有测试未使用 Live Photo fixture 验证封面静帧贯穿编辑与导出。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/84",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F07-S07",
+      "exception": {
+        "reason": "现有测试未覆盖 iCloud 下载进度、成功继续和失败反馈。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/84",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F07-S09",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "reopens from the owned immutable original after the picker source disappears"
+        }
+      ]
+    },
+    {
+      "id": "F08-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "shows the creation Banner immediately while the reliable Grid is loading"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S02",
+      "exception": {
+        "reason": "现有测试未完整断言空库没有第二新建入口、插画或占位草稿。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S03",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S04",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S05",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "shows a creation error when the Draft publication does not commit"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "determines creation only from the canonical publication record"
+        }
+      ]
+    },
+    {
+      "id": "F08-S06",
+      "exception": {
+        "reason": "现有测试未断言手机三列、大屏自适应、全部纯缩略图字段及无数量上限。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S07",
+      "exception": {
+        "reason": "现有测试未覆盖最近编辑时间倒序与相同时间稳定排序的完整集合。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S08",
+      "exception": {
+        "reason": "现有测试未组合验证内容变更、撤销/重做、no-op 与保存失败对排序时间的影响。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S09",
+      "exception": {
+        "reason": "现有测试未证明浏览、导出、缩略图重建与维护均不改变排序。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S10",
+      "exception": {
+        "reason": "现有测试只覆盖单个缺失时间条目，未验证多个缺失时间条目的稳定次序。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S11",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "shows the creation Banner immediately while the reliable Grid is loading"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "installs one reliable snapshot through a single-flight initial load"
+        }
+      ]
+    },
+    {
+      "id": "F08-S12",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "waits for the initial load before publishing a concurrently created Draft"
+        }
+      ]
+    },
+    {
+      "id": "F08-S13",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "exposes Draft Library state without loading or merging it in Home"
+        }
+      ]
+    },
+    {
+      "id": "F08-S14",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/expoDraftThumbnailAdapter.test.ts",
+          "test": "renders and writes the square/original pair as one concrete target batch"
+        },
+        {
+          "level": "L3",
+          "file": "render-tests/skiaOffscreenRenderer.test.js",
+          "test": "renders square crop and original targets from one complete background/image/text scene"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "keeps the previous complete thumbnail pair when a new generation fails"
+        }
+      ]
+    },
+    {
+      "id": "F08-S15",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "switches square and original thumbnails only as one revision-matched pair"
+        }
+      ]
+    },
+    {
+      "id": "F08-S16",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "persists one global display mode and switches the whole Grid to contain"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S17",
+      "exception": {
+        "reason": "现有测试覆盖旧缩略图对保留，但未完整断言中性静态占位且不冒用第一张原图。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S18",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "renders accessible thumbnail-only items and opens the exact selected Draft"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S19",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "reuses the same-process session and undo history for the same Draft"
+        }
+      ]
+    },
+    {
+      "id": "F08-S20",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/features/editor/__tests__/runtime.test.ts",
+          "test": "keeps the current session when switching to another Draft fails"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "blocks a switch when the current latest revision cannot flush"
+        }
+      ]
+    },
+    {
+      "id": "F08-S21",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "scrolls to the top only when the opened Draft returns with a new content revision"
+        }
+      ]
+    },
+    {
+      "id": "F08-S22",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "requires the normal-Draft action menu and confirmation, but corrupt tap goes to confirmation"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S23",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "flushes and permanently invalidates the current handle before deleting its Draft"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S24",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "restores the current session after a definite delete failure and freezes it while unknown"
+        }
+      ]
+    },
+    {
+      "id": "F08-S25",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "replaces an unknown deletion snapshot with a page failure and retries only that decision"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/session/__tests__/currentEditingSession.test.ts",
+          "test": "restores the current session after a definite delete failure and freezes it while unknown"
+        }
+      ]
+    },
+    {
+      "id": "F08-S26",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "commits deletion with an external marker and resolves unknown outcomes on retry"
+        },
+        {
+          "level": "L4",
+          "file": "e2e/flows/f08-draft-library.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F08-S27",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "recovers the previous document after replacement removes the destination and fails"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/persistence/__tests__/recoverableFile.test.ts",
+          "test": "reports not committed when recovery restores the previous current"
+        }
+      ]
+    },
+    {
+      "id": "F08-S28",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "separates proven corruption from retryable page-level storage failure"
+        }
+      ]
+    },
+    {
+      "id": "F08-S29",
+      "exception": {
+        "reason": "现有测试未完整断言旧缩略图/损坏占位图上的警告遮罩和图标。",
+        "issue": "https://github.com/leon-zym/plogkit/issues/83",
+        "manual": "后续 Issue 补测前，按 Spec 在 iOS 与 Android development build 中人工验证。"
+      }
+    },
+    {
+      "id": "F08-S30",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "requires the normal-Draft action menu and confirmation, but corrupt tap goes to confirmation"
+        }
+      ]
+    },
+    {
+      "id": "F08-S31",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "retries a page-level library read failure without displaying a stale Grid"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/drafts/__tests__/draftLibrary.test.ts",
+          "test": "separates proven corruption from retryable page-level storage failure"
+        }
+      ]
+    },
+    {
+      "id": "F08-S32",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "renders accessible thumbnail-only items and opens the exact selected Draft"
+        },
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/index.test.tsx",
+          "test": "announces an unavailable thumbnail without claiming the Draft is ready"
+        }
+      ]
+    },
+    {
+      "id": "F09-S01",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "loads privacy-first defaults without writing when no record exists"
+        }
+      ]
+    },
+    {
+      "id": "F09-S02",
+      "evidence": [
+        {
+          "level": "L4",
+          "file": "e2e/flows/f09-app-settings.yaml"
+        }
+      ]
+    },
+    {
+      "id": "F09-S03",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "applies interleaved field intents to the latest committed snapshot"
+        }
+      ]
+    },
+    {
+      "id": "F09-S04",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "does not publish a new snapshot until persistence succeeds"
+        },
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/settings.test.tsx",
+          "test": "keeps the old value and disables the control until persistence succeeds"
+        }
+      ]
+    },
+    {
+      "id": "F09-S05",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "preserves the old snapshot after a failed write and recovers the queue"
+        },
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/settings.test.tsx",
+          "test": "shows a localized error and preserves the old value after save failure"
+        }
+      ]
+    },
+    {
+      "id": "F09-S06",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/expoAppSettings.test.ts",
+          "test": "replaces settings only after the complete pending file is written"
+        },
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/expoAppSettings.test.ts",
+          "test": "reads the backup when an interrupted replacement leaves the primary missing"
+        }
+      ]
+    },
+    {
+      "id": "F09-S07",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "keeps a read failure non-authoritative and retries the original record"
+        },
+        {
+          "level": "L2",
+          "file": "src/app/__tests__/settings.test.tsx",
+          "test": "disables settings after a load failure and offers initialization retry"
+        }
+      ]
+    },
+    {
+      "id": "F09-S08",
+      "evidence": [
+        {
+          "level": "L2",
+          "file": "src/services/settings/__tests__/appSettings.test.ts",
+          "test": "uses defaults for invalid JSON without rewriting it during load"
+        }
+      ]
+    }
+  ]
+}
