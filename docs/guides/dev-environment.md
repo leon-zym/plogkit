@@ -155,9 +155,9 @@ node scripts/e2e/run.mjs ios --phase test
 node scripts/e2e/run.mjs ios --phase test --flow f06-session-persistence
 ```
 
-`--phase test` 仍会重置专用设备、注入 fixture、启动 Metro 并执行 warmup。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
+`--phase test` 仍会重置专用设备、注入 fixture、启动 owned Metro 并执行 warmup。iOS runner 会先完成 Metro manifest 和 cold bundle 预热，再启动 development build 并等待 `home-screen`。原生依赖、Expo 配置或 runner 构建逻辑变化后必须重新运行对应的 `pnpm e2e:*`，不能复用旧构建。
 
-runner 默认使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD。缺少所需 runtime、device type 或 system image 时，测试会在业务 flow 前失败。每次测试擦除专用设备并注入 fixture，不使用或修改日常开发设备。失败 artifact 的目录会打印到终端；readiness、flow 隔离和诊断要求见[测试策略](testing-strategy.md)。
+runner 默认使用 iPhone 17 Pro / iOS 26.5 的 `PlogKit E2E` Simulator，以及 Pixel 7 Pro / API 36 `default` system image 的 `PlogKit_E2E` Android AVD。缺少所需 runtime、device type 或 system image 时，测试会在业务 flow 前失败。每次测试擦除专用设备并注入 fixture，不使用或修改日常开发设备。失败 artifact 的目录会打印到终端；其中 Metro 相关文件记录 Node、Expo CLI、owned process、端口、manifest / bundle URL、阶段分类和时间线。readiness、flow 隔离和诊断要求见[测试策略](testing-strategy.md)。
 
 E2E 独占本机 IPv4 端口 8081；端口已被占用时立即失败，不复用或终止未知进程。日常真机开发仍使用支持 LAN 的 `pnpm start`。
 

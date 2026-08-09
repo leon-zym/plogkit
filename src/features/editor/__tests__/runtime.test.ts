@@ -3,6 +3,7 @@ import {
   importedAssetId,
   type ImportedAssetId,
 } from "@/core/document";
+import { editIntents } from "@/core/editing";
 import {
   draftId,
   type AssetCatalogSnapshot,
@@ -245,6 +246,48 @@ describe("editor Draft integration", () => {
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
   });
 
+  it("keeps a Draft photo-information override separate from the global default for new Drafts", async () => {
+    const created: Extract<CreateDraftResult, { status: "created" }> = {
+      status: "created",
+      draftId: secondId,
+      document: secondDocument,
+      assets: snapshot("memory://second", secondId, secondImageId),
+      errors: [],
+      ...versionFacts,
+    };
+    const library = createLibrary({
+      create: jest.fn(async (_candidates, options) => {
+        expect(options).toEqual({ metadataPolicy: "strip" });
+        return created;
+      }),
+    });
+    const loadMetadataPolicy = jest.fn(async () => "strip" as const);
+    const runtime = new EditorRuntime({
+      storage: { library },
+      session: createCurrentEditingSession({ library, autosaveDelayMs: 10_000 }),
+      selectCandidates: async () => [pickerCandidate],
+      loadMetadataPolicy,
+    });
+    await runtime.openDraft(firstId);
+    const prepared = await runtime.prepareEditor();
+    if (prepared.status !== "prepared") throw new Error("expected prepared editor");
+
+    prepared.editing.dispatch({
+      type: "commit",
+      intent: editIntents.export.changeMetadataPolicy("retain-basic"),
+    });
+    await expect(runtime.flush()).resolves.toEqual({ status: "flushed" });
+    await expect(runtime.choosePhotos()).resolves.toMatchObject({ status: "created" });
+
+    expect(library.save).toHaveBeenCalledWith(
+      firstId,
+      expect.objectContaining({
+        exportSettings: expect.objectContaining({ metadataPolicy: "retain-basic" }),
+      }),
+    );
+    expect(loadMetadataPolicy).toHaveBeenCalledTimes(1);
+  });
+
   it("returns picker cancellation before loading settings or creating a Draft", async () => {
     const library = createLibrary();
     const loadMetadataPolicy = jest.fn(async () => "strip" as const);
@@ -261,6 +304,74 @@ describe("editor Draft integration", () => {
     });
     expect(loadMetadataPolicy).not.toHaveBeenCalled();
     expect(library.create).not.toHaveBeenCalled();
+  });
+
+  it("opens a partially imported Draft and exposes its failed-item count once", async () => {
+    const successfulIds = [
+      importedAssetId("image:partial-first"),
+      importedAssetId("image:partial-second"),
+    ] as const;
+    const partialDocument = createDocument([
+      { id: successfulIds[0], width: 1200, height: 900 },
+      { id: successfulIds[1], width: 900, height: 1200 },
+    ]);
+    const partialAssets: AssetCatalogSnapshot = Object.freeze({
+      entries: Object.freeze([...successfulIds]),
+      resolve: (imageId: ImportedAssetId, usage: "preview" | "original" | "metadata") =>
+        successfulIds.includes(imageId as (typeof successfulIds)[number])
+          ? Object.freeze({
+              draftId: secondId,
+              assetId: imageId,
+              usage,
+              uri: `memory://partial/${imageId}/${usage}`,
+            })
+          : null,
+    });
+    const created: Extract<CreateDraftResult, { status: "created" }> = {
+      status: "created",
+      draftId: secondId,
+      document: partialDocument,
+      assets: partialAssets,
+      errors: [
+        {
+          index: 1,
+          sourceUri: "picker://icloud-failed.jpg",
+          message: "iCloud download failed",
+        },
+      ],
+      ...versionFacts,
+    };
+    const library = createLibrary({
+      create: jest.fn(async () => created),
+      read: jest.fn(async () => ({
+        status: "ready" as const,
+        draftId: secondId,
+        document: partialDocument,
+        assets: partialAssets,
+        ...versionFacts,
+      })),
+      readPreview: jest.fn(async (_id, imageId) => ({
+        status: "ready" as const,
+        descriptor: partialAssets.resolve(imageId, "preview")!,
+        assets: partialAssets,
+      })),
+    });
+    const candidates: readonly ImportCandidate[] = [
+      pickerCandidate,
+      { ...pickerCandidate, uri: "picker://icloud-failed.jpg" },
+      { ...pickerCandidate, uri: "picker://third.jpg" },
+    ];
+    const runtime = createRuntime(library, candidates);
+
+    await expect(runtime.choosePhotos()).resolves.toEqual(created);
+    expect(runtime.takeImportErrorCount()).toBe(1);
+    expect(runtime.takeImportErrorCount()).toBe(0);
+
+    const prepared = await runtime.prepareEditor();
+    if (prepared.status !== "prepared") throw new Error("expected prepared editor");
+    expect(prepared.editing.read().document.sourceImages.map(({ id }) => id)).toEqual(
+      successfulIds,
+    );
   });
 
   it("deletes only through the current-session coordinator", async () => {

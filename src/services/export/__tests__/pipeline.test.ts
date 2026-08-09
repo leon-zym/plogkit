@@ -1,12 +1,14 @@
 import {
   createDocument,
   importedAssetId,
+  type ImportedAssetId,
   type PlogDocument,
 } from "../../../core/document";
 import { parseExportSettings, type ExportCapabilities } from "../../../core/exportPolicy";
 import {
   draftId,
   type AssetCatalogSnapshot,
+  type AssetUsage,
 } from "../../drafts/draftLibrary";
 import { createExportPipeline } from "../pipeline";
 import {
@@ -89,6 +91,53 @@ function createSuccessfulHarness(capabilities: ExportCapabilities = fullCapabili
 }
 
 describe("ExportPipeline.run", () => {
+  it("reduces a nine-photo original export to the global output bounds before preparing it", async () => {
+    const sourceImages = Array.from({ length: 9 }, (_, index) => ({
+      id: importedAssetId(`large-source-${index + 1}`),
+      width: 6000,
+      height: 4000,
+    }));
+    const document = createDocument(sourceImages);
+    const entries = Object.freeze(sourceImages.map(({ id }) => id));
+    const snapshot: AssetCatalogSnapshot = Object.freeze({
+      entries,
+      resolve: (candidateId: ImportedAssetId, usage: AssetUsage) =>
+        entries.includes(candidateId)
+          ? Object.freeze({
+              draftId: draftId("draft-nine-photo-export"),
+              assetId: candidateId,
+              usage,
+              uri: `file:///nine-photo/${candidateId}/${usage}.jpg`,
+            })
+          : null,
+    });
+    const { pipeline, backend, operations } = createSuccessfulHarness();
+
+    const result = await pipeline.run({ document, assets: snapshot });
+
+    expect(result).toMatchObject({
+      status: "success",
+      output: {
+        width: 2730,
+        height: 16384,
+        format: "jpeg",
+        wasReduced: true,
+      },
+    });
+    expect(2730 * 16384).toBeLessThanOrEqual(64_000_000);
+    expect(backend.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document,
+        policy: expect.objectContaining({
+          width: 2730,
+          height: 16384,
+          wasReduced: true,
+        }),
+      }),
+    );
+    expect(operations[0]?.cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("resolves and fixes the current document policy independently for every run", async () => {
     const imageId = importedAssetId("source-1");
     const original = createDocument([{ id: imageId, width: 4000, height: 3000 }]);

@@ -1,7 +1,7 @@
 # F07 图片导入
 
 - 状态：已实现
-- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)
+- 关联：[ADR 0006](../adr/0006-image-import-pipeline.md)、[ADR 0009](../adr/0009-sdr-export-live-photo-still.md)、[ADR 0022](../adr/0022-draft-aggregate-current-editing-session.md)、[ADR 0040](../adr/0040-system-photo-picker-batch-boundary.md)
 
 ## 概述
 
@@ -10,6 +10,7 @@
 ## 非目标
 
 - 应用内相册浏览器、相机拍摄、非图片资产。
+- 系统照片选择器内部的逐张下载进度、逐张错误详情与应用自有下载超时。
 
 ## 需求与场景
 
@@ -33,12 +34,12 @@
 - WHEN 用户从首页打开系统照片选择器并选择照片
 - THEN 用户仍可确认选中的照片并完成导入
 
-#### Scenario F07-S04: 部分失败保留同批次成功图片
+#### Scenario F07-S04: 本地导入部分失败保留同批次成功图片
 
-- GIVEN 用户选择的 3 张图片中有 1 张在导入时失败
-- WHEN 另外 2 张图片导入成功
+- GIVEN 系统照片选择器已向应用返回 3 张候选照片
+- WHEN 应用复制和准备候选照片时有 1 张失败、另外 2 张成功
 - THEN 应用创建只包含 2 张成功图片的草稿并进入 Editor
-- AND 应用明确提示失败项，不丢弃同批次中已经成功的图片
+- AND 应用提示存在导入失败，不丢弃同批次中已经成功的图片
 
 #### Scenario F07-S05: 取消或全部失败不创建草稿
 
@@ -54,12 +55,13 @@
 - WHEN 导入完成
 - THEN 编辑与导出使用该 Live Photo 的封面静帧
 
-#### Scenario F07-S07: iCloud 资产等待下载
+#### Scenario F07-S07: 系统照片选择器整批准备照片
 
-- GIVEN 用户选中一张仅存于 iCloud 的照片
-- WHEN 导入开始
-- THEN 界面显示下载进行中，下载完成后继续导入流程
-- AND 下载超时或失败时给出明确提示，已成功的图片不受影响
+- GIVEN 用户选中的照片包含本地照片或仅存于 iCloud 的照片
+- WHEN 用户确认选择，系统照片选择器准备整批可读取文件
+- THEN 应用显示统一的准备中状态，不展示逐张进度
+- AND 系统照片选择器成功返回整批结果后，应用继续本地导入流程
+- AND 系统照片选择器整批失败时，应用显示重新选择提示且不创建草稿
 
 #### Scenario F07-S08: 替换图片可以在当前会话撤销
 

@@ -26,6 +26,7 @@ import {
   createCleanupManager,
   installSignalHandlers,
   log,
+  prewarmMetroBundle,
   run,
   runMaestroSuite,
   startMetro,
@@ -164,6 +165,7 @@ function capturePhotoResources(device) {
 async function runSuiteWithExportAssertion(options) {
   const { device, flow } = options;
   const assertsExport = flow === null || flow === "f04-export";
+  const expectedNewResources = assertsExport ? 2 : 0;
   const before = assertsExport ? capturePhotoResources(device) : null;
 
   await runMaestroSuite(options);
@@ -172,15 +174,16 @@ async function runSuiteWithExportAssertion(options) {
   const after = await waitUntil(
     () => {
       const resources = capturePhotoResources(device);
-      return [...resources].some((resource) => !before.has(resource)) ? resources : null;
+      const added = [...resources].filter((resource) => !before.has(resource));
+      return added.length >= expectedNewResources ? resources : null;
     },
     10000,
-    `${device.platform} system photo library to contain a newly exported resource`,
+    `${device.platform} system photo library to contain ${expectedNewResources} newly exported resources`,
     500,
   );
   log(
     device.platform,
-    `System photo resources gained a new identity (${before.size} before, ${after.size} after).`,
+    `System photo resources gained ${expectedNewResources} new identities (${before.size} before, ${after.size} after).`,
   );
 }
 
@@ -194,6 +197,7 @@ async function test(platforms, { artifactRoot, cleanup, deviceId, flow }) {
     deviceId,
     installAndSeed,
     platforms,
+    prewarmMetroBundle,
     prepareDevice,
     root,
     startMetro,

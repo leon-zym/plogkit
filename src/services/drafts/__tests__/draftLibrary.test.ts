@@ -456,6 +456,193 @@ describe("Draft Library", () => {
     });
   });
 
+  it("sorts all Drafts by updated time and uses stable identity order for ties", async () => {
+    const { library, createLibrary, setCreateDraftId, setNow } = setup();
+    const identities = [draftId("draft:older"), draftId("draft:tie-b"), draftId("draft:tie-a")];
+    setCreateDraftId(() => {
+      const identity = identities.shift();
+      if (identity === undefined) throw new Error("missing fixture identity");
+      return identity;
+    });
+
+    setNow("2026-07-22T08:00:00.000Z");
+    await createDraft(library, [candidate("one")]);
+    setNow("2026-07-22T10:00:00.000Z");
+    await createDraft(library, [candidate("two")]);
+    await createDraft(library, [candidate("later")]);
+
+    expect(library.getState()).toMatchObject({
+      status: "ready",
+      entries: [
+        { draftId: "draft:tie-a", updatedAt: "2026-07-22T10:00:00.000Z" },
+        { draftId: "draft:tie-b", updatedAt: "2026-07-22T10:00:00.000Z" },
+        { draftId: "draft:older", updatedAt: "2026-07-22T08:00:00.000Z" },
+      ],
+    });
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [{ draftId: "draft:tie-a" }, { draftId: "draft:tie-b" }, { draftId: "draft:older" }],
+    });
+  });
+
+  it("places missing updated times first and keeps those corrupt entries stable", async () => {
+    const { files, library, createLibrary, setCreateDraftId, setNow } = setup();
+    const identities = [
+      draftId("draft:missing-z"),
+      draftId("draft:dated"),
+      draftId("draft:missing-a"),
+    ];
+    setCreateDraftId(() => {
+      const identity = identities.shift();
+      if (identity === undefined) throw new Error("missing fixture identity");
+      return identity;
+    });
+    setNow("2026-07-22T08:00:00.000Z");
+    const missingZ = await createDraft(library, [candidate("one")]);
+    setNow("2026-07-22T09:00:00.000Z");
+    const dated = await createDraft(library, [candidate("two")]);
+    setNow("2026-07-22T10:00:00.000Z");
+    const missingA = await createDraft(library, [candidate("later")]);
+    if (
+      missingZ.status !== "created" ||
+      dated.status !== "created" ||
+      missingA.status !== "created"
+    ) {
+      throw new Error("expected three created Drafts");
+    }
+    for (const created of [missingZ, missingA]) {
+      const original = created.assets.resolve(created.document.sourceImages[0]!.id, "original");
+      if (original === null) throw new Error("expected an original descriptor");
+      await files.writeText(`${original.uri.split("/assets/", 1)[0]}/draft.json`, "not-json");
+    }
+
+    const restarted = createLibrary();
+    await expect(restarted.load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [
+        { status: "corrupt", draftId: "draft:missing-a", updatedAt: null },
+        { status: "corrupt", draftId: "draft:missing-z", updatedAt: null },
+        {
+          status: "ready",
+          draftId: dated.draftId,
+          updatedAt: "2026-07-22T09:00:00.000Z",
+        },
+      ],
+    });
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [
+        { draftId: "draft:missing-a" },
+        { draftId: "draft:missing-z" },
+        { draftId: "draft:dated" },
+      ],
+    });
+  });
+
+  it("moves only successfully changed content and preserves time after no-op or failed saves", async () => {
+    const { files, library, createLibrary, setNow } = setup();
+    setNow("2026-07-22T08:00:00.000Z");
+    const first = await createDraft(library, [candidate("one")]);
+    setNow("2026-07-22T09:00:00.000Z");
+    const second = await createDraft(library, [candidate("two")]);
+    if (first.status !== "created" || second.status !== "created") {
+      throw new Error("expected two created Drafts");
+    }
+    const changed = updateDocument(first.document, {
+      canvas: { ...first.document.canvas, backgroundColor: "#135724" },
+    });
+
+    setNow("2026-07-22T10:00:00.000Z");
+    await expect(library.save(first.draftId, changed)).resolves.toMatchObject({
+      status: "saved",
+      contentRevision: 2,
+      metadata: { updatedAt: "2026-07-22T10:00:00.000Z" },
+    });
+    expect(library.getState()).toMatchObject({
+      entries: [
+        { draftId: first.draftId, updatedAt: "2026-07-22T10:00:00.000Z" },
+        { draftId: second.draftId, updatedAt: "2026-07-22T09:00:00.000Z" },
+      ],
+    });
+
+    setNow("2026-07-22T11:00:00.000Z");
+    await expect(library.save(first.draftId, changed)).resolves.toMatchObject({
+      status: "saved",
+      contentRevision: 2,
+      metadata: { updatedAt: "2026-07-22T10:00:00.000Z" },
+    });
+
+    const secondOriginal = second.assets.resolve(second.document.sourceImages[0]!.id, "original");
+    if (secondOriginal === null) throw new Error("expected the second original");
+    const secondRoot = `${secondOriginal.uri.split("/assets/", 1)[0]}/draft.json`;
+    files.failMoveTo = secondRoot;
+    setNow("2026-07-22T12:00:00.000Z");
+    await expect(
+      library.save(
+        second.draftId,
+        updateDocument(second.document, {
+          canvas: { ...second.document.canvas, backgroundColor: "#246813" },
+        }),
+      ),
+    ).resolves.toMatchObject({ status: "save-failed" });
+    files.failMoveTo = null;
+
+    await expect(createLibrary().load()).resolves.toMatchObject({
+      status: "ready",
+      entries: [
+        { draftId: first.draftId, updatedAt: "2026-07-22T10:00:00.000Z" },
+        { draftId: second.draftId, updatedAt: "2026-07-22T09:00:00.000Z" },
+      ],
+    });
+  });
+
+  it("keeps ordering metadata unchanged through browse, preview repair, thumbnail rebuild, and maintenance", async () => {
+    const { files, library, setNow } = setup();
+    setNow("2026-07-22T08:00:00.000Z");
+    const older = await createDraft(library, [candidate("one")]);
+    setNow("2026-07-22T09:00:00.000Z");
+    const newer = await createDraft(library, [candidate("two")]);
+    if (older.status !== "created" || newer.status !== "created") {
+      throw new Error("expected two created Drafts");
+    }
+    await settleBackgroundWork();
+    const expected = [
+      { draftId: newer.draftId, updatedAt: "2026-07-22T09:00:00.000Z" },
+      { draftId: older.draftId, updatedAt: "2026-07-22T08:00:00.000Z" },
+    ];
+    const expectStableProjection = () => {
+      expect(library.getState()).toMatchObject({ status: "ready", entries: expected });
+    };
+    expectStableProjection();
+
+    await expect(library.read(older.draftId)).resolves.toMatchObject({ status: "ready" });
+    expectStableProjection();
+
+    const imageId = older.document.sourceImages[0]!.id;
+    const preview = older.assets.resolve(imageId, "preview");
+    if (preview === null) throw new Error("expected a preview descriptor");
+    await files.removeFile(preview.uri);
+    await expect(library.readPreview(older.draftId, imageId)).resolves.toMatchObject({
+      status: "ready",
+    });
+    expectStableProjection();
+
+    const stateBeforeThumbnailRepair = library.getState();
+    const olderEntry =
+      stateBeforeThumbnailRepair.status === "ready"
+        ? stateBeforeThumbnailRepair.entries.find(({ draftId: id }) => id === older.draftId)
+        : undefined;
+    if (olderEntry?.thumbnail === null || olderEntry?.thumbnail === undefined) {
+      throw new Error("expected a generated thumbnail pair");
+    }
+    library.reportThumbnailLoadFailure(older.draftId, olderEntry.thumbnail);
+    await settleBackgroundWork();
+    expectStableProjection();
+
+    await library.maintainInactive(older.draftId);
+    expectStableProjection();
+  });
+
   it("serializes colliding creation publication without removing the winning Draft", async () => {
     const { files, library, createLibrary, setCreateDraftId } = setup();
     setCreateDraftId(() => draftId("draft:1"));

@@ -2,7 +2,7 @@
 
 - 状态：部分修订
 - 接受日期：2026-07-27
-- 后继：[ADR 0040](0040-scenario-verification-traceability.md)
+- 后继：[ADR 0041](0041-scenario-verification-traceability.md)
 - 修订：[ADR 0013](0013-doc-system.md)
 - 关联：[ADR 0014](0014-language-policy.md)、[Issue #50](https://github.com/leon-zym/plogkit/issues/50)
 

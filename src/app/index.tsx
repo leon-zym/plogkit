@@ -261,6 +261,11 @@ export default function HomeScreen() {
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
             style={[styles.thumbnailPlaceholder, corrupt && styles.corruptPlaceholder]}
+            testID={
+              corrupt
+                ? `draft-corrupt-placeholder-${index}`
+                : `draft-thumbnail-placeholder-${index}`
+            }
           >
             <View style={styles.placeholderMark} />
           </View>
@@ -282,8 +287,11 @@ export default function HomeScreen() {
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
             style={styles.corruptOverlay}
+            testID={`draft-corrupt-overlay-${index}`}
           >
-            <Text style={styles.warningIcon}>!</Text>
+            <Text style={styles.warningIcon} testID={`draft-corrupt-warning-${index}`}>
+              !
+            </Text>
           </View>
         ) : null}
       </Pressable>

@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md) 和 [ADR 0040](../adr/0040-scenario-verification-traceability.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md) 和 [ADR 0041](../adr/0041-scenario-verification-traceability.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -47,11 +47,13 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development bui
 - `clearState` 会重置应用数据。dev menu 的自动界面由项目 config plugin 禁用，避免干扰业务元素定位。
 - 本地与 CI 共用同一编排入口。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
+iOS warm-up 分别证明 Metro readiness 与 App readiness。runner 在启动 Maestro / XCTest 前先从 owned Metro 解析 bundle URL，并在有界 timeout 内完整消费一次 cold bundle；随后启动 development build，并以 `home-screen` 断言证明设备已进入业务界面。两个阶段都只执行一次，不做 retry 或固定等待；资源紧张导致的冷编译失败必须归因到 Metro 阶段，不得退化为不明确的 UI readiness 失败。
+
 当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
 ### 设备 readiness 与 flow 隔离
 
-设备进入业务 flow 前必须证明 launcher 与 UI hierarchy 可响应且不存在系统 ANR；boot flag、服务注册或固定等待不能单独视为 ready。每个业务 flow 隔离运行，单个设备或 driver 故障不得污染后续 flow。失败时须保留足以区分产品、Metro、driver 与设备层的 artifacts，具体探针、分类和采集命令由 runner 及其测试定义。
+设备进入业务 flow 前必须证明 launcher 与 UI hierarchy 可响应且不存在系统 ANR；boot flag、服务注册或固定等待不能单独视为 ready。每个业务 flow 隔离运行，单个设备或 driver 故障不得污染后续 flow。失败分类分别记录 `metro-transport`、`metro-bundle`、`xctest-driver`、`system-ui`、`app-crash` 与 `business-assertion`，不得用后续 UI 断言覆盖较早的基础设施根因。Metro log、owned process lifecycle、manifest / bundle URL 和关键时间线随 failure artifacts 保留。
 
 ## Scenario 可追踪性
 

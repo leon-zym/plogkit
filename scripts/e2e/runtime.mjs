@@ -8,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { connect } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -256,9 +257,182 @@ async function metroIsHealthy() {
   }
 }
 
+function writeMetroPrewarmTimeline(artifactRoot, platform, timeline) {
+  try {
+    mkdirSync(artifactRoot, { recursive: true });
+    writeFileSync(
+      join(artifactRoot, `metro-${platform}-prewarm.json`),
+      `${JSON.stringify(timeline, null, 2)}\n`,
+    );
+  } catch {
+    // Timeline capture is best-effort and must preserve the transport or bundle failure.
+  }
+}
+
+function metroPrewarmError(category, phase, error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const failure = new Error(`Metro ${phase} prewarm failed [${category}]: ${detail}`, {
+    cause: error,
+  });
+  failure.category = category;
+  return failure;
+}
+
+export async function prewarmMetroBundle({
+  artifactRoot,
+  baseUrl = "http://127.0.0.1:8081",
+  platform,
+  timeoutMs = 120000,
+}) {
+  const startedAt = new Date();
+  const timeline = {
+    platform,
+    manifestUrl: `${baseUrl.replace(/\/$/, "")}/`,
+    startedAt: startedAt.toISOString(),
+  };
+  const signal = AbortSignal.timeout(timeoutMs);
+  let phase = "manifest";
+  try {
+    const manifestResponse = await fetch(timeline.manifestUrl, {
+      headers: {
+        accept: "application/expo+json",
+        "expo-platform": platform,
+      },
+      signal,
+    });
+    if (!manifestResponse.ok) {
+      throw new Error(`HTTP ${manifestResponse.status} from ${timeline.manifestUrl}`);
+    }
+    const manifest = await manifestResponse.json();
+    const bundleUrl = manifest?.launchAsset?.url;
+    if (typeof bundleUrl !== "string") {
+      throw new Error("Expo manifest does not contain launchAsset.url");
+    }
+    const manifestOrigin = new URL(timeline.manifestUrl).origin;
+    if (new URL(bundleUrl).origin !== manifestOrigin) {
+      throw new Error(`Expo manifest bundle URL is not owned by ${manifestOrigin}`);
+    }
+    timeline.manifestReadyAt = new Date().toISOString();
+    timeline.bundleUrl = bundleUrl;
+
+    phase = "bundle";
+    const bundleResponse = await fetch(bundleUrl, {
+      headers: {
+        accept: "application/javascript",
+        "expo-platform": platform,
+      },
+      signal,
+    });
+    if (!bundleResponse.ok) {
+      throw new Error(`HTTP ${bundleResponse.status} from ${bundleUrl}`);
+    }
+    let bundleBytes = 0;
+    if (bundleResponse.body) {
+      for await (const chunk of bundleResponse.body) bundleBytes += chunk.byteLength;
+    }
+    timeline.bundleBytes = bundleBytes;
+    timeline.bundleReadyAt = new Date().toISOString();
+    writeMetroPrewarmTimeline(artifactRoot, platform, timeline);
+    log("metro", `${platform} cold bundle ready (${bundleBytes} bytes): ${bundleUrl}`);
+    return timeline;
+  } catch (error) {
+    const category = phase === "manifest" ? "metro-transport" : "metro-bundle";
+    const failure = metroPrewarmError(category, phase, error);
+    timeline.category = category;
+    timeline.error = failure.message;
+    timeline.failedAt = new Date().toISOString();
+    timeline.phase = phase;
+    writeMetroPrewarmTimeline(artifactRoot, platform, timeline);
+    try {
+      const failureDirectory = join(artifactRoot, platform, "warmup");
+      mkdirSync(failureDirectory, { recursive: true });
+      appendFileSync(
+        join(failureDirectory, "failure-summary.txt"),
+        `category: ${category}\nerror: ${failure.message}\n`,
+      );
+    } catch {
+      // Failure summary capture is best-effort and must preserve the prewarm failure.
+    }
+    throw failure;
+  }
+}
+
+export function createMetroFailureSignal(logPath, onFailure = () => {}) {
+  let outputTail = "";
+  let resolveFailure;
+  let settled = false;
+  let stopping = false;
+  const failure = new Promise((resolvePromise) => {
+    resolveFailure = resolvePromise;
+  });
+  const fail = (detail, cause) => {
+    if (settled || stopping) return;
+    settled = true;
+    const error = new Error(`Owned Metro transport failed: ${detail}. See ${logPath}`, {
+      cause,
+    });
+    error.category = "metro-transport";
+    onFailure(error);
+    resolveFailure(error);
+  };
+  return {
+    failure,
+    markStopping() {
+      stopping = true;
+    },
+    observeError(error) {
+      fail(error instanceof Error ? error.message : String(error), error);
+    },
+    observeExit(code, signal) {
+      fail(`process exited (${code ?? signal ?? "unknown"})`);
+    },
+    observeOutput(chunk) {
+      outputTail = `${outputTail}${String(chunk)}`.slice(-512);
+      if (/ERR_STREAM_PREMATURE_CLOSE/i.test(outputTail)) {
+        fail("ERR_STREAM_PREMATURE_CLOSE");
+      }
+    },
+  };
+}
+
 export async function startMetro({ artifactRoot, cleanup, root }) {
   const logPath = join(artifactRoot, "metro.log");
+  const lifecyclePath = join(artifactRoot, "metro-lifecycle.json");
+  const lifecycleTimeline = {
+    command: `${process.execPath} --dns-result-order=ipv4first ./node_modules/expo/bin/cli start --dev-client --localhost`,
+    expoCliVersion: capture(process.execPath, ["./node_modules/expo/bin/cli", "--version"], {
+      allowFailure: true,
+      cwd: root,
+    }),
+    logPath,
+    nodeVersion: process.version,
+    port: 8081,
+    startedAt: new Date().toISOString(),
+    stdio: { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+  };
+  const writeLifecycleTimeline = () => {
+    try {
+      writeFileSync(lifecyclePath, `${JSON.stringify(lifecycleTimeline, null, 2)}\n`);
+    } catch {
+      // Lifecycle capture is best-effort and must not replace the Metro result.
+    }
+  };
   const logStream = createWriteStream(logPath, { flags: "w" });
+  const lifecycle = createMetroFailureSignal(logPath, (error) => {
+    lifecycleTimeline.category = error.category;
+    lifecycleTimeline.error = error.message;
+    lifecycleTimeline.failedAt = new Date().toISOString();
+    lifecycleTimeline.status = "failed";
+    writeLifecycleTimeline();
+    try {
+      appendFileSync(
+        join(artifactRoot, "metro-failure-summary.txt"),
+        `category: ${error.category}\nerror: ${error.message}\n`,
+      );
+    } catch {
+      // Shared failure summary capture is best-effort.
+    }
+  });
   log("metro", `Starting an owned Metro server; log: ${logPath}`);
   const child = spawn(
     process.execPath,
@@ -271,38 +445,77 @@ export async function startMetro({ artifactRoot, cleanup, root }) {
     ],
     { cwd: root, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
   );
+  lifecycleTimeline.pid = child.pid;
+  lifecycleTimeline.status = "starting";
+  writeLifecycleTimeline();
+  let cleanupStarted = false;
+  const childExited = new Promise((resolvePromise) => {
+    child.once("exit", (code, signal) => {
+      lifecycle.observeExit(code, signal);
+      lifecycleTimeline.exitAt = new Date().toISOString();
+      lifecycleTimeline.exitCode = code;
+      lifecycleTimeline.exitSignal = signal;
+      lifecycleTimeline.status = cleanupStarted ? "stopped" : "failed";
+      writeLifecycleTimeline();
+      resolvePromise();
+    });
+  });
+  const childClosed = new Promise((resolvePromise) => child.once("close", resolvePromise));
+  const childIsRunning = () => child.exitCode === null && child.signalCode === null;
   for (const [stream, destination] of [
     [child.stdout, process.stdout],
     [child.stderr, process.stderr],
   ]) {
     stream.on("data", (chunk) => {
+      lifecycle.observeOutput(chunk);
       destination.write(chunk);
       logStream.write(chunk);
     });
   }
   child.once("error", (error) => {
+    lifecycle.observeError(error);
     console.error(`[e2e:metro] ${String(error)}`);
   });
   cleanup.add(async () => {
-    if (child.exitCode === null) {
+    cleanupStarted = true;
+    lifecycle.markStopping();
+    lifecycleTimeline.stoppingAt = new Date().toISOString();
+    lifecycleTimeline.status = "stopping";
+    writeLifecycleTimeline();
+    if (childIsRunning()) {
       log("metro", "Stopping Metro.");
       child.kill("SIGINT");
       await Promise.race([
-        new Promise((resolvePromise) => child.once("exit", resolvePromise)),
+        childExited,
         new Promise((resolvePromise) => setTimeout(resolvePromise, 10000)),
       ]);
-      if (child.exitCode === null) child.kill("SIGTERM");
+      if (childIsRunning()) {
+        child.kill("SIGTERM");
+        await Promise.race([
+          childExited,
+          new Promise((resolvePromise) => setTimeout(resolvePromise, 5000)),
+        ]);
+      }
+      if (childIsRunning()) child.kill("SIGKILL");
     }
+    await Promise.race([
+      childClosed,
+      new Promise((resolvePromise) => setTimeout(resolvePromise, 2000)),
+    ]);
     await new Promise((resolvePromise) => logStream.end(resolvePromise));
   });
   await waitUntil(
     async () => {
-      if (child.exitCode !== null) throw new Error(`Metro exited early. See ${logPath}`);
+      if (!childIsRunning()) throw new Error(`Metro exited early. See ${logPath}`);
       return metroIsHealthy();
     },
     60000,
     "Metro to become healthy on 127.0.0.1:8081",
   );
+  lifecycleTimeline.healthyAt = new Date().toISOString();
+  lifecycleTimeline.status = "healthy";
+  writeLifecycleTimeline();
+  return { failure: lifecycle.failure };
 }
 
 async function runMaestro({ artifactRoot, cleanup, device, kind, root, target }) {
@@ -329,7 +542,11 @@ async function runMaestro({ artifactRoot, cleanup, device, kind, root, target })
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const evidence = `${message}\n${readArtifactEvidence(outputDirectory)}`;
+    const evidence = [
+      message,
+      readArtifactEvidence(outputDirectory),
+      readTextEvidence(join(artifactRoot, "metro.log")),
+    ].join("\n");
     const category = classifyFailure(evidence);
     await collectFailureDiagnostics({
       diagnosticDirectory: outputDirectory,
@@ -353,7 +570,7 @@ export function warmUpApp(options) {
   });
 }
 
-const SUITE_ABORT_CATEGORIES = new Set(["metro", "system-ui"]);
+const SUITE_ABORT_CATEGORIES = new Set(["metro-transport", "metro-bundle", "system-ui"]);
 
 export function shouldAbortMaestroSuite(category) {
   return SUITE_ABORT_CATEGORIES.has(category);
@@ -415,8 +632,11 @@ const XCTEST_DRIVER_PATTERNS =
 const BENIGN_XCTEST_PENDING_RECORD_PATTERN =
   /\bXCTestDriver:\s+Recorded pending request for target session\b.*\btimeout\b/i;
 const XCTEST_FAILURE_TERMS = /\b(failed|error|timed\s*out|unavailable)\b/i;
-const METRO_FAILURE_PATTERNS =
-  /\b(?:Metro|packager).{0,100}\b(?:exited|failed|error|unavailable|not\s+running)\b|\b(?:exited|failed|error|unavailable).{0,100}\b(?:Metro|packager)\b|\b(?:bundling\s+failed|ERR_STREAM_PREMATURE_CLOSE|ECONNREFUSED(?:\s+127\.0\.0\.1)?:8081)\b/i;
+const METRO_EXPLICIT_TRANSPORT_FAILURE_PATTERN =
+  /\b(?:ERR_STREAM_PREMATURE_CLOSE|ECONNREFUSED(?:\s+127\.0\.0\.1)?:8081)\b/i;
+const METRO_PROCESS_FAILURE_PATTERNS =
+  /\b(?:Metro|packager).{0,100}\b(?:exited|failed|error|unavailable|not\s+running)\b|\b(?:exited|failed|error|unavailable).{0,100}\b(?:Metro|packager)\b/i;
+const METRO_BUNDLE_FAILURE_PATTERN = /\bbundling\s+failed\b/i;
 const COLD_BUNDLE_PROGRESS_PATTERN = /\bBundling\s+\d{1,3}%/i;
 const WARMUP_HOME_SCREEN_FAILURE_PATTERN =
   /\bAssertion is false:\s*(?:id:\s*)?home-screen is visible\b/i;
@@ -426,6 +646,14 @@ const BUSINESS_ASSERTION_PATTERNS =
   /\b(Assertion is false|No visible element found|Could not find a visible element matching selector)\b/i;
 
 const TEXT_ARTIFACT_EXTENSIONS = /\.(json|log|txt|xml|yaml|yml)$/i;
+
+function readTextEvidence(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
 
 function readArtifactEvidence(directory) {
   if (!existsSync(directory)) return "";
@@ -451,20 +679,22 @@ function withoutBenignXCTestPendingRecords(message) {
   return message
     .split(/\r?\n/)
     .filter(
-      (line) =>
-        !BENIGN_XCTEST_PENDING_RECORD_PATTERN.test(line) || XCTEST_FAILURE_TERMS.test(line),
+      (line) => !BENIGN_XCTEST_PENDING_RECORD_PATTERN.test(line) || XCTEST_FAILURE_TERMS.test(line),
     )
     .join("\n");
 }
 
 export function classifyFailure(message) {
-  if (
-    METRO_FAILURE_PATTERNS.test(message) ||
-    (COLD_BUNDLE_PROGRESS_PATTERN.test(message) &&
-      WARMUP_HOME_SCREEN_FAILURE_PATTERN.test(message))
-  ) {
-    return "metro";
+  if (METRO_EXPLICIT_TRANSPORT_FAILURE_PATTERN.test(message)) {
+    return "metro-transport";
   }
+  if (
+    METRO_BUNDLE_FAILURE_PATTERN.test(message) ||
+    (COLD_BUNDLE_PROGRESS_PATTERN.test(message) && WARMUP_HOME_SCREEN_FAILURE_PATTERN.test(message))
+  ) {
+    return "metro-bundle";
+  }
+  if (METRO_PROCESS_FAILURE_PATTERNS.test(message)) return "metro-transport";
   if (SYSTEM_UI_PATTERNS.test(message)) return "system-ui";
   if (XCTEST_DRIVER_PATTERNS.test(withoutBenignXCTestPendingRecords(message))) {
     return "xctest-driver";
@@ -512,7 +742,13 @@ export async function collectFailureDiagnostics({
   }
 
   // Collect platform-specific crash and system UI diagnostics.
-  if (kind === "app-crash" || kind === "xctest-driver" || kind === "system-ui") {
+  if (
+    kind === "app-crash" ||
+    kind === "metro-bundle" ||
+    kind === "metro-transport" ||
+    kind === "xctest-driver" ||
+    kind === "system-ui"
+  ) {
     if (device.platform === "ios") {
       try {
         const reportsDir = join(homedir(), "Library", "Logs", "DiagnosticReports");
