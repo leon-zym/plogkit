@@ -79,6 +79,8 @@ L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm
 
 iOS scheduled / manual E2E 将 development build 与 acceptance suite 放在两个顺序 job 中：build job 上限 40 分钟，其中构建步骤上限 30 分钟；构建产物以保留可执行权限的短期 archive 交接。acceptance job 上限 60 分钟，其中完整 suite 步骤上限 50 分钟，剩余预算用于失败 artifact 上传与收尾。两阶段分别上传 `ios-build-artifacts` 与 `ios-maestro-artifacts`；Android 仍使用单一 60 分钟 job。该结构只改变 CI 的阶段预算，本地 runner 的公开命令和 owned Metro / device 生命周期不变。
 
+Android CI 使用 Pixel 7 / API 36 `default` x86_64 AVD，并把公共 `ubuntu-latest` runner 的 4 cores 显式交给 emulator。该 profile 保留现代手机的约 411 dp 布局宽度，同时避免 Pixel 7 Pro 1440p framebuffer 在 SwiftShader 软件渲染下阻塞 SystemUI readiness；本地专用 AVD 的默认 profile 不随之改变。
+
 Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端编译检查，此后正式 PR 的每次新提交重新运行全部三项检查。`main` ruleset 要求 PR 和这三项检查全部通过后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
 ## 命令

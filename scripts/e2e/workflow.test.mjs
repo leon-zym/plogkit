@@ -54,3 +54,16 @@ test("iOS CI gives build and acceptance separate budgets with a permission-safe 
   );
   assert.doesNotMatch(acceptance, /node scripts\/e2e\/run\.mjs ios --phase build/);
 });
+
+test("Android CI budgets hosted cores and SwiftShader pixels before device readiness", () => {
+  const acceptance = jobBlock("android-maestro");
+
+  assert.match(acceptance, /profile: pixel_7\n/);
+  assert.doesNotMatch(acceptance, /profile: pixel_7_pro/);
+  assert.match(acceptance, /cores: 4/);
+  assert.match(acceptance, /emulator-options: .* -gpu swiftshader_indirect /);
+  assert.match(
+    acceptance,
+    /script: node scripts\/e2e\/run\.mjs android --phase test --device "\$ANDROID_SERIAL"/,
+  );
+});

@@ -177,7 +177,9 @@ jobs:
         with:
           api-level: 36
           arch: x86_64
-          profile: pixel_7_pro
+          # Pixel 7 keeps the modern phone viewport without the Pixel 7 Pro's 1440p SwiftShader load.
+          profile: pixel_7
+          cores: 4
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
