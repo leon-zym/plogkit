@@ -25,11 +25,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ios-maestro:
-    name: iOS Maestro acceptance suite
+  ios-build:
+    name: iOS development build
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 40
     env:
       E2E_BUILD_WORKERS: "2"
       MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
@@ -55,16 +55,79 @@ jobs:
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
       - name: Build iOS development app
-        run: node scripts/e2e/run.mjs ios --phase build
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          mkdir -p "$E2E_ARTIFACTS_DIR"
+          node scripts/e2e/run.mjs ios --phase build 2>&1 | tee "$E2E_ARTIFACTS_DIR/ios-build.log"
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+      - name: Package iOS development app
+        run: >-
+          tar -czf "$RUNNER_TEMP/ios-development-build.tar.gz"
+          -C ios/build/Build/Products/Debug-iphonesimulator PlogKit.app
+      - name: Upload iOS development app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-development-build
+          path: ${{ runner.temp }}/ios-development-build.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload build failure artifacts
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-artifacts
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/plogkit-e2e
+
+  ios-maestro:
+    name: iOS Maestro acceptance suite
+    needs: ios-build
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
+      MAESTRO_CLI_NO_ANALYTICS: "true"
+      MAESTRO_DISABLE_UPDATE_CHECK: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: pnpm install --frozen-lockfile
+      - name: Install Maestro CLI
+        run: |
+          export MAESTRO_VERSION=2.7.0
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Download iOS development app
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-development-build
+          path: ${{ runner.temp }}/ios-development-build
+      - name: Restore iOS development app
+        run: |
+          mkdir -p ios/build/Build/Products/Debug-iphonesimulator
+          tar -xzf "$RUNNER_TEMP/ios-development-build/ios-development-build.tar.gz" -C ios/build/Build/Products/Debug-iphonesimulator
       - name: Run iOS Maestro flows
+        timeout-minutes: 50
         run: node scripts/e2e/run.mjs ios --phase test
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
           E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: ios-maestro-artifacts
