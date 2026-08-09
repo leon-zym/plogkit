@@ -111,7 +111,7 @@ describe("ExportPipeline.run", () => {
             })
           : null,
     });
-    const { pipeline, backend } = createSuccessfulHarness();
+    const { pipeline, backend, operations } = createSuccessfulHarness();
 
     const result = await pipeline.run({ document, assets: snapshot });
 
@@ -135,6 +135,7 @@ describe("ExportPipeline.run", () => {
         }),
       }),
     );
+    expect(operations[0]?.cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("resolves and fixes the current document policy independently for every run", async () => {

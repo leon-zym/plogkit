@@ -40,7 +40,7 @@ describe("headless render measurement protocol", () => {
           warmupRuns: 1,
           measuredRuns: 3,
           expectedOutputIds: ["export"],
-          expectedOutputs: [{ id: "export", width: 1200, height: 10400, format: "png" }],
+          expectedOutputs: [{ id: "export", width: 2730, height: 16384, format: "png" }],
         }),
         expect.objectContaining({
           caseId: "thumbnail-9-pair",
