@@ -158,13 +158,11 @@ function declarationReferenceKind(expression, declaration) {
     if (!baseKind) return null;
     if (expression.name.text === "skip") return "disabled";
     if (declaration === "test" && expression.name.text === "todo") return "disabled";
+    if (declaration === "test" && expression.name.text === "failing") return "disabled";
     if (expression.name.text === "only") {
       return baseKind === "disabled" ? "disabled" : "focused";
     }
-    if (
-      declaration === "test" &&
-      (expression.name.text === "concurrent" || expression.name.text === "failing")
-    ) {
+    if (declaration === "test" && expression.name.text === "concurrent") {
       return baseKind;
     }
   }
