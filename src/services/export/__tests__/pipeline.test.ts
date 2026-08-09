@@ -91,7 +91,7 @@ function createSuccessfulHarness(capabilities: ExportCapabilities = fullCapabili
 }
 
 describe("ExportPipeline.run", () => {
-  it("reduces a nine-photo original export to the global output bounds before preparing it", async () => {
+  it("[F04-S04] reduces a nine-photo original export to the global output bounds before preparing it", async () => {
     const sourceImages = Array.from({ length: 9 }, (_, index) => ({
       id: importedAssetId(`large-source-${index + 1}`),
       width: 6000,
@@ -220,7 +220,7 @@ describe("ExportPipeline.run", () => {
     expect(input.assets.resolve(imageId, "original")?.uri).toBe("file:///initial.jpg");
   });
 
-  it("returns preset-unavailable without inventing preset or backend revisions", async () => {
+  it("[F04-S12] returns preset-unavailable without inventing preset or backend revisions", async () => {
     const document: PlogDocument = {
       ...createDocument(),
       exportSettings: parseExportSettings({ presetId: "retired", metadataPolicy: "strip" }),
@@ -262,7 +262,7 @@ describe("ExportPipeline.run", () => {
     });
   });
 
-  it("sweeps crash orphans and removes the PreparedExport after Photos publication", async () => {
+  it("[F04-S13] sweeps crash orphans and removes the PreparedExport after Photos publication", async () => {
     const directories = new Set(["cache:///export-staging/orphan"]);
     const files = new Map<string, Uint8Array>();
     const adapter: ExportStagingFileAdapter = {
@@ -329,7 +329,7 @@ describe("ExportPipeline.run", () => {
     expect([...directories]).toEqual(["cache:///export-staging"]);
   });
 
-  it("retries required staging initialization after a transient failure", async () => {
+  it("[F04-S15] retries required staging initialization after a transient failure", async () => {
     const directories = new Set<string>();
     let ensureAttempts = 0;
     const staging = createExportStaging({
@@ -495,7 +495,7 @@ describe("ExportPipeline.run", () => {
     });
   });
 
-  it("returns a typed staging failure and cleans when PreparedExport cannot be written", async () => {
+  it("[F04-S14] returns a typed staging failure and cleans when PreparedExport cannot be written", async () => {
     const { backend, destination } = createSuccessfulHarness();
     const operation: ExportOperation = {
       id: "operation-write-failure",

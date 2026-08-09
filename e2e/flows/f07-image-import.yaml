@@ -1,5 +1,8 @@
 appId: com.leonzym.plogkit
 name: Import selected photos into a local editing session
+tags:
+  - F07-S01
+  - F07-S03
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - assertVisible:

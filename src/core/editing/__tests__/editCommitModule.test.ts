@@ -69,7 +69,7 @@ describe("edit commit module", () => {
     expect(autosaved).toHaveBeenCalledWith(editing.read().document);
   });
 
-  it("does not create an edit commit when an intent changes nothing", () => {
+  it("[F05-S04] does not create an edit commit when an intent changes nothing", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
       initialDocument: createEmptyDocument(),
@@ -86,7 +86,7 @@ describe("edit commit module", () => {
     expect(autosaved).not.toHaveBeenCalled();
   });
 
-  it("projects a preview without creating an edit commit", () => {
+  it("[F03-S03] projects a preview without creating an edit commit", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
       initialDocument: createEmptyDocument(),
@@ -157,7 +157,7 @@ describe("edit commit module", () => {
     expect(autosaved).not.toHaveBeenCalled();
   });
 
-  it("undoes and redoes edit commits while clearing an active preview", () => {
+  it("[F01-S08][F01-S10] undoes and redoes edit commits while clearing an active preview", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
       initialDocument: createEmptyDocument(),
@@ -195,7 +195,7 @@ describe("edit commit module", () => {
     expect(autosaved).toHaveBeenCalledTimes(3);
   });
 
-  it("changes the canvas ratio through a semantic intent", () => {
+  it("[F02-S02] changes the canvas ratio through a semantic intent", () => {
     const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
 
     editing.dispatch({ type: "commit", intent: editIntents.canvas.changeRatio("4:5") });
@@ -211,7 +211,7 @@ describe("edit commit module", () => {
     expect(editing.read().document.stitch.mode).toBe("grid");
   });
 
-  it("reorders every source image atomically", () => {
+  it("[F03-S04] reorders every source image atomically", () => {
     const editing = createEditCommitModule({ initialDocument: createDocument(images) });
 
     editing.dispatch({
@@ -225,7 +225,7 @@ describe("edit commit module", () => {
     expect(editing.read().document.stitch.order).toEqual(["image-2", "image-1"]);
   });
 
-  it("switches preset and normalizes format and metadata as one edit commit", () => {
+  it("[F04-S09] switches preset and normalizes format and metadata as one edit commit", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
       initialDocument: createDocument([], { metadataPolicy: "retain-basic" }),
@@ -340,7 +340,7 @@ describe("edit commit module", () => {
     });
   });
 
-  it("applies a text style as one edit commit", () => {
+  it("[F01-S11] applies a text style as one edit commit", () => {
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),
       createTextId: () => "text-1",
@@ -423,7 +423,7 @@ describe("edit commit module", () => {
     expect(editing.read().document.textElements).toEqual([]);
   });
 
-  it("reports entity effects when undo and redo add or remove text", () => {
+  it("[F05-S01] reports entity effects when undo and redo add or remove text", () => {
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),
       createTextId: () => "text-1",
@@ -462,7 +462,7 @@ describe("edit commit module", () => {
     expect(autosaved).not.toHaveBeenCalled();
   });
 
-  it("removes text when a replacement draft has empty content", () => {
+  it("[F01-S04] removes text when a replacement draft has empty content", () => {
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),
       createTextId: () => "text-1",
@@ -498,7 +498,7 @@ describe("edit commit module", () => {
     expect(editing.read()).toBe(before);
   });
 
-  it("clears the redo branch after a new edit commit", () => {
+  it("[F05-S06] clears the redo branch after a new edit commit", () => {
     const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
     editing.dispatch({
       type: "commit",
@@ -553,7 +553,7 @@ describe("edit commit module", () => {
     expect(autosaved).toHaveBeenCalledWith(editing.read().document);
   });
 
-  it("keeps only the latest forty edit commits in undo history", () => {
+  it("[F05-S02] keeps only the latest forty edit commits in undo history", () => {
     const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
     for (let index = 1; index <= 41; index += 1) {
       editing.dispatch({

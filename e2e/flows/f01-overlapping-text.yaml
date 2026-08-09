@@ -1,5 +1,7 @@
 appId: com.leonzym.plogkit
 name: Overlapping text selects the visually upper element
+tags:
+  - F01-S15
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:

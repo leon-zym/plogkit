@@ -207,7 +207,7 @@ describe("Editor behavior scenarios", () => {
     mockPreventRemoveCallback = undefined;
   });
 
-  it("keeps two independently selectable text blocks after adding them", async () => {
+  it("[F01-S02] keeps two independently selectable text blocks after adding them", async () => {
     const { prepared, view } = await renderPreparedEditor();
 
     await press(view, "editor-tool-text");
@@ -233,7 +233,7 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
-  it("updates an existing text block without creating a duplicate", async () => {
+  it("[F01-S03] updates an existing text block without creating a duplicate", async () => {
     const { prepared, view } = await renderPreparedEditor();
 
     await press(view, "editor-tool-text");
@@ -249,7 +249,7 @@ describe("Editor behavior scenarios", () => {
     expect(view.queryByText("修改前的文字")).toBeNull();
   });
 
-  it("keeps independent font-size and line-height adjustments after applying a preset", async () => {
+  it("[F01-S09] keeps independent font-size and line-height adjustments after applying a preset", async () => {
     const { prepared, view } = await renderPreparedEditor();
 
     await press(view, "editor-tool-text");
@@ -271,7 +271,7 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
-  it("restores the source image aspect ratio after switching away from 3:4", async () => {
+  it("[F02-S03] restores the source image aspect ratio after switching away from 3:4", async () => {
     const prepared = createPreparedEditor({ sourceImages: [{ width: 1200, height: 900 }] });
     const { view } = await renderPreparedEditor(prepared);
 
@@ -297,7 +297,7 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
-  it("treats continuous spacing previews as one undoable edit commit", async () => {
+  it("[F05-S03] treats continuous spacing previews as one undoable edit commit", async () => {
     const { prepared, view } = await renderPreparedEditor();
 
     await press(view, "editor-tool-stitch");
@@ -314,7 +314,7 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
-  it("starts with undo disabled and enables it after an edit commit", async () => {
+  it("[F05-S05] starts with undo disabled and enables it after an edit commit", async () => {
     const { view } = await renderPreparedEditor();
 
     expect(view.getByTestId("editor-undo")).toBeDisabled();
@@ -330,7 +330,7 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
-  it("keeps the active edit complete across a background flush and return", async () => {
+  it("[F06-S06] keeps the active edit complete across a background flush and return", async () => {
     const appStateListeners: ((state: AppStateStatus) => void)[] = [];
     const addEventListener = jest
       .spyOn(AppState, "addEventListener")
@@ -363,7 +363,7 @@ describe("Editor behavior scenarios", () => {
     addEventListener.mockRestore();
   });
 
-  it("continues editing and exports the updated document after an earlier success", async () => {
+  it("[F04-S08] continues editing and exports the updated document after an earlier success", async () => {
     mockExportDocument.mockResolvedValue(successfulExportResult());
     const { view } = await renderPreparedEditor();
 
@@ -407,7 +407,7 @@ describe("Editor behavior scenarios", () => {
     expect(runtime.flush).not.toHaveBeenCalled();
   });
 
-  it("shows the successful photo count and partial-import warning together", async () => {
+  it("[F07-S04] shows the successful photo count and partial-import warning together", async () => {
     runtime.takeImportErrorCount.mockReturnValueOnce(1);
     const prepared = createPreparedEditor({
       sourceImages: [
@@ -431,7 +431,7 @@ describe("Editor session leave", () => {
     mockPreventRemoveCallback = undefined;
   });
 
-  it("stays in the editor after a flush failure and navigates after retry succeeds", async () => {
+  it("[F06-S09] stays in the editor after a flush failure and navigates after retry succeeds", async () => {
     runtime.prepareEditor.mockResolvedValue(createPreparedEditor());
     runtime.flush.mockResolvedValueOnce({
       status: "flush-failed",

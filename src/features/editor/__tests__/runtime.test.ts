@@ -109,7 +109,7 @@ function createRuntime(library: DraftLibrary, candidates: readonly ImportCandida
 }
 
 describe("editor Draft integration", () => {
-  it("exposes Draft Library state without loading or merging it in Home", async () => {
+  it("[F08-S13] exposes Draft Library state without loading or merging it in Home", async () => {
     const library = createLibrary();
     const runtime = createRuntime(library);
     const listener = jest.fn();
@@ -127,7 +127,7 @@ describe("editor Draft integration", () => {
     await expect(runtime.prepareEditor()).resolves.toEqual({ status: "no-draft" });
   });
 
-  it("opens the exact selected Draft and prepares its previews", async () => {
+  it("[F06-S02] opens the exact selected Draft and prepares its previews", async () => {
     const library = createLibrary();
     const runtime = createRuntime(library);
 
@@ -142,7 +142,7 @@ describe("editor Draft integration", () => {
     expect(library.readPreview).toHaveBeenCalledWith(secondId, secondImageId);
   });
 
-  it("reuses the same-process session and undo history for the same Draft", async () => {
+  it("[F06-S07][F08-S19] reuses the same-process session and undo history for the same Draft", async () => {
     const library = createLibrary();
     const runtime = createRuntime(library);
     await runtime.openDraft(firstId);
@@ -166,7 +166,7 @@ describe("editor Draft integration", () => {
     await runtime.flush();
   });
 
-  it("keeps the current session when switching to another Draft fails", async () => {
+  it("[F06-S05][F08-S20] keeps the current session when switching to another Draft fails", async () => {
     const library = createLibrary({
       read: jest.fn(async (id) =>
         id === secondId
@@ -246,7 +246,7 @@ describe("editor Draft integration", () => {
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
   });
 
-  it("keeps a Draft photo-information override separate from the global default for new Drafts", async () => {
+  it("[F04-S07] keeps a Draft photo-information override separate from the global default for new Drafts", async () => {
     const created: Extract<CreateDraftResult, { status: "created" }> = {
       status: "created",
       draftId: secondId,
@@ -288,7 +288,7 @@ describe("editor Draft integration", () => {
     expect(loadMetadataPolicy).toHaveBeenCalledTimes(1);
   });
 
-  it("returns picker cancellation before loading settings or creating a Draft", async () => {
+  it("[F07-S05] returns picker cancellation before loading settings or creating a Draft", async () => {
     const library = createLibrary();
     const loadMetadataPolicy = jest.fn(async () => "strip" as const);
     const runtime = new EditorRuntime({

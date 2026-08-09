@@ -107,7 +107,7 @@ class MemoryFiles implements DraftLibraryFileAdapter {
 }
 
 describe("Live Photo import contract", () => {
-  it("owns only the cover still and supplies it to editing previews and export", async () => {
+  it("[F07-S06] owns only the cover still and supplies it to editing previews and export", async () => {
     const coverUri = "picker://live-photo-cover.heic";
     const motionUri = "picker://live-photo-motion.mov";
     const coverBytes = new Uint8Array([1, 2, 3]);

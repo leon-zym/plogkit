@@ -71,7 +71,7 @@ async function readySettings(initial?: string): Promise<{
 }
 
 describe("App Settings", () => {
-  it("loads privacy-first defaults without writing when no record exists", async () => {
+  it("[F09-S01] loads privacy-first defaults without writing when no record exists", async () => {
     const memory = createMemoryFiles();
     const settings = createAppSettings(memory.files, "settings.json");
 
@@ -115,7 +115,7 @@ describe("App Settings", () => {
         draftThumbnailDisplay: "square",
       }),
     ],
-  ])("uses defaults for %s without rewriting it during load", async (_label, content) => {
+  ])("[F09-S08] uses defaults for %s without rewriting it during load", async (_label, content) => {
     const memory = createMemoryFiles(content);
     const settings = createAppSettings(memory.files, "settings.json");
 
@@ -150,7 +150,7 @@ describe("App Settings", () => {
     expect(memory.readText).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a read failure non-authoritative and retries the original record", async () => {
+  it("[F09-S07] keeps a read failure non-authoritative and retries the original record", async () => {
     const memory = createMemoryFiles(
       persisted({
         defaultMetadataPolicy: "retain-basic",
@@ -182,7 +182,7 @@ describe("App Settings", () => {
     expect(memory.exists).toHaveBeenCalledTimes(2);
   });
 
-  it("applies interleaved field intents to the latest committed snapshot", async () => {
+  it("[F09-S03] applies interleaved field intents to the latest committed snapshot", async () => {
     const { settings, memory } = await readySettings();
     const firstWrite = deferred<void>();
     memory.writeText
@@ -236,7 +236,7 @@ describe("App Settings", () => {
     expect(settings.getState().settings.draftThumbnailDisplay).toBe("square");
   });
 
-  it("does not publish a new snapshot until persistence succeeds", async () => {
+  it("[F09-S04] does not publish a new snapshot until persistence succeeds", async () => {
     const { settings, memory } = await readySettings();
     const write = deferred<void>();
     memory.writeText.mockImplementationOnce(() => write.promise);
@@ -254,7 +254,7 @@ describe("App Settings", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves the old snapshot after a failed write and recovers the queue", async () => {
+  it("[F09-S05] preserves the old snapshot after a failed write and recovers the queue", async () => {
     const { settings, memory } = await readySettings();
     memory.writeText.mockRejectedValueOnce(new Error("disk full"));
     const listener = jest.fn();

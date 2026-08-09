@@ -1,5 +1,10 @@
 appId: com.leonzym.plogkit
 name: Reopen a persisted Draft from the Library after relaunch
+tags:
+  - F06-S01
+  - F06-S02
+  - F06-S03
+  - F06-S06
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:

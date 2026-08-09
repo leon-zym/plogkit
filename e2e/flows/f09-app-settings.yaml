@@ -1,5 +1,7 @@
 appId: com.leonzym.plogkit
 name: App settings remain durable and independent
+tags:
+  - F09-S02
 ---
 - runFlow: ../subflows/launch-app.yaml
 - assertVisible:

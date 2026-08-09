@@ -9,7 +9,7 @@ import {
 } from "./renderMeasurementProtocol";
 
 describe("headless render measurement protocol", () => {
-  it("freezes the 1/3/9 export and two-target thumbnail matrix", () => {
+  it("[F04-S04] freezes the 1/3/9 export and two-target thumbnail matrix", () => {
     const plan = createHeadlessMeasurementPlan("full");
 
     expect(plan.map(({ caseId }) => caseId)).toEqual([
