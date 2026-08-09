@@ -64,7 +64,7 @@ describe("Expo Draft thumbnail adapter contract", () => {
     });
   });
 
-  it("renders and writes the square/original pair as one concrete target batch", async () => {
+  it("[F08-S14] renders and writes the square/original pair as one concrete target batch", async () => {
     const squareBytes = Uint8Array.from([1, 2]);
     const originalBytes = Uint8Array.from([3, 4]);
     const renderer: SkiaOffscreenSceneRenderer = {

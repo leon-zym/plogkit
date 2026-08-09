@@ -63,7 +63,7 @@ describe("real CanvasKit text layout snapshot", () => {
     }
   }
 
-  it("lays out CJK fallback, automatic wrapping, and explicit hard breaks", () => {
+  it("[F01-S05][F01-S06] lays out CJK fallback, automatic wrapping, and explicit hard breaks", () => {
     withSnapshot(
       [
         text("fallback", "AB周末"),
@@ -117,7 +117,7 @@ describe("real CanvasKit text layout snapshot", () => {
     }
   });
 
-  it("derives horizontal bounds from left, center, and right aligned line metrics", () => {
+  it("[F01-S13] derives horizontal bounds from left, center, and right aligned line metrics", () => {
     withSnapshot(
       [
         text("left", "AB", { alignment: "left" }),
@@ -137,7 +137,7 @@ describe("real CanvasKit text layout snapshot", () => {
     );
   });
 
-  it("uses Paragraph line height and keeps missing emoji fallback geometry finite", () => {
+  it("[F01-S07][F01-S10] uses Paragraph line height and keeps missing emoji fallback geometry finite", () => {
     withSnapshot(
       [
         text("compact", "第一行\n第二行", { lineHeight: 1 }),

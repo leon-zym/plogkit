@@ -22,7 +22,7 @@ const prepared: PreparedExport = Object.freeze({
 });
 
 describe("Expo Photos destination", () => {
-  it("publishes only the PreparedExport and returns its system asset identity", async () => {
+  it("[F04-S13] publishes only the PreparedExport and returns its system asset identity", async () => {
     requestPermission.mockResolvedValue({ granted: true } as never);
     createAsset.mockResolvedValue({ id: "photos-1" } as never);
 

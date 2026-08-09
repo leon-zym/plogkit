@@ -30,7 +30,7 @@ const textElement = {
 } as const;
 
 describe("document model", () => {
-  it("creates the complete document with stable defaults", () => {
+  it("[F04-S06] creates the complete document with stable defaults", () => {
     const doc = createEmptyDocument();
 
     expect(doc).toEqual({

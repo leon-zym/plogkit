@@ -14,7 +14,7 @@ const callbacks = {
 };
 
 describe("ExportPanel", () => {
-  it("offers original, social, and compact presets through the export panel", async () => {
+  it("[F04-S01] offers original, social, and compact presets through the export panel", async () => {
     const settings = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
     const onPresetChange = jest.fn();
     const view = await render(
@@ -38,7 +38,7 @@ describe("ExportPanel", () => {
     expect(onPresetChange.mock.calls).toEqual([["social"], ["compact"]]);
   });
 
-  it("shows the formats projected for a multi-format preset", async () => {
+  it("[F04-S11] shows the formats projected for a multi-format preset", async () => {
     const original = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
     const view = await render(
       <ExportPanel
@@ -54,7 +54,7 @@ describe("ExportPanel", () => {
     expect(view.getByTestId("export-format-png")).toBeTruthy();
   });
 
-  it("hides format selection for a single-format preset", async () => {
+  it("[F04-S10] hides format selection for a single-format preset", async () => {
     const social = parseExportSettings({ presetId: "social", metadataPolicy: "strip" });
     const view = await render(
       <ExportPanel
@@ -70,7 +70,7 @@ describe("ExportPanel", () => {
     expect(view.queryByTestId("export-format-png")).toBeNull();
   });
 
-  it("explains an unsupported policy and prevents export", async () => {
+  it("[F04-S12] explains an unsupported policy and prevents export", async () => {
     const settings = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
     const policyError: ExportPolicyError = {
       code: "unsupported-policy",

@@ -13,7 +13,7 @@ const geometry = (
 });
 
 describe("text layout geometry projection", () => {
-  it("keeps the selection box on visual bounds while expanding only touch bounds to 44pt", () => {
+  it("[F01-S14] keeps the selection box on visual bounds while expanding only touch bounds to 44pt", () => {
     const [projected] = projectTextLayoutGeometry([geometry("caption", 100, 200, 20, 10)], 0.5);
 
     expect(projected).toEqual({

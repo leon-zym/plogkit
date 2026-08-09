@@ -12,7 +12,7 @@ describe("Expo image picker source", () => {
     mockLaunchImageLibraryAsync.mockReset();
   });
 
-  it("requests network-backed assets and maps a Live Photo to its cover still", async () => {
+  it("[F07-S06] requests network-backed assets and maps a Live Photo to its cover still", async () => {
     mockLaunchImageLibraryAsync.mockResolvedValue({
       canceled: false,
       assets: [
@@ -56,7 +56,7 @@ describe("Expo image picker source", () => {
     ]);
   });
 
-  it("keeps the batch pending until the system picker resolves selected files", async () => {
+  it("[F07-S07] keeps the batch pending until the system picker resolves selected files", async () => {
     let finishSelection!: (result: unknown) => void;
     mockLaunchImageLibraryAsync.mockImplementation(
       () =>
@@ -97,7 +97,7 @@ describe("Expo image picker source", () => {
   });
 
   it.each(["Photo selection failed", "Photo provider unavailable"])(
-    "propagates an opaque picker batch failure for explicit flow feedback: %s",
+    "[F07-S07] propagates an opaque picker batch failure for explicit flow feedback: %s",
     async (message) => {
       mockLaunchImageLibraryAsync.mockRejectedValue(new Error(message));
 

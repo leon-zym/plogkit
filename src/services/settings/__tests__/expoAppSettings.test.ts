@@ -122,7 +122,7 @@ describe("Expo App Settings file adapter", () => {
     expect(mockContents.has(backupUri)).toBe(false);
   });
 
-  it("reads the backup when an interrupted replacement leaves the primary missing", async () => {
+  it("[F09-S06] reads the backup when an interrupted replacement leaves the primary missing", async () => {
     mockContents.set(backupUri, oldSettings);
     mockContents.set(pendingUri, newSettings);
 
@@ -185,7 +185,7 @@ describe("Expo App Settings file adapter", () => {
     expect(mockContents.has(backupUri)).toBe(false);
   });
 
-  it("replaces settings only after the complete pending file is written", async () => {
+  it("[F09-S06] replaces settings only after the complete pending file is written", async () => {
     mockContents.set(settingsUri, oldSettings);
 
     await expoAppSettingsFileAdapter.writeText(settingsUri, newSettings);

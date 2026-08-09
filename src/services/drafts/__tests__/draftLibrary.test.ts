@@ -278,7 +278,7 @@ function setup() {
 }
 
 describe("Draft Library", () => {
-  it("installs one reliable snapshot through a single-flight initial load", async () => {
+  it("[F08-S11] installs one reliable snapshot through a single-flight initial load", async () => {
     const { files, library } = setup();
     let releaseEnumeration!: () => void;
     const enumerationGate = new Promise<void>((resolve) => {
@@ -302,7 +302,7 @@ describe("Draft Library", () => {
     expect(library.getState()).toEqual({ status: "ready", entries: [] });
   });
 
-  it("waits for the initial load before publishing a concurrently created Draft", async () => {
+  it("[F08-S12] waits for the initial load before publishing a concurrently created Draft", async () => {
     const { files, library, createLibrary, setNow } = setup();
     const existing = await createDraft(library, [candidate("one")]);
     if (existing.status !== "created") throw new Error("expected an existing Draft");
@@ -456,7 +456,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("sorts all Drafts by updated time and uses stable identity order for ties", async () => {
+  it("[F08-S07] sorts all Drafts by updated time and uses stable identity order for ties", async () => {
     const { library, createLibrary, setCreateDraftId, setNow } = setup();
     const identities = [draftId("draft:older"), draftId("draft:tie-b"), draftId("draft:tie-a")];
     setCreateDraftId(() => {
@@ -485,7 +485,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("places missing updated times first and keeps those corrupt entries stable", async () => {
+  it("[F08-S10] places missing updated times first and keeps those corrupt entries stable", async () => {
     const { files, library, createLibrary, setCreateDraftId, setNow } = setup();
     const identities = [
       draftId("draft:missing-z"),
@@ -539,7 +539,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("moves only successfully changed content and preserves time after no-op or failed saves", async () => {
+  it("[F08-S08] moves only successfully changed content and preserves time after no-op or failed saves", async () => {
     const { files, library, createLibrary, setNow } = setup();
     setNow("2026-07-22T08:00:00.000Z");
     const first = await createDraft(library, [candidate("one")]);
@@ -596,7 +596,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("keeps ordering metadata unchanged through browse, preview repair, thumbnail rebuild, and maintenance", async () => {
+  it("[F08-S09] keeps ordering metadata unchanged through browse, preview repair, thumbnail rebuild, and maintenance", async () => {
     const { files, library, setNow } = setup();
     setNow("2026-07-22T08:00:00.000Z");
     const older = await createDraft(library, [candidate("one")]);
@@ -679,7 +679,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("determines creation only from the canonical publication record", async () => {
+  it("[F08-S05] determines creation only from the canonical publication record", async () => {
     const failed = setup();
     failed.files.failWriteText = `${firstDraftUri}/publication.json`;
 
@@ -791,7 +791,7 @@ describe("Draft Library", () => {
     unsubscribe();
   });
 
-  it("switches square and original thumbnails only as one revision-matched pair", async () => {
+  it("[F08-S15] switches square and original thumbnails only as one revision-matched pair", async () => {
     const { files, library, setNow, setThumbnailGenerate, thumbnailSizes } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
@@ -1103,7 +1103,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("keeps the previous complete thumbnail pair when a new generation fails", async () => {
+  it("[F08-S14] keeps the previous complete thumbnail pair when a new generation fails", async () => {
     const { library, setNow, setThumbnailGenerate } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
@@ -1436,7 +1436,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("separates proven corruption from retryable page-level storage failure", async () => {
+  it("[F08-S28][F08-S31] separates proven corruption from retryable page-level storage failure", async () => {
     const { files, library, createLibrary, setNow } = setup();
     const first = await createDraft(library, [candidate("one")]);
     setNow("2026-07-22T09:00:00.000Z");
@@ -1472,7 +1472,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("commits deletion with an external marker and resolves unknown outcomes on retry", async () => {
+  it("[F08-S26] commits deletion with an external marker and resolves unknown outcomes on retry", async () => {
     const failed = setup();
     const failedCreated = await createDraft(failed.library, [candidate("one")]);
     if (failedCreated.status !== "created") throw new Error("expected a created Draft");
@@ -1576,7 +1576,7 @@ describe("Draft Library", () => {
     expect(files.directories.has("memory://library/staging/operation-1/items/item-0")).toBe(true);
   });
 
-  it("does not allocate or expose a Draft when selection is cancelled or all items fail", async () => {
+  it("[F07-S05] does not allocate or expose a Draft when selection is cancelled or all items fail", async () => {
     const { library, getDraftSequence } = setup();
 
     await expect(createDraft(library, [])).resolves.toEqual({ status: "not-created", errors: [] });
@@ -1676,7 +1676,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("recovers the previous document after replacement removes the destination and fails", async () => {
+  it("[F06-S10][F08-S27] recovers the previous document after replacement removes the destination and fails", async () => {
     const { files, library, createLibrary } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
@@ -2561,7 +2561,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("reopens from the owned immutable original after the picker source disappears", async () => {
+  it("[F07-S09] reopens from the owned immutable original after the picker source disappears", async () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
@@ -2574,7 +2574,7 @@ describe("Draft Library", () => {
     });
   });
 
-  it("rejects a corrupt catalog and an unresolved document reference", async () => {
+  it("[F06-S04] rejects a corrupt catalog and an unresolved document reference", async () => {
     const { files, library } = setup();
     const created = await createDraft(library, [candidate("one")]);
     if (created.status !== "created") throw new Error("expected a created Draft");
