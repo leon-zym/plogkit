@@ -1,10 +1,10 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md) 和 [ADR 0039](../adr/0039-native-node-orchestration-tests.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md) 和 [ADR 0041](../adr/0041-scenario-verification-traceability.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
-- 验收场景先写入 `docs/specs/`，测试名称描述用户可观察的行为。BDD 是方法，不引入 Cucumber 或 Gherkin 工具链。
+- 验收场景先写入 `docs/specs/`，提供证据的原生测试在名称或 Flow tags 中声明稳定 Scenario ID。BDD 是方法，不引入 Cucumber 或 Gherkin 工具链。
 - `src/core` 保持纯 TypeScript，不依赖 React 或 React Native，并采用先写失败测试、再实现和重构的 TDD 循环。
 - 可序列化文档是渲染、持久化和导出的数据源，使核心行为能在设备外验证。
 - 不设置覆盖率百分比门槛。测试应覆盖行为和边界条件，避免为数字指标编写无意义断言。
@@ -39,7 +39,7 @@ Golden 必须使用随包字体，不能依赖系统字体。无头渲染代码�
 
 Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development build，JS bundle 由 Metro 提供。CI 使用固定的 Maestro CLI 基线，本地工具要求见[开发环境](dev-environment.md)。runner 不自动改变开发机环境。
 
-- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对应 `docs/specs/` 中的功能场景。
+- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对关键跨端路径进行 L4 抽样；具体覆盖的 Scenario 由 Flow 配置区的 tags 声明，不以功能编号相同推定完整覆盖。
 - `e2e/subflows/` 存放复用步骤。业务步骤跨平台共享，系统照片选择器等差异用 `platform` 条件进入 iOS 或 Android 子流程，禁止复制完整业务 flow。
 - `e2e/fixtures/` 存放确定性测试照片；runner 每次擦除专用设备后只注入一组 fixture。
 - flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。
@@ -54,6 +54,19 @@ iOS warm-up 分别证明 Metro readiness 与 App readiness。runner 在启动 Ma
 ### 设备 readiness 与 flow 隔离
 
 设备进入业务 flow 前必须证明 launcher 与 UI hierarchy 可响应且不存在系统 ANR；boot flag、服务注册或固定等待不能单独视为 ready。每个业务 flow 隔离运行，单个设备或 driver 故障不得污染后续 flow。失败分类分别记录 `metro-transport`、`metro-bundle`、`xctest-driver`、`system-ui`、`app-crash` 与 `business-assertion`，不得用后续 UI 断言覆盖较早的基础设施根因。Metro log、owned process lifecycle、manifest / bundle URL 和关键时间线随 failure artifacts 保留。
+
+## Scenario 可追踪性
+
+已实现 Scenario 必须由 L2/L3 原生测试标题或 L4 Maestro Flow tags 声明至少一项自动化证据，具体格式见 [Spec 规范](../specs/README.md)。绑定是跨层多对多关系，不要求每个 Scenario 拥有独立 Maestro flow，也不维护独立映射清单。
+
+选择证据层级时：
+
+- 确定性业务规则、服务 contract 和组件可观察交互优先使用 L2。
+- 像素构图、实际编码、尺寸、格式和 metadata 输出使用 L3；需要时与 L2 policy 测试组合。
+- 系统选择器、系统相册、应用生命周期和关键跨端主路径使用 L4 抽样，不把可在设备外稳定证明的全部边界塞入 E2E。
+- 单层能够完整覆盖关键 GIVEN / WHEN / THEN 时不重复堆叠层级；交互与最终产物位于不同 seam 时组合多项证据。
+
+L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm verify:specs` 使用 TypeScript 语法树读取启用的 `it`、`test` 和 `it.each` 标题，并读取 Maestro tags；它拒绝缺失、悬空、重复、格式错误、禁用测试上的声明以及可能跳过同文件其他证据的聚焦声明。静态校验不解析断言语义，评审者仍须确认每项证据覆盖 Scenario 的用户可观察 THEN。
 
 ## CI 门禁
 
@@ -73,12 +86,13 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 | `pnpm check`              | 类型检查和 lint                                      |
 | `pnpm test`               | App、核心逻辑和组件测试                              |
 | `pnpm test:orchestration` | 宿主 Node 编排器的纯 Node 逻辑测试                   |
+| `pnpm verify:specs`       | 静态校验 Scenario ID、测试标题与 Maestro Flow tags   |
 | `pnpm test:render`        | L3 golden 测试                                       |
 | `pnpm measure:render`     | 先验证 L3，再生成资格门禁的 Mac / CanvasKit 工程测量 |
 | `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4                    |
 | `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4                 |
 | `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4              |
-| `pnpm verify`             | 聚合静态、Node、App 和渲染验证，提交前运行           |
+| `pnpm verify`             | 聚合静态、Scenario 绑定、Node、App 和渲染验证        |
 
 可靠性 profile 使用以下独立命令；固定输入、artifact 与结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
 

@@ -14,6 +14,7 @@
     "check": "pnpm typecheck && pnpm lint",
     "test": "jest --runInBand",
     "test:orchestration": "node --test \"scripts/**/*.test.mjs\"",
+    "verify:specs": "node scripts/spec-verification/verify.mjs",
     "test:reliability-soak": "node scripts/reliability-soak/run.mjs quick",
     "test:reliability-soak:evidence": "node scripts/reliability-soak/run.mjs evidence",
     "test:reliability-soak:replay": "node scripts/reliability-soak/run.mjs replay",
@@ -22,7 +23,7 @@
     "e2e": "node scripts/e2e/run.mjs all",
     "e2e:ios": "node scripts/e2e/run.mjs ios",
     "e2e:android": "node scripts/e2e/run.mjs android",
-    "verify": "pnpm check && pnpm test:orchestration && pnpm test && pnpm test:render"
+    "verify": "pnpm check && pnpm verify:specs && pnpm test:orchestration && pnpm test && pnpm test:render"
   },
   "dependencies": {
     "@shopify/react-native-skia": "2.6.2",

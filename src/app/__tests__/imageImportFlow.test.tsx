@@ -84,7 +84,7 @@ describe("Home image import flow", () => {
     });
   });
 
-  it("shows one waiting state until the system picker batch succeeds", async () => {
+  it("[F07-S07] shows one waiting state until the system picker batch succeeds", async () => {
     const importResult = deferred<{
       readonly status: "created";
       readonly draftId: string;
@@ -115,7 +115,7 @@ describe("Home image import flow", () => {
   });
 
   it.each(["Photo selection failed", "Photo provider unavailable"])(
-    "shows explicit feedback and does not enter Editor when the picker batch rejects: %s",
+    "[F07-S07] shows explicit feedback and does not enter Editor when the picker batch rejects: %s",
     async (message) => {
       const importResult = deferred<never>();
       runtime.choosePhotos.mockReturnValue(importResult.promise);
@@ -135,7 +135,7 @@ describe("Home image import flow", () => {
     },
   );
 
-  it("enters Editor when the created Draft contains successful items and import errors", async () => {
+  it("[F07-S04] enters Editor when the created Draft contains successful items and import errors", async () => {
     runtime.choosePhotos.mockResolvedValue({
       status: "created",
       draftId: "draft:partial-success",

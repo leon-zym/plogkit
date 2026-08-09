@@ -124,7 +124,7 @@ describe("commitPreparedFileWithOutcome", () => {
     expect(files.entries.has(temporaryUri)).toBe(false);
   });
 
-  it("reports not committed when recovery restores the previous current", async () => {
+  it("[F06-S10][F08-S27] reports not committed when recovery restores the previous current", async () => {
     const files = new MemoryFiles();
     files.entries.set(currentUri, "old");
     files.entries.set(temporaryUri, "new");

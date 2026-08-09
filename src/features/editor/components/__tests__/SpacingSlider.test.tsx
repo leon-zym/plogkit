@@ -61,7 +61,7 @@ describe("SpacingSlider", () => {
     mockPanGestures.length = 0;
   });
 
-  it("previews every drag value and commits only the value at release", async () => {
+  it("[F05-S03] previews every drag value and commits only the value at release", async () => {
     const onPreview = jest.fn();
     const onCommit = jest.fn();
     const view = await render(

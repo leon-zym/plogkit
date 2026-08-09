@@ -63,7 +63,7 @@ describe("document render scene", () => {
     expect(scene.images[0]?.destination.y).toBeCloseTo((height - 750) / 2);
   });
 
-  it("reuses core vertical layout and preserves image order and spacing", () => {
+  it("[F03-S01][F03-S03][F03-S05] reuses core vertical layout and preserves image order and spacing", () => {
     const document = updateDocument({
       stitch: {
         mode: "vertical",
@@ -105,7 +105,7 @@ describe("document render scene", () => {
     ]);
   });
 
-  it("keeps text in logical coordinates for scaled Paragraph rendering", () => {
+  it("[F03-S05] keeps text in logical coordinates for scaled Paragraph rendering", () => {
     const document = updateDocument({
       textElements: [
         {
@@ -141,7 +141,7 @@ describe("document render scene", () => {
     ]);
   });
 
-  it("derives original export resolution from source pixels, not preview pixels", () => {
+  it("[F04-S03] derives original export resolution from source pixels, not preview pixels", () => {
     const scene = documentToRenderScene(createDocument([images[0]!]));
 
     expect(getNaturalSceneSize(scene)).toEqual({ width: 4000, height: 3000 });
