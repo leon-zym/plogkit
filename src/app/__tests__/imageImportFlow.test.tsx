@@ -84,7 +84,7 @@ describe("Home image import flow", () => {
     });
   });
 
-  it("shows a live waiting state until an iCloud-backed selection succeeds", async () => {
+  it("shows one waiting state until the system picker batch succeeds", async () => {
     const importResult = deferred<{
       readonly status: "created";
       readonly draftId: string;
@@ -114,8 +114,8 @@ describe("Home image import flow", () => {
     expect(view.queryByTestId("home-importing")).toBeNull();
   });
 
-  it.each(["iCloud download timed out", "iCloud download failed"])(
-    "shows explicit feedback and does not enter Editor when import rejects: %s",
+  it.each(["Photo selection failed", "Photo provider unavailable"])(
+    "shows explicit feedback and does not enter Editor when the picker batch rejects: %s",
     async (message) => {
       const importResult = deferred<never>();
       runtime.choosePhotos.mockReturnValue(importResult.promise);
@@ -143,8 +143,8 @@ describe("Home image import flow", () => {
       errors: [
         {
           index: 1,
-          sourceUri: "file:///picker/icloud-failed.heic",
-          message: "iCloud download failed",
+          sourceUri: "file:///picker/local-copy-failed.heic",
+          message: "Failed to copy selected photo",
         },
       ],
     });
