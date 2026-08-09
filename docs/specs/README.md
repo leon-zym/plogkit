@@ -1,6 +1,6 @@
 # 功能需求 Specs
 
-本目录负责维护用户可观察行为、验收 Scenario 与功能交付状态。文档职责见 [`docs/README.md`](../README.md)，测试方法见[测试策略](../guides/testing-strategy.md)。
+本目录负责维护用户可观察行为、验收 Scenario、功能交付状态与验证映射。文档职责见 [`docs/README.md`](../README.md)，测试方法见[测试策略](../guides/testing-strategy.md)。
 
 ## 什么属于 Spec
 
@@ -27,6 +27,20 @@ Spec 是活文档，用户可观察行为变化时先更新对应 Spec。
 - 整体状态只使用`草拟`、`已确认`或`已实现`。`草拟`表示尚未形成产品承诺，`已确认`表示已经承诺但尚未全部交付，`已实现`表示全部非例外 Scenario 已交付。
 - Scenario 默认继承整体状态；只有状态与整体不同时才写独立的`状态`字段。状态不同且尚未实现时，还必须写`Issue`字段并关联开放 Issue。
 - 当前基线尚未完整交付时，整体保持`已确认`。已交付功能的未来扩展可以作为例外 Scenario；实现后删除例外状态和已关闭 Issue 链接。
+
+交付状态只说明行为是否已经交付，不表示 Scenario 已有自动化证据，也不表示已经由设备 E2E 覆盖。这三个事实分别由 Spec 状态、验证映射和映射中的 L4 证据表达。
+
+## 验证映射
+
+[`verification-map.json`](verification-map.json) 是 Scenario 到自动化证据或自动化例外的唯一事实来源。
+
+- 每个已实现 Scenario 必须拥有一项映射；尚未实现的交付例外可以暂不映射。
+- `evidence` 是非空数组，每项记录 `level`（`L2`、`L3` 或 `L4`）、仓库相对测试文件 `file`，并可用 `test` 补充具体测试名称。一个 Scenario 可以组合多项证据，一项测试也可以验证多个 Scenario。
+- 证据必须覆盖 Scenario 的关键 GIVEN / WHEN / THEN，尤其是用户可观察的 THEN。测试路径或名称相近不等于行为已覆盖，可选 `test` 字段也不由静态校验器解析。
+- 暂无自动化证据时使用 `exception`，必须记录 `reason` 和开放的 PlogKit `issue`；建议用 `manual` 说明补测前的人工验证方式。补测完成后将例外替换为证据。
+- 新增、删除、重编号或重命名 Scenario，以及新增、移动或删除测试文件时，必须同步审阅映射。
+
+运行 `pnpm verify:specs` 检查 Scenario ID、已实现 Scenario 的映射、证据层级、文件引用与悬空映射；`pnpm verify` 已包含该命令。校验不联网判断 Issue 状态，也不替代证据完整性的人工语义审查。
 
 ## 索引
 

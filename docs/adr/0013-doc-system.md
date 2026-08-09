@@ -2,7 +2,7 @@
 
 - 状态：部分修订
 - 接受日期：2026-07-02
-- 后继：[ADR 0038](0038-document-ownership-contracts.md)
+- 后继：[ADR 0038](0038-document-ownership-contracts.md)、[ADR 0040](0040-scenario-verification-traceability.md)
 - 关联：[ADR 0014](0014-language-policy.md)
 
 ## 背景

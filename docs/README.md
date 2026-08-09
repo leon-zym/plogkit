@@ -4,18 +4,18 @@
 
 ## Ownership map
 
-| 文档                                                                      | 负责维护                                            | 边界说明                                   |
-| ------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [`docs/adr/`](adr/)                                                       | 长期架构、工程治理决策及其演进关系                  | 不记录功能交付状态、实施进度或故障调查     |
-| [`docs/specs/`](specs/)                                                   | 用户可观察行为、验收 Scenario 与功能交付状态        | 不规定实现机制；架构约束链接 ADR           |
-| [`docs/guides/`](guides/)                                                 | 面向开发者的环境、测试和 UI/UX 指南                 | 记录当前可执行做法，不拥有产品功能语义     |
-| [`product-strategy.md`](product/product-strategy.md)                      | 稳定定位、目标用户、产品原则与核心用户任务          |                                            |
-| [`product-scope.md`](product/product-scope.md)                            | 当前产品范围、已确认方向与产品硬边界                | 具体行为与交付状态链接对应 Spec            |
-| [`naming-and-slogan.md`](product/naming-and-slogan.md)                    | 发布前品牌选择；名称确定后只保留最终品牌契约        |                                            |
-| [`README.md`](../README.md) / [`README.zh-Hans.md`](../README.zh-Hans.md) | 面向外部的双语产品入口与项目导航                    | 两份文件保持语义一致，只概述当前稳定基线   |
-| [`AGENTS.md`](../AGENTS.md)                                               | 让首次进入仓库的开发者与 Agent 可执行的项目开发规则 |                                            |
-| [`CONTEXT.md`](../CONTEXT.md)                                             | 代码、文档与讨论共用的领域词汇                      | 只定义领域词义，不承载需求、决策或实现说明 |
-| [`docs/agents/`](agents/)                                                 | 面向 Agent 与项目级 skills 的适配说明和操作约定     |                                            |
+| 文档                                                                      | 负责维护                                              | 边界说明                                   |
+| ------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------ |
+| [`docs/adr/`](adr/)                                                       | 长期架构、工程治理决策及其演进关系                    | 不记录功能交付状态、实施进度或故障调查     |
+| [`docs/specs/`](specs/)                                                   | 用户可观察行为、验收 Scenario、功能交付状态与验证映射 | 不规定实现机制；架构约束链接 ADR           |
+| [`docs/guides/`](guides/)                                                 | 面向开发者的环境、测试和 UI/UX 指南                   | 记录当前可执行做法，不拥有产品功能语义     |
+| [`product-strategy.md`](product/product-strategy.md)                      | 稳定定位、目标用户、产品原则与核心用户任务            |                                            |
+| [`product-scope.md`](product/product-scope.md)                            | 当前产品范围、已确认方向与产品硬边界                  | 具体行为与交付状态链接对应 Spec            |
+| [`naming-and-slogan.md`](product/naming-and-slogan.md)                    | 发布前品牌选择；名称确定后只保留最终品牌契约          |                                            |
+| [`README.md`](../README.md) / [`README.zh-Hans.md`](../README.zh-Hans.md) | 面向外部的双语产品入口与项目导航                      | 两份文件保持语义一致，只概述当前稳定基线   |
+| [`AGENTS.md`](../AGENTS.md)                                               | 让首次进入仓库的开发者与 Agent 可执行的项目开发规则   |                                            |
+| [`CONTEXT.md`](../CONTEXT.md)                                             | 代码、文档与讨论共用的领域词汇                        | 只定义领域词义，不承载需求、决策或实现说明 |
+| [`docs/agents/`](agents/)                                                 | 面向 Agent 与项目级 skills 的适配说明和操作约定       |                                            |
 
 每份文档只维护“负责维护”列中的事实；“边界说明”只补充容易混淆的排除项，留空不会扩大该文档的职责。
 
