@@ -56,12 +56,12 @@ describe("Expo image picker source", () => {
     ]);
   });
 
-  it("waits for an iCloud-backed selection to resolve to a local file", async () => {
-    let finishDownload!: (result: unknown) => void;
+  it("keeps the batch pending until the system picker resolves selected files", async () => {
+    let finishSelection!: (result: unknown) => void;
     mockLaunchImageLibraryAsync.mockImplementation(
       () =>
         new Promise((resolve) => {
-          finishDownload = resolve;
+          finishSelection = resolve;
         }),
     );
     const source = createExpoImagePickerSource();
@@ -74,7 +74,7 @@ describe("Expo image picker source", () => {
     await Promise.resolve();
     expect(settled).toBe(false);
 
-    finishDownload({
+    finishSelection({
       canceled: false,
       assets: [
         {
@@ -96,8 +96,8 @@ describe("Expo image picker source", () => {
     ]);
   });
 
-  it.each(["iCloud download timed out", "iCloud download failed"])(
-    "propagates a picker failure for explicit flow feedback: %s",
+  it.each(["Photo selection failed", "Photo provider unavailable"])(
+    "propagates an opaque picker batch failure for explicit flow feedback: %s",
     async (message) => {
       mockLaunchImageLibraryAsync.mockRejectedValue(new Error(message));
 

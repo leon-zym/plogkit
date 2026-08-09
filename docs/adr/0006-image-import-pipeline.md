@@ -2,7 +2,7 @@
 
 - 状态：部分修订
 - 接受日期：2026-07-02
-- 后继：[ADR 0022](0022-draft-aggregate-current-editing-session.md)
+- 后继：[ADR 0022](0022-draft-aggregate-current-editing-session.md)、[ADR 0040](0040-system-photo-picker-batch-boundary.md)
 - 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0007](0007-export-pipeline.md)、[ADR 0009](0009-sdr-export-live-photo-still.md)、[ADR 0017](0017-share-extension-deferred.md)、[F07](../specs/F07-image-import.md)
 
 ## 背景
