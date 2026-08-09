@@ -14,6 +14,30 @@ const callbacks = {
 };
 
 describe("ExportPanel", () => {
+  it("offers original, social, and compact presets through the export panel", async () => {
+    const settings = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
+    const onPresetChange = jest.fn();
+    const view = await render(
+      <ExportPanel
+        {...callbacks}
+        canRetainBasic
+        onPresetChange={onPresetChange}
+        policyError={null}
+        settings={settings}
+        status={{ kind: "idle" }}
+      />,
+    );
+
+    expect(view.getByTestId("export-preset-original")).toBeTruthy();
+    expect(view.getByTestId("export-preset-social")).toBeTruthy();
+    expect(view.getByTestId("export-preset-compact")).toBeTruthy();
+
+    await fireEvent.press(view.getByTestId("export-preset-social"));
+    await fireEvent.press(view.getByTestId("export-preset-compact"));
+
+    expect(onPresetChange.mock.calls).toEqual([["social"], ["compact"]]);
+  });
+
   it("shows the formats projected for a multi-format preset", async () => {
     const original = parseExportSettings({ presetId: "original", metadataPolicy: "strip" });
     const view = await render(
