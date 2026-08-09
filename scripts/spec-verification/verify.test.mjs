@@ -104,6 +104,21 @@ test("accepts multiple Scenario IDs on an it.each declaration", () => {
   );
 });
 
+test("accepts Scenario IDs on a tagged-template it.each declaration", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'it.each`\nvalue\n${1}\n`("[F01-S01] shows the visible result for $value", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /1 implemented with 1 bindings \(L2 1, L3 0, L4 0\)/);
+    },
+  );
+});
+
 test("accepts Scenario tags on a top-level Maestro flow", () => {
   withRepository(
     {
@@ -165,6 +180,28 @@ test("rejects an implemented Scenario without a test binding", () => {
   );
 });
 
+test("rejects a malformed Scenario status instead of inheriting the overall status", () => {
+  withRepository(
+    {
+      specs: {
+        "docs/specs/F01-example.md": `# F01 Example
+- 状态：已确认
+#### Scenario F01-S01: Intended implemented behavior
+- 状态: 已实现
+- GIVEN one
+- WHEN one
+- THEN one
+`,
+      },
+      files: {},
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario status/);
+    },
+  );
+});
+
 test("rejects a test binding for a deleted Scenario", () => {
   withRepository(
     {
@@ -196,6 +233,68 @@ test("rejects Scenario evidence declared on a disabled test", () => {
   );
 });
 
+test("rejects Scenario evidence declared on a disabled it.each test", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'it.skip.each([1])("[F01-S01] shows the visible result for %s", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /declares Scenario evidence on a disabled test/);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
+    },
+  );
+});
+
+test("rejects Scenario evidence nested in a disabled suite", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'describe.skip("behavior", () => { test("[F01-S01] shows the visible result", () => {}); });\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /declares Scenario evidence on a disabled test/);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
+    },
+  );
+});
+
+test("rejects focused tests because sibling evidence may not execute", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test.only("focuses this file", () => {});\ntest("[F01-S01] shows the visible result", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /uses a focused test declaration/);
+    },
+  );
+});
+
+test("rejects focused suites because sibling evidence may not execute", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'describe.only("focused behavior", () => {});\ntest("[F01-S01] shows the visible result", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /uses a focused suite declaration/);
+    },
+  );
+});
+
 test("rejects malformed Scenario annotations in native test titles", () => {
   withRepository(
     {
@@ -217,6 +316,21 @@ test("rejects Scenario annotations outside the test-title prefix", () => {
       files: {
         "src/example/__tests__/behavior.test.ts":
           'test("shows the [F01-S01] visible result", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario annotation/);
+    },
+  );
+});
+
+test("rejects additional Scenario annotations after a valid prefix", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test("[F01-S01] shows the result for [F01-S99]", () => {});\n',
       },
     },
     (result) => {
@@ -278,6 +392,49 @@ test("rejects a Scenario heading without a stable ID", () => {
     (result) => {
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /has an invalid Scenario heading/);
+    },
+  );
+});
+
+test("rejects a Scenario written at the wrong Markdown heading level", () => {
+  withRepository(
+    {
+      specs: {
+        "docs/specs/F01-example.md": `# F01 Example
+- 状态：已实现
+### Scenario F01-S01: Wrong heading level
+- GIVEN one
+- WHEN one
+- THEN one
+`,
+      },
+      files: {},
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario heading/);
+      assert.match(result.stderr, /has no valid Scenario headings/);
+    },
+  );
+});
+
+test("rejects a feature Spec without any Scenario", () => {
+  withRepository(
+    {
+      specs: {
+        "docs/specs/F01-example.md": `# F01 Example
+- 状态：已实现
+
+## Requirements
+
+The behavior has not been specified.
+`,
+      },
+      files: {},
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has no valid Scenario headings/);
     },
   );
 });

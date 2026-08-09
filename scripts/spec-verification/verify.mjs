@@ -42,17 +42,21 @@ function readScenarios(root, errors) {
     const path = join(specDirectory, file);
     const contents = readFileSync(path, "utf8");
     const featureId = basename(file).match(/^(F\d{2})-/)?.[1];
-    const firstScenarioIndex = contents.search(/^#### Scenario/m);
+    const firstScenarioIndex = contents.search(/^[ \t]{0,3}#{1,6}[ \t]+Scenario\b/m);
     const header = contents.slice(
       0,
       firstScenarioIndex === -1 ? contents.length : firstScenarioIndex,
     );
-    const overallStatus = header.match(/^- 状态：(草拟|已确认|已实现)$/m)?.[1];
-    if (!overallStatus) {
-      errors.push(`${repositoryPath(root, path)} has no valid overall status`);
-    }
+    const overallStatusLines = [...header.matchAll(/^[ \t]*-[ \t]*状态.*$/gm)];
+    const overallStatusMatch =
+      overallStatusLines.length === 1
+        ? overallStatusLines[0][0].match(/^- 状态：(草拟|已确认|已实现)$/)
+        : null;
+    const overallStatus = overallStatusMatch?.[1];
+    if (!overallStatus)
+      errors.push(`${repositoryPath(root, path)} has no single valid overall status`);
 
-    for (const malformed of contents.matchAll(/^#### Scenario.*$/gm)) {
+    for (const malformed of contents.matchAll(/^[ \t]{0,3}#{1,6}[ \t]+Scenario.*$/gm)) {
       if (!/^#### Scenario F\d{2}-S\d{2}: .+$/.test(malformed[0])) {
         errors.push(
           `${repositoryPath(root, path)}:${lineNumberAt(contents, malformed.index)} has an invalid Scenario heading`,
@@ -61,13 +65,25 @@ function readScenarios(root, errors) {
     }
 
     const headings = [...contents.matchAll(SCENARIO_HEADING)];
+    if (headings.length === 0) {
+      errors.push(`${repositoryPath(root, path)} has no valid Scenario headings`);
+    }
     for (const [index, heading] of headings.entries()) {
       const id = heading[1];
       const start = heading.index;
       const end = headings[index + 1]?.index ?? contents.length;
       const section = contents.slice(start, end);
-      const status = section.match(/^- 状态：(草拟|已确认|已实现)$/m)?.[1] ?? overallStatus;
       const location = `${repositoryPath(root, path)}:${lineNumberAt(contents, start)}`;
+      const statusLines = [...section.matchAll(/^[ \t]*-[ \t]*状态.*$/gm)];
+      const statusMatch =
+        statusLines.length === 1 ? statusLines[0][0].match(/^- 状态：(草拟|已确认|已实现)$/) : null;
+      if (statusLines.length > 0 && !statusMatch) {
+        const statusIndex = start + (statusLines[0]?.index ?? 0);
+        errors.push(
+          `${repositoryPath(root, path)}:${lineNumberAt(contents, statusIndex)} has an invalid Scenario status`,
+        );
+      }
+      const status = statusLines.length === 0 ? overallStatus : statusMatch?.[1];
 
       if (!id.startsWith(`${featureId}-`)) {
         errors.push(`${location} uses Scenario ID ${id} outside ${featureId}`);
@@ -107,6 +123,12 @@ function readAnnotationIds(title, location, errors) {
     );
     return [];
   }
+  if (match[2].includes("[F")) {
+    errors.push(
+      `${location} has an invalid Scenario annotation in test title ${JSON.stringify(title)}`,
+    );
+    return [];
+  }
 
   const ids = [...match[1].matchAll(ANNOTATION_TOKEN)].map((token) => token[1]);
   const seen = new Set();
@@ -117,34 +139,55 @@ function readAnnotationIds(title, location, errors) {
   return ids;
 }
 
-function testCallKind(node) {
-  const expression = node.expression;
+function declarationReferenceKind(expression, declaration) {
   if (ts.isIdentifier(expression)) {
-    if (expression.text === "it" || expression.text === "test") return "enabled";
-    if (expression.text === "xit" || expression.text === "xtest") return "disabled";
-    return null;
-  }
-
-  if (ts.isPropertyAccessExpression(expression)) {
-    if (
-      ts.isIdentifier(expression.expression) &&
-      (expression.expression.text === "it" || expression.expression.text === "test")
-    ) {
-      if (expression.name.text === "skip" || expression.name.text === "todo") return "disabled";
-      if (expression.name.text === "only") return "enabled";
+    if (declaration === "test") {
+      if (expression.text === "it" || expression.text === "test") return "enabled";
+      if (expression.text === "xit" || expression.text === "xtest") return "disabled";
+      if (expression.text === "fit") return "focused";
+    } else {
+      if (expression.text === "describe") return "enabled";
+      if (expression.text === "xdescribe") return "disabled";
+      if (expression.text === "fdescribe") return "focused";
     }
     return null;
   }
 
+  if (ts.isPropertyAccessExpression(expression)) {
+    const baseKind = declarationReferenceKind(expression.expression, declaration);
+    if (!baseKind) return null;
+    if (expression.name.text === "skip") return "disabled";
+    if (declaration === "test" && expression.name.text === "todo") return "disabled";
+    if (expression.name.text === "only") {
+      return baseKind === "disabled" ? "disabled" : "focused";
+    }
+    if (
+      declaration === "test" &&
+      (expression.name.text === "concurrent" || expression.name.text === "failing")
+    ) {
+      return baseKind;
+    }
+  }
+
+  return null;
+}
+
+function declarationCallKind(node, declaration) {
+  const expression = node.expression;
+  const directKind = declarationReferenceKind(expression, declaration);
+  if (directKind) return directKind;
+
+  const eachFactory = ts.isCallExpression(expression)
+    ? expression.expression
+    : ts.isTaggedTemplateExpression(expression)
+      ? expression.tag
+      : null;
   if (
-    ts.isCallExpression(expression) &&
-    ts.isPropertyAccessExpression(expression.expression) &&
-    expression.expression.name.text === "each" &&
-    ts.isIdentifier(expression.expression.expression) &&
-    (expression.expression.expression.text === "it" ||
-      expression.expression.expression.text === "test")
+    eachFactory &&
+    ts.isPropertyAccessExpression(eachFactory) &&
+    eachFactory.name.text === "each"
   ) {
-    return "enabled";
+    return declarationReferenceKind(eachFactory.expression, declaration);
   }
 
   return null;
@@ -169,9 +212,15 @@ function readCodeBindings(root, errors) {
             : ts.ScriptKind.TS;
       const parsed = ts.createSourceFile(file, contents, ts.ScriptTarget.Latest, true, syntax);
 
-      function visit(node) {
+      function visit(node, disabledBySuite = false) {
+        let descendantsDisabled = disabledBySuite;
         if (ts.isCallExpression(node)) {
-          const kind = testCallKind(node);
+          const kind = declarationCallKind(node, "test");
+          const callLine =
+            parsed.getLineAndCharacterOfPosition(node.expression.getStart()).line + 1;
+          if (kind === "focused") {
+            errors.push(`${file}:${callLine} uses a focused test declaration`);
+          }
           const titleNode = node.arguments[0];
           if (
             kind &&
@@ -181,16 +230,22 @@ function readCodeBindings(root, errors) {
             const line = parsed.getLineAndCharacterOfPosition(titleNode.getStart()).line + 1;
             const location = `${file}:${line}`;
             const ids = readAnnotationIds(titleNode.text, location, errors);
-            if (kind === "disabled" && ids.length > 0) {
+            if ((kind === "disabled" || disabledBySuite) && ids.length > 0) {
               errors.push(`${location} declares Scenario evidence on a disabled test`);
-            } else {
+            } else if (kind === "enabled") {
               for (const id of ids) {
                 bindings.push({ id, level: source.level, location });
               }
             }
           }
+
+          const suiteKind = declarationCallKind(node, "suite");
+          if (suiteKind === "focused") {
+            errors.push(`${file}:${callLine} uses a focused suite declaration`);
+          }
+          descendantsDisabled ||= suiteKind === "disabled";
         }
-        ts.forEachChild(node, visit);
+        ts.forEachChild(node, (child) => visit(child, descendantsDisabled));
       }
 
       visit(parsed);

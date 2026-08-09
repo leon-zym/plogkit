@@ -66,7 +66,7 @@ iOS warm-up 分别证明 Metro readiness 与 App readiness。runner 在启动 Ma
 - 系统选择器、系统相册、应用生命周期和关键跨端主路径使用 L4 抽样，不把可在设备外稳定证明的全部边界塞入 E2E。
 - 单层能够完整覆盖关键 GIVEN / WHEN / THEN 时不重复堆叠层级；交互与最终产物位于不同 seam 时组合多项证据。
 
-L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm verify:specs` 使用 TypeScript 语法树读取启用的 `it`、`test` 和 `it.each` 标题，并读取 Maestro tags；它拒绝缺失、悬空、重复、格式错误及禁用测试上的声明。静态校验不解析断言语义，评审者仍须确认每项证据覆盖 Scenario 的用户可观察 THEN。
+L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm verify:specs` 使用 TypeScript 语法树读取启用的 `it`、`test` 和 `it.each` 标题，并读取 Maestro tags；它拒绝缺失、悬空、重复、格式错误、禁用测试上的声明以及可能跳过同文件其他证据的聚焦声明。静态校验不解析断言语义，评审者仍须确认每项证据覆盖 Scenario 的用户可观察 THEN。
 
 ## CI 门禁
 
