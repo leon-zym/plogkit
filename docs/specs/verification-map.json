@@ -1214,7 +1214,7 @@
         {
           "level": "L2",
           "file": "src/services/settings/__tests__/appSettings.test.ts",
-          "test": "uses defaults for invalid JSON without rewriting it during load"
+          "test": "uses defaults for %s without rewriting it during load"
         }
       ]
     }
