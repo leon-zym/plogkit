@@ -36,7 +36,7 @@ Scenario ID 直接声明在提供证据的原生测试中，不维护独立映�
 
 - L2/L3 的 `it` 或 `test` 标题以 `[FNN-SNN]` 开头；一项测试覆盖多个 Scenario 时连续列出多个 ID，同一 Scenario 也可以由多项测试组合证明。
 - L4 顶层 Maestro Flow 在配置区的 `tags` 中列出 Scenario ID；subflow 不独立作为证据。
-- 证据必须覆盖 Scenario 的关键 GIVEN / WHEN / THEN，尤其是用户可观察的 THEN。相近的文件名、未执行的测试、`describe` 标题或注释不构成证据；不得提交会让同文件其他证据跳过执行的 `.only` 聚焦声明。
+- 证据必须覆盖 Scenario 的关键 GIVEN / WHEN / THEN，尤其是用户可观察的 THEN。相近的文件名、未执行或预期失败的测试、`describe` 标题或注释不构成证据；不得提交会让同文件其他证据跳过执行的 `.only` 聚焦声明。
 - 尚未实现的 Scenario 不要求测试绑定；行为实现时必须同步增加或更新测试并声明 ID，否则不能把 Scenario 标记为`已实现`。
 - 新增或删除 Scenario、测试及 Flow 时必须同步维护两端声明。测试移动或重命名时 ID 随测试保留，不需要修改第三份清单。
 

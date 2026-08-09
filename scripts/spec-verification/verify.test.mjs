@@ -249,6 +249,22 @@ test("rejects Scenario evidence declared on a disabled it.each test", () => {
   );
 });
 
+test("rejects Scenario evidence declared on an expected-failure test", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test.failing("[F01-S01] currently fails to show the result", () => { throw new Error("not implemented"); });\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /declares Scenario evidence on a disabled test/);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
+    },
+  );
+});
+
 test("rejects Scenario evidence nested in a disabled suite", () => {
   withRepository(
     {
