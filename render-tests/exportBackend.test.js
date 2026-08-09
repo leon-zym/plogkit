@@ -30,6 +30,14 @@ const ONE_PIXEL_PNG = Uint8Array.from(
     "base64",
   ),
 );
+const DISPLAY_P3_PNG = Uint8Array.from(
+  Buffer.from(
+    [
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABGdBTUEAALGPC/xhBQAAAWNpQ0NQa0NHQ29sb3JTcGFjZURpc3BsYXlQMwAAKJF9kLFLw1AQxr9WpaB1EB0cHDKJQ5SSCro4tBVEcQhVweqUvqapkMZHkiIFN/+Bgv+BCs5uFoc6OjgIopPo5uSk4KLleS+JpCJ6j+N+fO+74zggOW5wbvcDqDu+W1zKK5ulLSX1jAS9IAzm8Zyur0r+rj/j/T703k7LWb///43Biukxqp+UGcZdH0ioxPqezyXvE4+5tBRxS7IV8onkcsjngWe9WCC+JlZYzagQvxCr5R7d6uG63WDRDnL7tOlsrMk5lBNYxA48cNgw0IQCHdk//LOBv4BdcjfhUp+FGnzqyZEiJ5jEy3DAMAOVWEOGUpN3ju53F91PjbWDJ2ChI4S4iLWVDnA2Rydrx9rUPDAyBFy1ueEagdRHmaxWgddTYLgEjN5Qz7ZXzWrh9uk8MPAoxNskkDoEui0hPo6E6B5T8wNw6XwBA6diE6SWDlsAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAARjSUNQDA0AAW4D4+8AAAA4ZVhJZk1NACoAAAAIAAGHaQAEAAAAAQAAABoAAAAAAAKgAgAEAAAAAQAAAAigAwAEAAAAAQAAAAgAAAAAtkxZaAAAANFJREFUGBlFj8FKA0EQRF/vzCwxQc2K2UM+wA/IXcSP8Re9ihHx5iEqePAgJIZsQNlINuiuO2PPXlKHhu4quqqk2hQBhbUWYxKIm0BdN4QQsJFMlHh9mvHy9q5kgrOGy4tz+v0DEgXb75Lr6R1hcIo9zpl/blkVBUa57kPT1IhzjPKc1Fl+djtE1EfRCYwxrJdLHm5v1PuXj8WcydmV2sk+Qy8Vnh/v+SpLxlnG6CTDe4/EFr5tqaoNzV+rGYWjwyHOpXtB9Iphu346Q/BdxXj/B2NAUKoNKyclAAAAAElFTkSuQmCC",
+    ].join(""),
+    "base64",
+  ),
+);
 const FONT_DIR = join(__dirname, "fonts");
 
 function containsAscii(bytes, value) {
@@ -70,12 +78,14 @@ function resolvedPolicy(document, backend) {
 
 describe("Skia export backend contract", () => {
   let api;
+  let canvasKit;
   let createSkiaExportBackend;
   let fontProvider;
   let textLayoutEnvironment;
 
   beforeAll(async () => {
     await LoadSkiaWeb();
+    canvasKit = global.CanvasKit;
     api = getSkiaExports().Skia;
     ({ createSkiaExportBackend } = require("../src/services/export/skiaBackend"));
     fontProvider = createHeadlessFontProvider([
@@ -165,6 +175,63 @@ describe("Skia export backend contract", () => {
     decoded.dispose();
     expect(comparison.changedPixels).toBe(0);
     expect(preparedBytes[0].slice(1, 4)).toEqual(Uint8Array.from([0x50, 0x4e, 0x47]));
+  });
+
+  it("converts a Display P3 source into an actual SDR/sRGB encoded image", async () => {
+    const imageId = importedAssetId("backend-display-p3");
+    const baseDocument = createDocument([{ id: imageId, width: 8, height: 8 }]);
+    const document = {
+      ...baseDocument,
+      exportSettings: {
+        ...baseDocument.exportSettings,
+        formatOverride: "png",
+      },
+    };
+    const backend = createSkiaExportBackend({
+      renderer: createHeadlessSkiaOffscreenSceneRenderer(
+        new Map([["fixture://display-p3", DISPLAY_P3_PNG]]),
+        textLayoutEnvironment,
+      ),
+    });
+    const assets = {
+      entries: [imageId],
+      resolve: (candidateId, usage) =>
+        candidateId === imageId
+          ? {
+              draftId: "draft-display-p3",
+              assetId: imageId,
+              usage,
+              uri: "fixture://display-p3",
+            }
+          : null,
+    };
+    const { operation, preparedBytes } = createOperation();
+
+    const source = canvasKit.MakeImageFromEncoded(DISPLAY_P3_PNG);
+    expect(source).not.toBeNull();
+    const sourceColorSpace = source.getColorSpace();
+    expect(containsAscii(DISPLAY_P3_PNG, "kCGColorSpaceDisplayP3")).toBe(true);
+    expect(canvasKit.ColorSpace.Equals(sourceColorSpace, canvasKit.ColorSpace.SRGB)).toBe(false);
+    sourceColorSpace.delete();
+    source.delete();
+
+    const result = await backend.prepare({
+      document,
+      assets,
+      policy: resolvedPolicy(document, backend),
+      operation,
+    });
+
+    expect(result.status).toBe("prepared");
+    const output = canvasKit.MakeImageFromEncoded(preparedBytes[0]);
+    expect(output).not.toBeNull();
+    const outputColorSpace = output.getColorSpace();
+    expect(canvasKit.ColorSpace.Equals(outputColorSpace, canvasKit.ColorSpace.SRGB)).toBe(true);
+    expect(canvasKit.ColorSpace.Equals(outputColorSpace, canvasKit.ColorSpace.DISPLAY_P3)).toBe(
+      false,
+    );
+    outputColorSpace.delete();
+    output.delete();
   });
 
   it("retains only basic JPEG metadata from the Draft sidecar", async () => {

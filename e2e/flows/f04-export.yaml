@@ -25,3 +25,25 @@ name: Export from the document with a one-time metadata override
       id: export-success
     timeout: 60000
 - assertVisible: Saved to Photos
+- tapOn:
+    id: editor-tool-text
+- tapOn:
+    id: text-input
+- setClipboard: "导出后更新 ✨"
+- pasteText
+- runFlow: ../subflows/dismiss-keyboard.yaml
+- runFlow: ../subflows/scroll-and-apply-text-edits.yaml
+- assertVisible: "导出后更新 ✨"
+- tapOn:
+    id: editor-open-export
+- scrollUntilVisible:
+    element:
+      id: export-document
+    direction: DOWN
+- tapOn:
+    id: export-document
+- extendedWaitUntil:
+    visible:
+      id: export-success
+    timeout: 60000
+- assertVisible: Saved to Photos

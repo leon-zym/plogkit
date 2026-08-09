@@ -151,12 +151,13 @@ function loadFixtures(api) {
 }
 
 function createFixtureDocument(imageCount, presetId = "social", format = "jpeg") {
+  const exercisesGlobalOriginalBounds = imageCount === 9 && presetId === "original";
   const images = Array.from({ length: imageCount }, (_, index) => {
     const fixture = FIXTURE_DEFINITIONS[index % FIXTURE_DEFINITIONS.length];
     return {
       id: importedAssetId(`measurement-${imageCount}-${index + 1}`),
-      width: fixture.width,
-      height: fixture.height,
+      width: exercisesGlobalOriginalBounds ? 6000 : fixture.width,
+      height: exercisesGlobalOriginalBounds ? 4000 : fixture.height,
     };
   });
   const base = createDocument(images);
