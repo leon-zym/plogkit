@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -9,6 +10,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -91,7 +93,8 @@ test("final writable flush failures are propagated", async () => {
 });
 
 test("suite abort policy distinguishes shared infrastructure from flow-local failures", () => {
-  assert.equal(shouldAbortMaestroSuite("metro"), true);
+  assert.equal(shouldAbortMaestroSuite("metro-transport"), true);
+  assert.equal(shouldAbortMaestroSuite("metro-bundle"), true);
   assert.equal(shouldAbortMaestroSuite("system-ui"), true);
   assert.equal(shouldAbortMaestroSuite("xctest-driver"), false);
   assert.equal(shouldAbortMaestroSuite("app-crash"), false);
@@ -116,7 +119,6 @@ printf '%s\n' 'Metro bundling failed' >&2
 exit 1
 `,
   );
-
   const previousPath = process.env.PATH;
   const previousInvocationLog = process.env.FAKE_INVOCATION_LOG;
   process.env.PATH = `${binaries}:${previousPath}`;
@@ -130,7 +132,7 @@ exit 1
         flow: null,
         root: directory,
       }),
-      /Maestro flow failed \[metro\]/,
+      /Maestro flow failed \[metro-bundle\]/,
     );
   } finally {
     process.env.PATH = previousPath;
@@ -202,7 +204,7 @@ test("diagnostic write failures do not replace the original E2E failure", async 
 });
 
 test("failure classification covers Metro, app crashes, and root-cause priority", () => {
-  assert.equal(classifyFailure("Metro bundling failed"), "metro");
+  assert.equal(classifyFailure("Metro bundling failed"), "metro-bundle");
   assert.equal(classifyFailure("FATAL EXCEPTION: main\nAndroidRuntime"), "app-crash");
   assert.equal(
     classifyFailure("XCTest failed with kAXErrorInvalidUIElement\napp stopped"),
@@ -252,7 +254,7 @@ test("a cold-bundle warm-up is classified as Metro infrastructure", () => {
     "Assertion is false: id: home-screen is visible",
   ].join("\n");
 
-  assert.equal(classifyFailure(coldBundleArtifact), "metro");
+  assert.equal(classifyFailure(coldBundleArtifact), "metro-bundle");
 });
 
 test("bundle progress alone does not override an unrelated business assertion", () => {
@@ -270,7 +272,208 @@ test("a premature-close signature takes priority over benign XCTest session reco
     "Assertion is false: id: home-screen is visible",
   ].join("\n");
 
-  assert.equal(classifyFailure(metroTransportArtifact), "metro");
+  assert.equal(classifyFailure(metroTransportArtifact), "metro-transport");
+});
+
+test("warm-up attributes a shared owned-Metro transport failure", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-metro-transport-"));
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  writeFileSync(
+    join(artifactRoot, "metro.log"),
+    "Error [ERR_STREAM_PREMATURE_CLOSE]: Premature close\n",
+  );
+  writeExecutable(
+    join(binaries, "pnpm"),
+    `#!/bin/sh
+for argument in "$@"; do
+  case "$argument" in
+    --test-output-dir=*) output_dir="\${argument#--test-output-dir=}" ;;
+  esac
+done
+run_dir="$output_dir/fake-run/warmup"
+mkdir -p "$run_dir/screen-hierarchy"
+printf '%s\n' '{"accessibilityText":"Searching for development servers..."}' > "$run_dir/screen-hierarchy/failed.json"
+printf '%s\n' 'Assertion is false: id: home-screen is visible' >&2
+exit 1
+`,
+  );
+  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nprintf '%s\\n' 'simulator transport log'\n");
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await assert.rejects(
+      warmUpApp({
+        artifactRoot,
+        cleanup: { add() {} },
+        device: { platform: "ios", deviceId: "simulator-test" },
+        root: directory,
+      }),
+      /Warm-up failed \[metro-transport\]/,
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+  assert.equal(
+    readFileSync(join(artifactRoot, "ios", "warmup", "simulator-system.log"), "utf8"),
+    "simulator transport log",
+  );
+});
+
+test("iOS Metro prewarm resolves the manifest bundle and records its timeline", async () => {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push({
+      accept: request.headers.accept,
+      platform: request.headers["expo-platform"],
+      url: request.url,
+    });
+    if (request.url === "/") {
+      const address = server.address();
+      response.setHeader("content-type", "application/expo+json");
+      response.end(
+        JSON.stringify({
+          launchAsset: {
+            url: `http://127.0.0.1:${address.port}/node_modules/expo-router/entry.bundle?platform=ios`,
+          },
+        }),
+      );
+      return;
+    }
+    response.setHeader("content-type", "application/javascript");
+    response.end("globalThis.__PLOGKIT_PREWARM__ = true;\n");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-metro-prewarm-"));
+  const address = server.address();
+  try {
+    const { prewarmMetroBundle } = await import("./runtime.mjs");
+    await prewarmMetroBundle({
+      artifactRoot: directory,
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      platform: "ios",
+      timeoutMs: 1000,
+    });
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+
+  assert.deepEqual(requests, [
+    {
+      accept: "application/expo+json",
+      platform: "ios",
+      url: "/",
+    },
+    {
+      accept: "application/javascript",
+      platform: "ios",
+      url: "/node_modules/expo-router/entry.bundle?platform=ios",
+    },
+  ]);
+  const timeline = JSON.parse(readFileSync(join(directory, "metro-ios-prewarm.json"), "utf8"));
+  assert.equal(timeline.platform, "ios");
+  assert.equal(timeline.bundleBytes, 39);
+  assert.match(timeline.bundleUrl, /expo-router\/entry\.bundle\?platform=ios$/);
+  assert.equal(typeof timeline.startedAt, "string");
+  assert.equal(typeof timeline.manifestReadyAt, "string");
+  assert.equal(typeof timeline.bundleReadyAt, "string");
+});
+
+test("iOS Metro prewarm records a manifest transport failure at the warm-up seam", async () => {
+  const server = createServer((_request, response) => response.destroy());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-metro-manifest-failure-"));
+  const address = server.address();
+  try {
+    const { prewarmMetroBundle } = await import("./runtime.mjs");
+    await assert.rejects(
+      prewarmMetroBundle({
+        artifactRoot: directory,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        platform: "ios",
+        timeoutMs: 1000,
+      }),
+      /Metro manifest prewarm failed \[metro-transport\]/,
+    );
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+
+  assert.match(
+    readFileSync(join(directory, "ios", "warmup", "failure-summary.txt"), "utf8"),
+    /category: metro-transport/,
+  );
+  const timeline = JSON.parse(readFileSync(join(directory, "metro-ios-prewarm.json"), "utf8"));
+  assert.equal(timeline.category, "metro-transport");
+  assert.equal(timeline.phase, "manifest");
+});
+
+test("iOS Metro prewarm records an incomplete cold bundle separately", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/") {
+      const address = server.address();
+      response.setHeader("content-type", "application/expo+json");
+      response.end(
+        JSON.stringify({
+          launchAsset: {
+            url: `http://127.0.0.1:${address.port}/entry.bundle?platform=ios`,
+          },
+        }),
+      );
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/javascript" });
+    response.write("partial bundle");
+    response.destroy();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-metro-bundle-failure-"));
+  const address = server.address();
+  try {
+    const { prewarmMetroBundle } = await import("./runtime.mjs");
+    await assert.rejects(
+      prewarmMetroBundle({
+        artifactRoot: directory,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        platform: "ios",
+        timeoutMs: 1000,
+      }),
+      /Metro bundle prewarm failed \[metro-bundle\]/,
+    );
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+
+  const summary = readFileSync(join(directory, "ios", "warmup", "failure-summary.txt"), "utf8");
+  assert.match(summary, /category: metro-bundle/);
+  const timeline = JSON.parse(readFileSync(join(directory, "metro-ios-prewarm.json"), "utf8"));
+  assert.equal(timeline.category, "metro-bundle");
+  assert.equal(timeline.phase, "bundle");
+});
+
+test("owned Metro lifecycle detects a fragmented premature-close signature", async () => {
+  const { createMetroFailureSignal } = await import("./runtime.mjs");
+  const lifecycle = createMetroFailureSignal("/artifacts/metro.log");
+
+  lifecycle.observeOutput("Error [ERR_STREAM_PREMATURE_");
+  lifecycle.observeOutput("CLOSE]: Premature close\n");
+
+  const failure = await lifecycle.failure;
+  assert.match(failure.message, /Owned Metro transport failed/);
+  assert.match(failure.message, /ERR_STREAM_PREMATURE_CLOSE/);
+  assert.match(failure.message, /\/artifacts\/metro\.log/);
 });
 
 test("iOS diagnostics copy only fresh relevant reports and isolate per-file failures", () => {
