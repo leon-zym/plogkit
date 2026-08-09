@@ -1,5 +1,8 @@
 appId: com.leonzym.plogkit
 name: Right-aligned small text uses an extended touch target
+tags:
+  - F01-S13
+  - F01-S14
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:

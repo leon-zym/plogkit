@@ -107,7 +107,7 @@ describe("Skia export backend contract", () => {
     fontProvider.dispose();
   });
 
-  it("matches the shared renderer pixels and preserves the requested static encoding", async () => {
+  it("[F04-S02][F04-S11] matches the shared renderer pixels and preserves the requested static encoding", async () => {
     const imageId = importedAssetId("backend-png");
     const baseDocument = createDocument([{ id: imageId, width: 96, height: 128 }]);
     const document = {
@@ -177,7 +177,7 @@ describe("Skia export backend contract", () => {
     expect(preparedBytes[0].slice(1, 4)).toEqual(Uint8Array.from([0x50, 0x4e, 0x47]));
   });
 
-  it("converts a Display P3 source into an actual SDR/sRGB encoded image", async () => {
+  it("[F04-S05] converts a Display P3 source into an actual SDR/sRGB encoded image", async () => {
     const imageId = importedAssetId("backend-display-p3");
     const baseDocument = createDocument([{ id: imageId, width: 8, height: 8 }]);
     const document = {
@@ -382,7 +382,7 @@ describe("Skia export backend contract", () => {
     expect(operation.prepareStaticImage).not.toHaveBeenCalled();
   });
 
-  it("preserves renderer cancellation phase without writing a PreparedExport", async () => {
+  it("[F04-S14] preserves renderer cancellation phase without writing a PreparedExport", async () => {
     const imageId = importedAssetId("backend-cancelled");
     const document = createDocument([{ id: imageId, width: 64, height: 48 }]);
     const controller = new AbortController();

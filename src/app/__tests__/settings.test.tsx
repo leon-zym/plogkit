@@ -85,7 +85,7 @@ describe("Settings screen", () => {
     await waitFor(() => expect(settings.initialize).toHaveBeenCalledTimes(1));
   });
 
-  it("keeps the old value and disables the control until persistence succeeds", async () => {
+  it("[F09-S04] keeps the old value and disables the control until persistence succeeds", async () => {
     const pending = deferred<AppSettingsUpdateResult>();
     settings.setDefaultMetadataPolicy.mockReturnValueOnce(pending.promise);
     const view = await render(<SettingsScreen />);
@@ -115,7 +115,7 @@ describe("Settings screen", () => {
     });
   });
 
-  it("shows a localized error and preserves the old value after save failure", async () => {
+  it("[F09-S05] shows a localized error and preserves the old value after save failure", async () => {
     settings.setDefaultMetadataPolicy.mockResolvedValueOnce({
       status: "save-failed",
       settings: state.settings,
@@ -135,7 +135,7 @@ describe("Settings screen", () => {
     expect(view.getByTestId("settings-retain-basic").props.disabled).toBe(false);
   });
 
-  it("disables settings after a load failure and offers initialization retry", async () => {
+  it("[F09-S07] disables settings after a load failure and offers initialization retry", async () => {
     state = {
       status: "load-failed",
       settings: {

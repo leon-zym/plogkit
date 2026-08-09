@@ -78,7 +78,7 @@ describe("JPEG retain-basic EXIF", () => {
     expect(tags).not.toContain(0x8825);
   });
 
-  it("strips an existing EXIF segment containing GPS before reinjection", () => {
+  it("[F04-S06] strips an existing EXIF segment containing GPS before reinjection", () => {
     const source = minimalJpeg(gpsExifSegment());
     const stripped = stripExifApp1(source);
     const result = injectBasicExif(source, { make: "Apple" });

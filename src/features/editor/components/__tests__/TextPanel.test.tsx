@@ -7,7 +7,7 @@ import type { TextElement } from "@/core/document";
 import { TextPanel } from "../TextPanel";
 
 describe("TextPanel", () => {
-  it("uses distinct visible labels for each text alignment", async () => {
+  it("[F01-S10] uses distinct visible labels for each text alignment", async () => {
     const view = await render(
       <TextPanel
         elements={[]}
@@ -25,7 +25,7 @@ describe("TextPanel", () => {
     expect(view.getByText("Align right")).toBeTruthy();
   });
 
-  it("publishes style changes for immediate canvas preview", async () => {
+  it("[F01-S08] publishes style changes for immediate canvas preview", async () => {
     const onPreview = jest.fn();
     const onStyleCommit = jest.fn();
     const selected: TextElement = {

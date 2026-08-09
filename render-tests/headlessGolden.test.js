@@ -76,7 +76,7 @@ describe("headless render golden", () => {
     fontProvider.dispose();
   });
 
-  it("renders the shared scene deterministically", async () => {
+  it("[F01-S11][F03-S05] renders the shared scene deterministically", async () => {
     const actual = await renderHeadlessScene(scene, new Map([["pixel", ONE_PIXEL_PNG]]), {
       textLayoutEnvironment,
     });

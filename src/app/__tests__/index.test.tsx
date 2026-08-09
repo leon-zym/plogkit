@@ -191,7 +191,7 @@ describe("Home Draft Library", () => {
     );
   });
 
-  it("shows the creation Banner immediately while the reliable Grid is loading", async () => {
+  it("[F08-S01][F08-S11] shows the creation Banner immediately while the reliable Grid is loading", async () => {
     state = { status: "loading" };
 
     const view = await render(<HomeScreen />);
@@ -203,7 +203,7 @@ describe("Home Draft Library", () => {
     await view.unmount();
   });
 
-  it("keeps a loaded empty Grid empty without duplicating the creation entry", async () => {
+  it("[F08-S02] keeps a loaded empty Grid empty without duplicating the creation entry", async () => {
     state = { status: "ready", entries: [] };
 
     const view = await render(<HomeScreen />);
@@ -216,7 +216,7 @@ describe("Home Draft Library", () => {
     expect(view.queryByTestId("draft-corrupt-placeholder-0")).toBeNull();
   });
 
-  it("uses three phone columns, adds tablet columns, and passes every thumbnail to the Grid", async () => {
+  it("[F08-S06] uses three phone columns, adds tablet columns, and passes every thumbnail to the Grid", async () => {
     const fixtures = Array.from({ length: 37 }, (_, index) => readyEntry(index));
     state = { status: "ready", entries: fixtures };
     const phone = await render(<HomeScreen />);
@@ -256,7 +256,7 @@ describe("Home Draft Library", () => {
     expect(tabletItemStyle.width).toBe(tabletItemStyle.height);
   });
 
-  it("renders accessible thumbnail-only items and opens the exact selected Draft", async () => {
+  it("[F08-S18][F08-S32] renders accessible thumbnail-only items and opens the exact selected Draft", async () => {
     state = readyState();
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("draft-item-0")).toBeTruthy());
@@ -272,7 +272,7 @@ describe("Home Draft Library", () => {
     expect(mockPush).toHaveBeenCalledWith("/editor");
   });
 
-  it("announces an unavailable thumbnail without claiming the Draft is ready", async () => {
+  it("[F08-S32] announces an unavailable thumbnail without claiming the Draft is ready", async () => {
     const ready = readyState();
     const first = ready.status === "ready" ? ready.entries[0] : undefined;
     if (first?.status !== "ready") throw new Error("expected a ready Draft");
@@ -293,7 +293,7 @@ describe("Home Draft Library", () => {
     expect(view.getByTestId("draft-item-0").props.accessibilityLabel).not.toContain("Ready");
   });
 
-  it("shows the previous complete thumbnail or a neutral placeholder without using an original", async () => {
+  it("[F08-S17] shows the previous complete thumbnail or a neutral placeholder without using an original", async () => {
     state = {
       status: "ready",
       entries: [
@@ -327,7 +327,7 @@ describe("Home Draft Library", () => {
     expect(view.queryByText("original")).toBeNull();
   });
 
-  it("marks corrupt thumbnails and placeholders as warnings that cannot open the Editor", async () => {
+  it("[F08-S29] marks corrupt thumbnails and placeholders as warnings that cannot open the Editor", async () => {
     state = {
       status: "ready",
       entries: [
@@ -390,7 +390,7 @@ describe("Home Draft Library", () => {
     expect(view.getByTestId("corrupt-delete-confirmation")).toBeTruthy();
   });
 
-  it("persists one global display mode and switches the whole Grid to contain", async () => {
+  it("[F08-S16] persists one global display mode and switches the whole Grid to contain", async () => {
     state = readyState();
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("home-menu")).toBeTruthy());
@@ -504,7 +504,7 @@ describe("Home Draft Library", () => {
     expect(view.getByTestId("draft-thumbnail-0").props.resizeMode).toBe("cover");
   });
 
-  it("scrolls to the top only when the opened Draft returns with a new content revision", async () => {
+  it("[F08-S21] scrolls to the top only when the opened Draft returns with a new content revision", async () => {
     const scrollToOffset = jest.spyOn(FlatList.prototype, "scrollToOffset");
     state = readyState();
     const view = await render(<HomeScreen />);
@@ -527,7 +527,7 @@ describe("Home Draft Library", () => {
     scrollToOffset.mockRestore();
   });
 
-  it("requires the normal-Draft action menu and confirmation, but corrupt tap goes to confirmation", async () => {
+  it("[F06-S04][F08-S22][F08-S30] requires the normal-Draft action menu and confirmation, but corrupt tap goes to confirmation", async () => {
     state = readyState();
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("draft-item-0")).toBeTruthy());
@@ -544,7 +544,7 @@ describe("Home Draft Library", () => {
     expect(runtime.deleteDraft).toHaveBeenCalledWith(corruptId);
   });
 
-  it("replaces an unknown deletion snapshot with a page failure and retries only that decision", async () => {
+  it("[F08-S25] replaces an unknown deletion snapshot with a page failure and retries only that decision", async () => {
     state = readyState();
     runtime.deleteDraft
       .mockResolvedValueOnce({ status: "delete-unknown" })
@@ -563,7 +563,7 @@ describe("Home Draft Library", () => {
     expect(runtime.deleteDraft).toHaveBeenNthCalledWith(2, firstId);
   });
 
-  it("retries a page-level library read failure without displaying a stale Grid", async () => {
+  it("[F08-S31] retries a page-level library read failure without displaying a stale Grid", async () => {
     state = { status: "storage-failed", message: "disk unavailable" };
     const view = await render(<HomeScreen />);
     await waitFor(() => expect(view.getByTestId("home-storage-failed")).toBeTruthy());
@@ -576,7 +576,7 @@ describe("Home Draft Library", () => {
     expect(view.queryByTestId("draft-item-0")).toBeNull();
   });
 
-  it("shows a creation error when the Draft publication does not commit", async () => {
+  it("[F08-S05] shows a creation error when the Draft publication does not commit", async () => {
     state = { status: "ready", entries: [] };
     runtime.choosePhotos.mockResolvedValue({
       status: "create-failed",

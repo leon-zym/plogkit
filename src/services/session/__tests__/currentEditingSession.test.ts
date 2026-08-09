@@ -178,7 +178,7 @@ describe("current editing session", () => {
     expect(result.handle.assets.resolve(firstImageId, "original")?.draftId).toBe(firstDraftId);
   });
 
-  it("persists a Draft photo-information choice without applying it to another Draft", async () => {
+  it("[F04-S07] persists a Draft photo-information choice without applying it to another Draft", async () => {
     const { session } = setup(10_000);
     const first = await session.open(firstDraftId);
     if (first.status !== "opened") throw new Error("expected the first Draft to open");
@@ -201,7 +201,7 @@ describe("current editing session", () => {
     );
   });
 
-  it("flushes and permanently invalidates the current handle before deleting its Draft", async () => {
+  it("[F08-S23] flushes and permanently invalidates the current handle before deleting its Draft", async () => {
     const { library, session } = setup(10_000);
     const opened = await session.open(firstDraftId);
     if (opened.status !== "opened") throw new Error("expected an open session");
@@ -292,7 +292,7 @@ describe("current editing session", () => {
     ]);
   });
 
-  it("restores the current session after a definite delete failure and freezes it while unknown", async () => {
+  it("[F08-S24][F08-S25] restores the current session after a definite delete failure and freezes it while unknown", async () => {
     const first = setup(10_000);
     const opened = await first.session.open(firstDraftId);
     if (opened.status !== "opened") throw new Error("expected an open session");
@@ -470,7 +470,7 @@ describe("current editing session", () => {
     expect(switched.handle.draftId).toBe(secondDraftId);
   });
 
-  it("preserves the original handle when the target Draft cannot open", async () => {
+  it("[F06-S05] preserves the original handle when the target Draft cannot open", async () => {
     const { library, session } = setup();
     const first = await session.open(firstDraftId);
 
@@ -564,7 +564,7 @@ describe("current editing session", () => {
     expect(first.handle.editing.read()).toBe(before);
   });
 
-  it("preserves history for idempotent open and resets it after switching away", async () => {
+  it("[F06-S08] preserves history for idempotent open and resets it after switching away", async () => {
     const { session } = setup(10_000);
     const first = await session.open(firstDraftId);
     if (first.status !== "opened") return;
@@ -595,7 +595,7 @@ describe("current editing session", () => {
     });
   });
 
-  it("debounces successful Edit Commits and autosaves the latest document once", async () => {
+  it("[F06-S01] debounces successful Edit Commits and autosaves the latest document once", async () => {
     jest.useFakeTimers();
     const { library, session } = setup(25);
     const opened = await session.open(firstDraftId);
@@ -643,7 +643,7 @@ describe("current editing session", () => {
     jest.useRealTimers();
   });
 
-  it("returns a typed flush failure without discarding the latest document", async () => {
+  it("[F06-S09] returns a typed flush failure without discarding the latest document", async () => {
     const { library, session } = setup(10_000);
     const opened = await session.open(firstDraftId);
     if (opened.status !== "opened") return;
@@ -667,7 +667,7 @@ describe("current editing session", () => {
     expect(library.saveCalls[1]?.document.canvas.backgroundColor).toBe("#ABCDEF");
   });
 
-  it("blocks a switch when the current latest revision cannot flush", async () => {
+  it("[F08-S20] blocks a switch when the current latest revision cannot flush", async () => {
     const { library, session } = setup(10_000);
     const first = await session.open(firstDraftId);
     if (first.status !== "opened") return;
@@ -841,7 +841,7 @@ describe("current editing session", () => {
     expect(reopened.handle).toBe(opened.handle);
   });
 
-  it("publishes a successful add batch before one Edit Commit and undoes it in one step", async () => {
+  it("[F07-S01] publishes a successful add batch before one Edit Commit and undoes it in one step", async () => {
     const { library, session } = setup(10_000);
     const opened = await session.open(firstDraftId);
     if (opened.status !== "opened") return;
@@ -969,7 +969,7 @@ describe("current editing session", () => {
     ]);
   });
 
-  it("reports overflow before ingest and commits the successful capacity-limited batch", async () => {
+  it("[F07-S02] reports overflow before ingest and commits the successful capacity-limited batch", async () => {
     const { library, session } = setup(10_000);
     const existingImages = Array.from({ length: 8 }, (_, index) => ({
       id: importedAssetId(`asset:${index}`),

@@ -71,7 +71,7 @@ describe("shared Skia offscreen renderer with real CanvasKit", () => {
     fontProvider.dispose();
   });
 
-  it("renders square crop and original targets from one complete background/image/text scene", async () => {
+  it("[F08-S14] renders square crop and original targets from one complete background/image/text scene", async () => {
     const scene = {
       width: 100,
       height: 200,

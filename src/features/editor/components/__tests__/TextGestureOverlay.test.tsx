@@ -100,7 +100,7 @@ describe("TextGestureOverlay", () => {
     expect(view.getByTestId("canvas-text-hit-1-upper")).toHaveStyle({ zIndex: 1 });
   });
 
-  it("selects and moves the visually upper overlapping text without changing layer order", async () => {
+  it("[F01-S15] selects and moves the visually upper overlapping text without changing layer order", async () => {
     const onSelect = jest.fn();
     const onCommitPosition = jest.fn();
     const view = await render(

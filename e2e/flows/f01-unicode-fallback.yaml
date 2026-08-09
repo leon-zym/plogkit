@@ -1,5 +1,7 @@
 appId: com.leonzym.plogkit
 name: Chinese emoji and fallback glyphs remain selectable and draggable
+tags:
+  - F01-S07
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:

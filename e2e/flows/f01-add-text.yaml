@@ -1,5 +1,8 @@
 appId: com.leonzym.plogkit
 name: Add and style a text element
+tags:
+  - F01-S01
+  - F01-S12
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:

@@ -1,5 +1,14 @@
 appId: com.leonzym.plogkit
 name: Browse, switch, and delete local Drafts
+tags:
+  - F08-S01
+  - F08-S03
+  - F08-S04
+  - F08-S16
+  - F08-S18
+  - F08-S22
+  - F08-S23
+  - F08-S26
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
