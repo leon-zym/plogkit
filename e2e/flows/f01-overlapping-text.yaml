@@ -1,0 +1,64 @@
+appId: com.leonzym.plogkit
+name: Overlapping text selects the visually upper element
+---
+- runFlow: ../subflows/import-two-photos.yaml
+- tapOn:
+    id: editor-tool-text
+- assertVisible: Add text
+- tapOn:
+    id: text-input
+- setClipboard: "底层文字 🌊"
+- pasteText
+- runFlow: ../subflows/dismiss-keyboard.yaml
+- runFlow: ../subflows/scroll-and-apply-text-edits.yaml
+- scrollUntilVisible:
+    element:
+      id: select-new-text
+    direction: UP
+    centerElement: true
+- tapOn:
+    id: select-new-text
+- tapOn:
+    id: text-input
+- setClipboard: "上层文字 ✨"
+- pasteText
+- runFlow:
+    when:
+      platform: iOS
+      visible:
+        id: dismiss-text-keyboard
+    commands:
+      - tapOn:
+          id: dismiss-text-keyboard
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- runFlow: ../subflows/scroll-and-apply-text-edits.yaml
+- assertVisible:
+    id: canvas-text-hit-0-.*
+- assertVisible:
+    id: canvas-text-hit-1-.*
+- runFlow: ../subflows/reenter-session-unselected.yaml
+# Both texts start at the same document position. Tapping their shared visual
+# bounds must enter the later element's production gesture detector.
+- tapOn:
+    id: document-canvas
+    point: 14%, 8%
+- assertVisible:
+    id: canvas-text-hit-1-.*
+    selected: true
+- assertVisible:
+    id: canvas-text-selection-.*
+- swipe:
+    from:
+      id: canvas-text-hit-1-.*
+    direction: RIGHT
+    duration: 500
+- tapOn:
+    id: editor-undo
+- assertVisible:
+    id: canvas-text-hit-0-.*
+- assertVisible:
+    id: canvas-text-hit-1-.*

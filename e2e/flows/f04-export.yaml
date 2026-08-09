@@ -29,10 +29,11 @@ name: Export from the document with a one-time metadata override
     id: editor-tool-text
 - tapOn:
     id: text-input
-- inputText: Updated after export
+- setClipboard: "导出后更新 ✨"
+- pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: Updated after export
+- assertVisible: "导出后更新 ✨"
 - tapOn:
     id: editor-open-export
 - scrollUntilVisible:
