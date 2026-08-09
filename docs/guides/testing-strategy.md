@@ -4,7 +4,7 @@
 
 ## 设计原则
 
-- 验收场景先写入 `docs/specs/`，测试名称描述用户可观察的行为，并通过验证映射追踪到自动化证据。BDD 是方法，不引入 Cucumber 或 Gherkin 工具链。
+- 验收场景先写入 `docs/specs/`，提供证据的原生测试在名称或 Flow tags 中声明稳定 Scenario ID。BDD 是方法，不引入 Cucumber 或 Gherkin 工具链。
 - `src/core` 保持纯 TypeScript，不依赖 React 或 React Native，并采用先写失败测试、再实现和重构的 TDD 循环。
 - 可序列化文档是渲染、持久化和导出的数据源，使核心行为能在设备外验证。
 - 不设置覆盖率百分比门槛。测试应覆盖行为和边界条件，避免为数字指标编写无意义断言。
@@ -39,7 +39,7 @@ Golden 必须使用随包字体，不能依赖系统字体。无头渲染代码�
 
 Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development build，JS bundle 由 Metro 提供。CI 使用固定的 Maestro CLI 基线，本地工具要求见[开发环境](dev-environment.md)。runner 不自动改变开发机环境。
 
-- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对关键跨端路径进行 L4 抽样；具体覆盖的 Scenario 由验证映射声明，不以功能编号相同推定完整覆盖。
+- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对关键跨端路径进行 L4 抽样；具体覆盖的 Scenario 由 Flow 配置区的 tags 声明，不以功能编号相同推定完整覆盖。
 - `e2e/subflows/` 存放复用步骤。业务步骤跨平台共享，系统照片选择器等差异用 `platform` 条件进入 iOS 或 Android 子流程，禁止复制完整业务 flow。
 - `e2e/fixtures/` 存放确定性测试照片；runner 每次擦除专用设备后只注入一组 fixture。
 - flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。
@@ -57,7 +57,7 @@ iOS warm-up 分别证明 Metro readiness 与 App readiness。runner 在启动 Ma
 
 ## Scenario 可追踪性
 
-[`docs/specs/verification-map.json`](../specs/verification-map.json) 记录已实现 Scenario 的验证证据或自动化例外，维护格式与状态边界见 [Spec 规范](../specs/README.md)。映射是跨层多对多关系，不要求每个 Scenario 拥有独立 Maestro flow。
+已实现 Scenario 必须由 L2/L3 原生测试标题或 L4 Maestro Flow tags 声明至少一项自动化证据，具体格式见 [Spec 规范](../specs/README.md)。绑定是跨层多对多关系，不要求每个 Scenario 拥有独立 Maestro flow，也不维护独立映射清单。
 
 选择证据层级时：
 
@@ -66,7 +66,7 @@ iOS warm-up 分别证明 Metro readiness 与 App readiness。runner 在启动 Ma
 - 系统选择器、系统相册、应用生命周期和关键跨端主路径使用 L4 抽样，不把可在设备外稳定证明的全部边界塞入 E2E。
 - 单层能够完整覆盖关键 GIVEN / WHEN / THEN 时不重复堆叠层级；交互与最终产物位于不同 seam 时组合多项证据。
 
-静态校验只检查映射结构和引用，不解析测试实现或从名称推断语义。评审者必须确认每项证据实际覆盖 Scenario 的用户可观察 THEN，自动化例外仍有明确理由和开放后续 Issue。
+L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm verify:specs` 使用 TypeScript 语法树读取启用的 `it`、`test` 和 `it.each` 标题，并读取 Maestro tags；它拒绝缺失、悬空、重复、格式错误及禁用测试上的声明。静态校验不解析断言语义，评审者仍须确认每项证据覆盖 Scenario 的用户可观察 THEN。
 
 ## CI 门禁
 
@@ -86,13 +86,13 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 | `pnpm check`              | 类型检查和 lint                                      |
 | `pnpm test`               | App、核心逻辑和组件测试                              |
 | `pnpm test:orchestration` | 宿主 Node 编排器的纯 Node 逻辑测试                   |
-| `pnpm verify:specs`       | 静态校验 Scenario ID、验证映射与测试文件引用         |
+| `pnpm verify:specs`       | 静态校验 Scenario ID、测试标题与 Maestro Flow tags   |
 | `pnpm test:render`        | L3 golden 测试                                       |
 | `pnpm measure:render`     | 先验证 L3，再生成资格门禁的 Mac / CanvasKit 工程测量 |
 | `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4                    |
 | `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4                 |
 | `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4              |
-| `pnpm verify`             | 聚合静态、Scenario 映射、Node、App 和渲染验证        |
+| `pnpm verify`             | 聚合静态、Scenario 绑定、Node、App 和渲染验证        |
 
 可靠性 profile 使用以下独立命令；固定输入、artifact 与结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
 
