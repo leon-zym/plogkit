@@ -14,7 +14,7 @@ function writeFixtureFile(root, path, contents) {
   writeFileSync(fullPath, contents);
 }
 
-function createRepository({ map, specs } = {}) {
+function createRepository({ files, specs } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plogkit-spec-verification-"));
   const defaultSpecs = {
     "docs/specs/F01-example.md": `# F01 Example
@@ -36,35 +36,17 @@ function createRepository({ map, specs } = {}) {
 - THEN the future result is visible
 `,
   };
-  const defaultMap = {
-    version: 1,
-    scenarios: [
-      {
-        id: "F01-S01",
-        evidence: [
-          {
-            level: "L2",
-            file: "src/example/__tests__/behavior.test.ts",
-            test: "shows the visible result",
-          },
-        ],
-      },
-    ],
+  const defaultFiles = {
+    "src/example/__tests__/behavior.test.ts":
+      'test("[F01-S01] shows the visible result", () => {});\n',
   };
 
   for (const [path, contents] of Object.entries(specs ?? defaultSpecs)) {
     writeFixtureFile(root, path, contents);
   }
-  writeFixtureFile(
-    root,
-    "docs/specs/verification-map.json",
-    `${JSON.stringify(map ?? defaultMap, null, 2)}\n`,
-  );
-  writeFixtureFile(
-    root,
-    "src/example/__tests__/behavior.test.ts",
-    'test("shows the visible result", () => {});\n',
-  );
+  for (const [path, contents] of Object.entries(files ?? defaultFiles)) {
+    writeFixtureFile(root, path, contents);
+  }
 
   return root;
 }
@@ -84,11 +66,62 @@ function withRepository(options, assertion) {
   }
 }
 
-test("accepts evidence for every implemented Scenario and ignores planned delivery", () => {
+test("accepts native test evidence for every implemented Scenario and ignores planned delivery", () => {
   withRepository({}, (result) => {
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /verified 2 Scenarios and 1 mappings/);
+    assert.match(
+      result.stdout,
+      /verified 2 Scenarios; 1 implemented with 1 bindings \(L2 1, L3 0, L4 0\)/,
+    );
   });
+});
+
+test("accepts multiple Scenario IDs on an it.each declaration", () => {
+  withRepository(
+    {
+      specs: {
+        "docs/specs/F01-example.md": `# F01 Example
+- 状态：已实现
+#### Scenario F01-S01: First behavior
+- GIVEN one
+- WHEN one
+- THEN one
+#### Scenario F01-S02: Second behavior
+- GIVEN two
+- WHEN two
+- THEN two
+`,
+      },
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'it.each([1, 2])("[F01-S01][F01-S02] preserves behavior for %s", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /2 implemented with 2 bindings \(L2 2, L3 0, L4 0\)/);
+    },
+  );
+});
+
+test("accepts Scenario tags on a top-level Maestro flow", () => {
+  withRepository(
+    {
+      files: {
+        "e2e/flows/behavior.yaml": `appId: com.example
+name: Visible behavior
+tags:
+  - F01-S01
+---
+- launchApp
+`,
+      },
+    },
+    (result) => {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /1 implemented with 1 bindings \(L2 0, L3 0, L4 1\)/);
+    },
+  );
 });
 
 test("rejects duplicate Scenario IDs", () => {
@@ -118,82 +151,112 @@ test("rejects duplicate Scenario IDs", () => {
   );
 });
 
-test("rejects an implemented Scenario without a mapping", () => {
-  withRepository({ map: { version: 1, scenarios: [] } }, (result) => {
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /F01-S01 is implemented but has no mapping/);
-  });
-});
-
-test("rejects evidence that references a missing test file", () => {
+test("rejects an implemented Scenario without a test binding", () => {
   withRepository(
     {
-      map: {
-        version: 1,
-        scenarios: [
-          {
-            id: "F01-S01",
-            evidence: [
-              {
-                level: "L4",
-                file: "e2e/flows/missing.yaml",
-              },
-            ],
-          },
-        ],
+      files: {
+        "src/example/__tests__/behavior.test.ts": 'test("shows the visible result", () => {});\n',
       },
     },
     (result) => {
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /F01-S01 references missing file e2e\/flows\/missing\.yaml/);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
     },
   );
 });
 
-test("rejects a mapping for a deleted Scenario", () => {
+test("rejects a test binding for a deleted Scenario", () => {
   withRepository(
     {
-      map: {
-        version: 1,
-        scenarios: [
-          {
-            id: "F01-S01",
-            evidence: [
-              {
-                level: "L2",
-                file: "src/example/__tests__/behavior.test.ts",
-              },
-            ],
-          },
-          {
-            id: "F01-S99",
-            exception: {
-              reason: "No stable device seam exists yet.",
-              issue: "https://github.com/leon-zym/plogkit/issues/99",
-            },
-          },
-        ],
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test("[F01-S99] shows a deleted result", () => {});\n',
       },
     },
     (result) => {
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /mapping F01-S99 has no matching Spec Scenario/);
+      assert.match(result.stderr, /references unknown Scenario F01-S99/);
     },
   );
 });
 
-test("rejects an automation exception without a reason and PlogKit Issue", () => {
+test("rejects Scenario evidence declared on a disabled test", () => {
   withRepository(
     {
-      map: {
-        version: 1,
-        scenarios: [{ id: "F01-S01", exception: {} }],
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'it.skip("[F01-S01] shows the visible result", () => {});\n',
       },
     },
     (result) => {
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /F01-S01 exception requires a reason/);
-      assert.match(result.stderr, /F01-S01 exception requires a PlogKit Issue URL/);
+      assert.match(result.stderr, /declares Scenario evidence on a disabled test/);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
+    },
+  );
+});
+
+test("rejects malformed Scenario annotations in native test titles", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test("[F1-S01] shows the visible result", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario annotation/);
+    },
+  );
+});
+
+test("rejects Scenario annotations outside the test-title prefix", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'test("shows the [F01-S01] visible result", () => {});\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario annotation/);
+    },
+  );
+});
+
+test("rejects malformed Scenario tags in Maestro flows", () => {
+  withRepository(
+    {
+      files: {
+        "e2e/flows/behavior.yaml": `appId: com.example
+name: Visible behavior
+tags:
+  - F1-S01
+---
+- launchApp
+`,
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /has an invalid Scenario tag "F1-S01"/);
+    },
+  );
+});
+
+test("does not treat a describe title as Scenario evidence", () => {
+  withRepository(
+    {
+      files: {
+        "src/example/__tests__/behavior.test.ts":
+          'describe("[F01-S01] behavior", () => { it("shows the result", () => {}); });\n',
+      },
+    },
+    (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /F01-S01 is implemented but has no test binding/);
     },
   );
 });
@@ -210,7 +273,7 @@ test("rejects a Scenario heading without a stable ID", () => {
 - THEN one
 `,
       },
-      map: { version: 1, scenarios: [] },
+      files: {},
     },
     (result) => {
       assert.notEqual(result.status, 0);
