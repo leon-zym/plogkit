@@ -16,6 +16,10 @@ export function validateIosHost() {
 }
 
 export function validateIosEnvironment() {
+  log("ios", `Node: ${process.version}`);
+  const expoVersion = capture("pnpm", ["exec", "expo", "--version"], { allowFailure: true });
+  log("ios", `Expo CLI: ${expoVersion ?? "unknown"}`);
+
   // Record Xcode version and path.
   const xcodePath = capture("xcode-select", ["-p"], { allowFailure: true });
   const xcodeVersion = capture("xcodebuild", ["-version"], { allowFailure: true });
