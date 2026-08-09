@@ -6,6 +6,15 @@ import type { TextLayoutGeometry } from "@/render/textLayoutGeometry";
 
 import { TextGestureOverlay } from "../TextGestureOverlay";
 
+interface MockPanGesture {
+  readonly minDistance: jest.Mock;
+  readonly onBegin: jest.Mock;
+  readonly onUpdate: jest.Mock;
+  readonly onFinalize: jest.Mock;
+}
+
+const mockPanGestures: MockPanGesture[] = [];
+
 jest.mock("react-native-reanimated", () => {
   const ReactNative = jest.requireActual<typeof import("react-native")>("react-native");
 
@@ -31,7 +40,7 @@ jest.mock("react-native-gesture-handler", () => {
   const React = jest.requireActual<typeof import("react")>("react");
 
   function createMockPanGesture() {
-    const mockGesture = {
+    const mockGesture: MockPanGesture = {
       minDistance: jest.fn(),
       onBegin: jest.fn(),
       onUpdate: jest.fn(),
@@ -41,6 +50,7 @@ jest.mock("react-native-gesture-handler", () => {
     mockGesture.onBegin.mockReturnValue(mockGesture);
     mockGesture.onUpdate.mockReturnValue(mockGesture);
     mockGesture.onFinalize.mockReturnValue(mockGesture);
+    mockPanGestures.push(mockGesture);
     return mockGesture;
   }
 
@@ -58,6 +68,10 @@ const geometry = (id: string): TextLayoutGeometry => ({
 });
 
 describe("TextGestureOverlay", () => {
+  beforeEach(() => {
+    mockPanGestures.length = 0;
+  });
+
   it("renders touch bounds separately from the selection box and puts later text on top", async () => {
     const view = await render(
       <TextGestureOverlay
@@ -83,6 +97,36 @@ describe("TextGestureOverlay", () => {
       width: 10,
       height: 5,
     });
+    expect(view.getByTestId("canvas-text-hit-1-upper")).toHaveStyle({ zIndex: 1 });
+  });
+
+  it("selects and moves the visually upper overlapping text without changing layer order", async () => {
+    const onSelect = jest.fn();
+    const onCommitPosition = jest.fn();
+    const view = await render(
+      <TextGestureOverlay
+        accessibilityLabel={(index) => `Edit text ${index + 1}`}
+        canvasWidth={500}
+        geometry={[geometry("lower"), geometry("upper")]}
+        onCommitPosition={onCommitPosition}
+        onSelect={onSelect}
+        selectedTextId={null}
+      />,
+    );
+    const upperGesture = mockPanGestures[1];
+    if (upperGesture === undefined) throw new Error("expected upper text gesture");
+    const onBegin = upperGesture.onBegin.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    const onUpdate = upperGesture.onUpdate.mock.calls.at(-1)?.[0] as
+      ((event: { translationX: number; translationY: number }) => void) | undefined;
+    const onFinalize = upperGesture.onFinalize.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+
+    onBegin?.();
+    onUpdate?.({ translationX: 20, translationY: 10 });
+    onFinalize?.();
+
+    expect(onSelect).toHaveBeenCalledWith("upper");
+    expect(onCommitPosition).toHaveBeenCalledWith("upper", { x: 140, y: 220 });
+    expect(view.getByTestId("canvas-text-hit-0-lower")).toHaveStyle({ zIndex: 0 });
     expect(view.getByTestId("canvas-text-hit-1-upper")).toHaveStyle({ zIndex: 1 });
   });
 });
