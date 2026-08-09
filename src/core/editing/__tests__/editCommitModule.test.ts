@@ -383,6 +383,30 @@ describe("edit commit module", () => {
     expect(editing.read().document.textElements[0]?.position).toEqual({ x: 160, y: 240 });
   });
 
+  it("keeps overlapping text layer order when the upper text moves", () => {
+    const textIds = ["text-lower", "text-upper"];
+    const editing = createEditCommitModule({
+      initialDocument: createDocument(images),
+      createTextId: () => textIds.shift() ?? "unexpected-text",
+    });
+    editing.dispatch({ type: "commit", intent: editIntents.text.add(textDraft) });
+    editing.dispatch({
+      type: "commit",
+      intent: editIntents.text.add({ ...textDraft, content: "上层文字" }),
+    });
+
+    editing.dispatch({
+      type: "commit",
+      intent: editIntents.text.move("text-upper", { x: 160, y: 240 }),
+    });
+
+    expect(editing.read().document.textElements.map(({ id }) => id)).toEqual([
+      "text-lower",
+      "text-upper",
+    ]);
+    expect(editing.read().document.textElements[1]?.position).toEqual({ x: 160, y: 240 });
+  });
+
   it("removes text and reports the removed document entity", () => {
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),

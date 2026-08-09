@@ -2,7 +2,7 @@
 
 - 状态：部分修订
 - 接受日期：2026-07-02
-- 后继：[ADR 0019](0019-cross-platform-maestro-e2e.md)、[ADR 0020](0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0023](0023-export-preset-catalog-and-pipeline.md)、[ADR 0026](0026-test-runners-by-runtime.md)、[ADR 0040](0040-scenario-verification-traceability.md)
+- 后继：[ADR 0019](0019-cross-platform-maestro-e2e.md)、[ADR 0020](0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0023](0023-export-preset-catalog-and-pipeline.md)、[ADR 0026](0026-test-runners-by-runtime.md)、[ADR 0041](0041-scenario-verification-traceability.md)
 - 关联：[ADR 0003](0003-document-driven-architecture.md)、[ADR 0012](0012-e2e-tooling-maestro.md)、[ADR 0013](0013-doc-system.md)、[测试策略](../guides/testing-strategy.md)
 
 ## 背景

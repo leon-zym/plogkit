@@ -178,6 +178,29 @@ describe("current editing session", () => {
     expect(result.handle.assets.resolve(firstImageId, "original")?.draftId).toBe(firstDraftId);
   });
 
+  it("persists a Draft photo-information choice without applying it to another Draft", async () => {
+    const { session } = setup(10_000);
+    const first = await session.open(firstDraftId);
+    if (first.status !== "opened") throw new Error("expected the first Draft to open");
+
+    expect(first.handle.editing.read().document.exportSettings.metadataPolicy).toBe("strip");
+    first.handle.editing.dispatch({
+      type: "commit",
+      intent: editIntents.export.changeMetadataPolicy("retain-basic"),
+    });
+    await expect(session.flush()).resolves.toEqual({ status: "flushed" });
+
+    const second = await session.open(secondDraftId);
+    if (second.status !== "opened") throw new Error("expected the second Draft to open");
+    expect(second.handle.editing.read().document.exportSettings.metadataPolicy).toBe("strip");
+
+    const reopened = await session.open(firstDraftId);
+    if (reopened.status !== "opened") throw new Error("expected the first Draft to reopen");
+    expect(reopened.handle.editing.read().document.exportSettings.metadataPolicy).toBe(
+      "retain-basic",
+    );
+  });
+
   it("flushes and permanently invalidates the current handle before deleting its Draft", async () => {
     const { library, session } = setup(10_000);
     const opened = await session.open(firstDraftId);

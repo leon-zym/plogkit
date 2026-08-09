@@ -89,7 +89,7 @@ const FROZEN_CASE_MANIFEST = [
     operation: "export",
     presetId: "original",
     format: "jpeg",
-    expectedOutputs: [{ id: "export", width: 1200, height: 10400, format: "jpeg" }],
+    expectedOutputs: [{ id: "export", width: 2730, height: 16384, format: "jpeg" }],
   },
   {
     caseId: "export-9-original-png",
@@ -97,7 +97,7 @@ const FROZEN_CASE_MANIFEST = [
     operation: "export",
     presetId: "original",
     format: "png",
-    expectedOutputs: [{ id: "export", width: 1200, height: 10400, format: "png" }],
+    expectedOutputs: [{ id: "export", width: 2730, height: 16384, format: "png" }],
   },
   {
     caseId: "export-9-social-jpeg",

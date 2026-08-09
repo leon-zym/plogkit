@@ -4,6 +4,17 @@ name: Reopen a persisted Draft from the Library after relaunch
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
     id: background-color-c9d3c2
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: editor-screen
+    timeout: 30000
+- runFlow:
+    file: ../subflows/assert-radio-checked.yaml
+    env:
+      OPTION_ID: background-color-c9d3c2
 - tapOn:
     id: editor-back
 - extendedWaitUntil:
