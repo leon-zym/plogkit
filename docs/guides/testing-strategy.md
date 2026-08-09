@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md) 和 [ADR 0041](../adr/0041-scenario-verification-traceability.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md)、[ADR 0041](../adr/0041-scenario-verification-traceability.md) 和 [ADR 0042](../adr/0042-ios-e2e-phase-budgets.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -76,6 +76,8 @@ L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm
 | ready / 正式 PR 的新提交 | macOS + Ubuntu（并行）   | iOS Simulator Debug 与 Android arm64 Debug 原生集成编译   |
 | 每周一 02:30（北京时间） | macOS + Ubuntu（并行）   | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
 | 手动                     | macOS / Ubuntu（按选择） | 完整双端套件，或指定平台和 flow 的诊断运行                |
+
+iOS scheduled / manual E2E 将 development build 与 acceptance suite 放在两个顺序 job 中：build job 上限 40 分钟，其中构建步骤上限 30 分钟；构建产物以保留可执行权限的短期 archive 交接。acceptance job 上限 60 分钟，其中完整 suite 步骤上限 50 分钟，剩余预算用于失败 artifact 上传与收尾。两阶段分别上传 `ios-build-artifacts` 与 `ios-maestro-artifacts`；Android 仍使用单一 60 分钟 job。该结构只改变 CI 的阶段预算，本地 runner 的公开命令和 owned Metro / device 生命周期不变。
 
 Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端编译检查，此后正式 PR 的每次新提交重新运行全部三项检查。`main` ruleset 要求 PR 和这三项检查全部通过后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
