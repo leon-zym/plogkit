@@ -149,24 +149,40 @@ function createBoundedCapture(maxBytes) {
   };
 }
 
-async function captureDiagnostic(command, args, { env = process.env, maxBytes, timeoutMs }) {
+async function captureDiagnostic(
+  command,
+  args,
+  { captureStdout = false, cleanup, cwd, env = process.env, maxBytes, timeoutMs },
+) {
   const captureWindow = createBoundedCapture(maxBytes);
+  const stdoutWindow = captureStdout ? createBoundedCapture(maxBytes) : null;
   const killGraceMs = Math.min(100, Math.max(1, Math.floor(timeoutMs / 4)));
   let child;
   try {
     child = spawn(command, args, {
+      cwd,
       detached: process.platform !== "win32",
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
-    return { ...captureWindow.finish(), error, ok: false, timedOut: false };
+    return {
+      ...captureWindow.finish(),
+      error,
+      ok: false,
+      stdout: stdoutWindow?.finish().output,
+      timedOut: false,
+    };
   }
-  child.stdout.on("data", (value) => captureWindow.append(value));
+  child.stdout.on("data", (value) => {
+    captureWindow.append(value);
+    stdoutWindow?.append(value);
+  });
   child.stderr.on("data", (value) => captureWindow.append(value));
 
   return new Promise((resolvePromise) => {
     let exitCode = null;
+    let exitSignal = null;
     let finalizing = false;
     let spawnError = null;
     let stopPromise = null;
@@ -176,15 +192,16 @@ async function captureDiagnostic(command, args, { env = process.env, maxBytes, t
         gracefulTimeoutMs: killGraceMs,
         killTimeoutMs: killGraceMs,
       }));
+    cleanup?.add(stopTree);
     const finish = async (timedOut = false) => {
       if (finalizing) return;
       finalizing = true;
       clearTimeout(timeoutHandle);
-      let terminationFailed = false;
+      let terminationError = null;
       try {
         await stopTree();
-      } catch {
-        terminationFailed = true;
+      } catch (error) {
+        terminationError = error;
       }
       child.stdout?.destroy();
       child.stderr?.destroy();
@@ -192,7 +209,11 @@ async function captureDiagnostic(command, args, { env = process.env, maxBytes, t
       resolvePromise({
         ...captured,
         error: spawnError,
-        ok: !timedOut && !spawnError && !terminationFailed && !captured.truncated && exitCode === 0,
+        exitCode,
+        exitSignal,
+        ok: !timedOut && !spawnError && !terminationError && !captured.truncated && exitCode === 0,
+        stdout: stdoutWindow?.finish().output,
+        terminationError,
         timedOut,
       });
     };
@@ -200,17 +221,82 @@ async function captureDiagnostic(command, args, { env = process.env, maxBytes, t
       spawnError = error;
       void finish();
     });
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       exitCode = code;
+      exitSignal = signal;
       void stopTree().catch(() => {});
     });
-    child.once("close", (code) => {
+    child.once("close", (code, signal) => {
       exitCode ??= code;
+      exitSignal ??= signal;
       void finish();
     });
     const commandTimeoutMs = Math.max(1, timeoutMs - killGraceMs * 2);
     timeoutHandle = setTimeout(() => void finish(true), commandTimeoutMs);
   });
+}
+
+function boundedCommandError(command, args, result, { maxBytes, timeoutMs }) {
+  const details = result.output.toString("utf8").trim();
+  let error;
+  if (result.timedOut) {
+    error = Object.assign(
+      new Error(
+        `Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}${
+          details ? `\n${details}` : ""
+        }`,
+      ),
+      { code: "E2E_COMMAND_TIMEOUT" },
+    );
+  } else if (result.error) {
+    error = Object.assign(
+      new Error(
+        `Command could not be executed (${result.error.code ?? "unknown error"}): ` +
+          `${command} ${args.join(" ")}${details ? `\n${details}` : ""}`,
+        { cause: result.error },
+      ),
+      { code: result.error.code },
+    );
+  } else if (result.truncated) {
+    error = Object.assign(
+      new Error(
+        `Command output exceeded ${maxBytes} bytes: ${command} ${args.join(" ")}\n${details}`,
+      ),
+      { code: "E2E_COMMAND_OUTPUT_LIMIT" },
+    );
+  } else {
+    error = new Error(
+      `Command failed (${result.exitCode ?? result.exitSignal ?? "unknown"}): ` +
+        `${command} ${args.join(" ")}${details ? `\n${details}` : ""}`,
+    );
+  }
+
+  if (!result.terminationError) return error;
+  const aggregate = new AggregateError(
+    [error, result.terminationError],
+    `${error.message}\nUnable to terminate the bounded command process tree: ` +
+      result.terminationError.message,
+    { cause: error },
+  );
+  aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
+  return aggregate;
+}
+
+export async function captureBoundedCommand(
+  command,
+  args,
+  { cleanup, cwd, env = process.env, maxBytes, timeoutMs },
+) {
+  const result = await captureDiagnostic(command, args, {
+    captureStdout: true,
+    cleanup,
+    cwd,
+    env,
+    maxBytes,
+    timeoutMs,
+  });
+  if (!result.ok) throw boundedCommandError(command, args, result, { maxBytes, timeoutMs });
+  return result.stdout.toString("utf8").trim();
 }
 
 export function run(

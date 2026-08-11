@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +18,8 @@ import {
   installAndSeedIos,
   isIosEnglishLocale,
   prepareIosDevice,
-  validateIosEnvironment,
+  validateIosSimulatorEnvironment,
+  validateIosToolchain,
 } from "./ios.mjs";
 import { createCleanupManager } from "./runtime.mjs";
 
@@ -247,7 +256,7 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 0.15; fi
   });
 });
 
-test("iOS rejects a host outside the pinned Xcode toolchain", () => {
+test("iOS rejects a host outside the pinned Xcode toolchain", async () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-toolchain-"));
   writeExecutable(
     join(directory, "xcode-select"),
@@ -258,13 +267,252 @@ test("iOS rejects a host outside the pinned Xcode toolchain", () => {
     "#!/bin/sh\nprintf '%s\\n' 'Xcode 27.0' 'Build version 27A5218g'\n",
   );
   writeExecutable(join(directory, "pod"), "#!/bin/sh\nprintf '%s\\n' '1.17.0'\n");
-  assert.throws(() => {
+  await assert.rejects(async () => {
     const previousPath = process.env.PATH;
     process.env.PATH = `${directory}:${previousPath}`;
     try {
-      validateIosEnvironment();
+      validateIosToolchain();
     } finally {
       process.env.PATH = previousPath;
     }
   }, /Xcode 26\.6 \(17F113\) is required, but Xcode 27\.0 \(27A5218g\) is selected/);
+});
+
+function writeIosSimulatorHostBinary(binaries) {
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+case "$*" in
+  "simctl list runtimes -j")
+    printf '%s\n' 'core-simulator-cold-init-started' >&2
+    if [ "$FAKE_RUNTIME_PROCESS_TREE" = 1 ]; then
+      (
+        trap '' TERM
+        sleep 1.5
+        printf '%s\n' 'descendant survived' > "$FAKE_RUNTIME_LEAK_MARKER"
+      ) &
+      wait
+    fi
+    if [ "$FAKE_RUNTIME_INVALID_JSON" = 1 ]; then printf '%s\n' 'not-json'; exit 0; fi
+    if [ "$FAKE_RUNTIME_HANG" = 1 ]; then while :; do :; done; fi
+    sleep "$FAKE_RUNTIME_DELAY_SECONDS"
+    printf '%s\n' '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5","isAvailable":true,"name":"iOS 26.5","version":"26.5"}]}' ;;
+  "simctl list devicetypes -j")
+    if [ "$FAKE_DEVICE_TYPE_HANG" = 1 ]; then while :; do :; done; fi
+    printf '%s\n' '{"devicetypes":[{"identifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","name":"iPhone 17 Pro"}]}' ;;
+  *) printf '%s\n' "unexpected command: $*" >&2; exit 2 ;;
+esac
+`,
+  );
+}
+
+test("iOS gives the first CoreSimulator runtime probe its lifecycle deadline", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-cold-init-"));
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  writeIosSimulatorHostBinary(binaries);
+
+  await withEnvironment(
+    {
+      FAKE_RUNTIME_DELAY_SECONDS: "1",
+      FAKE_RUNTIME_HANG: undefined,
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      await assert.doesNotReject(() =>
+        Promise.resolve(
+          validateIosSimulatorEnvironment({
+            artifactRoot,
+            hostLifecycleTimeoutMs: 5000,
+            probeTimeoutMs: 500,
+          }),
+        ),
+      );
+    },
+  );
+});
+
+test(
+  "iOS host runtime discovery kills a TERM-resistant child retaining output pipes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-process-tree-"));
+    const binaries = join(directory, "bin");
+    const artifactRoot = join(directory, "artifacts");
+    const leakMarker = join(directory, "descendant-survived");
+    mkdirSync(binaries);
+    mkdirSync(artifactRoot);
+    writeIosSimulatorHostBinary(binaries);
+
+    await withEnvironment(
+      {
+        FAKE_RUNTIME_DELAY_SECONDS: "0",
+        FAKE_RUNTIME_HANG: undefined,
+        FAKE_RUNTIME_LEAK_MARKER: leakMarker,
+        FAKE_RUNTIME_PROCESS_TREE: "1",
+        PATH: `${binaries}:${process.env.PATH}`,
+      },
+      async () => {
+        await assert.rejects(
+          async () =>
+            validateIosSimulatorEnvironment({
+              artifactRoot,
+              hostLifecycleTimeoutMs: 600,
+              probeTimeoutMs: 500,
+            }),
+          (error) => error.code === "E2E_COMMAND_TIMEOUT",
+        );
+      },
+    );
+
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1700));
+    assert.equal(existsSync(leakMarker), false);
+  },
+);
+
+test("iOS preserves a host timeout when writing its evidence also fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-evidence-write-"));
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  mkdirSync(join(artifactRoot, "ios-host-lifecycle.log"));
+  writeIosSimulatorHostBinary(binaries);
+
+  await withEnvironment(
+    {
+      FAKE_RUNTIME_DELAY_SECONDS: "0",
+      FAKE_RUNTIME_HANG: "1",
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      await assert.rejects(
+        async () =>
+          validateIosSimulatorEnvironment({
+            artifactRoot,
+            hostLifecycleTimeoutMs: 600,
+            probeTimeoutMs: 500,
+          }),
+        (error) => {
+          assert.ok(error instanceof AggregateError);
+          assert.equal(error.cause, error.errors[0]);
+          assert.equal(error.cause.code, "E2E_COMMAND_TIMEOUT");
+          assert.match(error.cause.message, /xcrun simctl list runtimes -j/);
+          assert.equal(error.errors[1].code, "EISDIR");
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("iOS preserves a host parse error when writing its evidence also fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-parse-evidence-write-"));
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  mkdirSync(join(artifactRoot, "ios-host-lifecycle.log"));
+  writeIosSimulatorHostBinary(binaries);
+
+  await withEnvironment(
+    {
+      FAKE_RUNTIME_DELAY_SECONDS: "0",
+      FAKE_RUNTIME_HANG: undefined,
+      FAKE_RUNTIME_INVALID_JSON: "1",
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      await assert.rejects(
+        validateIosSimulatorEnvironment({
+          artifactRoot,
+          hostLifecycleTimeoutMs: 1000,
+          probeTimeoutMs: 500,
+        }),
+        (error) => {
+          assert.ok(error instanceof AggregateError);
+          assert.equal(error.cause, error.errors[0]);
+          assert.ok(error.cause instanceof SyntaxError);
+          assert.equal(error.cause.code, "E2E_COMMAND_OUTPUT_INVALID");
+          assert.match(error.cause.message, /xcrun simctl list runtimes -j/);
+          assert.match(error.cause.message, /not-json/);
+          assert.equal(error.errors[1].code, "EISDIR");
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("iOS bounds a hung host lifecycle probe with command and raw evidence", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-hang-"));
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  writeIosSimulatorHostBinary(binaries);
+
+  await withEnvironment(
+    {
+      FAKE_RUNTIME_DELAY_SECONDS: "0",
+      FAKE_RUNTIME_HANG: "1",
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      await assert.rejects(
+        async () =>
+          validateIosSimulatorEnvironment({
+            artifactRoot,
+            hostLifecycleTimeoutMs: 1500,
+            probeTimeoutMs: 500,
+          }),
+        (error) => {
+          assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+          assert.match(error.message, /xcrun simctl list runtimes -j/);
+          assert.match(error.message, /core-simulator-cold-init-started/);
+          return true;
+        },
+      );
+    },
+  );
+
+  const evidencePath = join(artifactRoot, "ios-host-lifecycle.log");
+  assert.equal(existsSync(evidencePath), true);
+  assert.ok(statSync(evidencePath).size <= 1024 * 1024);
+  const evidence = readFileSync(evidencePath, "utf8");
+  assert.match(evidence, /xcrun simctl list runtimes -j/);
+  assert.match(evidence, /core-simulator-cold-init-started/);
+});
+
+test("iOS keeps ordinary simctl host queries on the short probe deadline", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-ordinary-probe-"));
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries);
+  writeIosSimulatorHostBinary(binaries);
+
+  await withEnvironment(
+    {
+      FAKE_DEVICE_TYPE_HANG: "1",
+      FAKE_RUNTIME_DELAY_SECONDS: "0",
+      FAKE_RUNTIME_HANG: undefined,
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      const startedAt = Date.now();
+      await assert.rejects(
+        async () =>
+          validateIosSimulatorEnvironment({
+            hostLifecycleTimeoutMs: 5000,
+            probeTimeoutMs: 500,
+          }),
+        (error) => {
+          assert.equal(error.code, "ETIMEDOUT");
+          return true;
+        },
+      );
+      assert.ok(Date.now() - startedAt < 3000);
+    },
+  );
 });

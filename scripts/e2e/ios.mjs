@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
-import { capture, log, run, waitUntil } from "./runtime.mjs";
+import { capture, captureBoundedCommand, log, run, waitUntil } from "./runtime.mjs";
 import {
   createMaestroEnvironment,
   createStandaloneBuildEnvironment,
@@ -21,6 +21,8 @@ const deviceTypeIdentifier = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pr
 const appPath = "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app";
 const buildTimeoutMs = 45 * 60 * 1000;
 const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
+const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
+const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
 
@@ -46,8 +48,7 @@ export function validateIosHost() {
   }
 }
 
-export function validateIosEnvironment() {
-  // Record Xcode version and path.
+export function validateIosToolchain() {
   const xcodePath = capture("xcode-select", ["-p"], {
     allowFailure: true,
     timeoutMs: 15000,
@@ -78,9 +79,20 @@ export function validateIosEnvironment() {
       `CocoaPods ${requiredCocoaPodsVersion} is required, but ${cocoaPodsVersion ?? "unknown"} is installed.`,
     );
   }
+  log("ios", "iOS toolchain validation passed.");
+}
 
-  // Verify required runtime is available.
-  const runtime = requiredRuntime();
+export async function validateIosSimulatorEnvironment({
+  artifactRoot,
+  cleanup,
+  hostLifecycleTimeoutMs = hostLifecycleProbeTimeoutMs,
+  probeTimeoutMs = 15000,
+} = {}) {
+  const runtime = await requiredRuntime({
+    artifactRoot,
+    cleanup,
+    timeoutMs: hostLifecycleTimeoutMs,
+  });
   if (!runtime) {
     throw new Error(
       `iOS Simulator runtime ${runtimeIdentifier} is not available. ` +
@@ -89,8 +101,7 @@ export function validateIosEnvironment() {
   }
   log("ios", `Simulator runtime: ${runtime.name} (${runtime.version})`);
 
-  // Verify required device type exists.
-  const deviceType = requiredDeviceType();
+  const deviceType = requiredDeviceType(probeTimeoutMs);
   if (!deviceType) {
     throw new Error(
       `Device type "${deviceTypeName}" is not available. ` +
@@ -98,21 +109,64 @@ export function validateIosEnvironment() {
     );
   }
 
-  log("ios", "iOS environment validation passed.");
+  log("ios", "iOS Simulator environment validation passed.");
 }
 
-function requiredRuntime() {
-  const runtimes = JSON.parse(
-    capture("xcrun", ["simctl", "list", "runtimes", "-j"], { timeoutMs: 15000 }),
-  );
-  return runtimes.runtimes.find(
-    (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
-  );
+function throwIosHostLifecycleFailure(artifactRoot, command, error) {
+  if (!artifactRoot) throw error;
+  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const evidencePath = join(artifactRoot, "ios-host-lifecycle.log");
+  try {
+    writeFileSync(
+      evidencePath,
+      boundedEvidence(
+        `=== iOS host lifecycle probe failure ===\ncommand: ${command}\n${details}\n`,
+        iosHostLifecycleEvidenceMaxBytes,
+      ),
+    );
+  } catch (evidenceError) {
+    const aggregate = new AggregateError(
+      [error, evidenceError],
+      `${error instanceof Error ? error.message : String(error)}\n` +
+        `Unable to preserve bounded iOS host lifecycle evidence at ${evidencePath}.`,
+      { cause: error },
+    );
+    if (error?.code) aggregate.code = error.code;
+    throw aggregate;
+  }
+  throw error;
 }
 
-function requiredDeviceType() {
+async function requiredRuntime({ artifactRoot, cleanup, timeoutMs }) {
+  const command = "xcrun simctl list runtimes -j";
+  try {
+    const output = await captureBoundedCommand("xcrun", ["simctl", "list", "runtimes", "-j"], {
+      cleanup,
+      maxBytes: iosHostLifecycleEvidenceMaxBytes,
+      timeoutMs,
+    });
+    let runtimes;
+    try {
+      runtimes = JSON.parse(output);
+    } catch (error) {
+      const parseError = new SyntaxError(
+        `Unable to parse output from ${command}: ${error.message}\n${output}`,
+        { cause: error },
+      );
+      parseError.code = "E2E_COMMAND_OUTPUT_INVALID";
+      throw parseError;
+    }
+    return runtimes.runtimes.find(
+      (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
+    );
+  } catch (error) {
+    throwIosHostLifecycleFailure(artifactRoot, command, error);
+  }
+}
+
+function requiredDeviceType(timeoutMs) {
   const result = JSON.parse(
-    capture("xcrun", ["simctl", "list", "devicetypes", "-j"], { timeoutMs: 15000 }),
+    capture("xcrun", ["simctl", "list", "devicetypes", "-j"], { timeoutMs }),
   );
   return result.devicetypes.find((device) => device.identifier === deviceTypeIdentifier);
 }

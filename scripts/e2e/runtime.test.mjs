@@ -18,6 +18,7 @@ import test from "node:test";
 
 import {
   capture,
+  captureBoundedCommand,
   acquireE2ePlatformLock,
   collectFailureDiagnostics,
   createCleanupManager,
@@ -55,6 +56,41 @@ test("capture bounds an unresponsive diagnostic command", () => {
   assert.equal(result, null);
   assert.ok(Date.now() - startedAt < 500);
 });
+
+test(
+  "bounded command capture kills a TERM-resistant process tree retaining output pipes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-bounded-command-tree-"));
+    const command = join(directory, "retain-pipe");
+    const leakMarker = join(directory, "descendant-survived");
+    writeExecutable(
+      command,
+      `#!/bin/sh
+printf '%s\n' 'bounded-command-started' >&2
+(
+  trap '' TERM
+  sleep 4
+  printf '%s\n' 'descendant survived' > ${JSON.stringify(leakMarker)}
+) &
+wait
+`,
+    );
+
+    const startedAt = Date.now();
+    await assert.rejects(
+      captureBoundedCommand(command, [], { maxBytes: 1024, timeoutMs: 2000 }),
+      (error) => {
+        assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+        assert.match(error.message, /bounded-command-started/);
+        return true;
+      },
+    );
+    assert.ok(Date.now() - startedAt < 2800);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 4200));
+    assert.equal(existsSync(leakMarker), false);
+  },
+);
 
 test("waitUntil propagates a channel failure without retrying it", async () => {
   const channelError = new Error("ADB_CHANNEL_FAILED");

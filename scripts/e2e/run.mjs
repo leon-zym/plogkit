@@ -20,8 +20,9 @@ import {
   iosBuildArtifact,
   iosBuildSidecars,
   prepareIosDevice,
-  validateIosEnvironment,
   validateIosHost,
+  validateIosSimulatorEnvironment,
+  validateIosToolchain,
 } from "./ios.mjs";
 import { createStandaloneBuildEnvironment, validateHostEnvironment } from "./environment.mjs";
 import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
@@ -80,7 +81,7 @@ function parseArguments(argv) {
   };
 }
 
-function validate({ flow, platforms }) {
+function validateBeforePlatformLock({ flow, platforms }) {
   for (const fixture of sourceFixtures) {
     if (!existsSync(fixture)) throw new Error(`Missing E2E fixture: ${fixture}`);
   }
@@ -90,10 +91,16 @@ function validate({ flow, platforms }) {
   const hostEnvironment = validateHostEnvironment();
   if (platforms.includes("ios")) {
     validateIosHost();
-    validateIosEnvironment();
+    validateIosToolchain();
   }
   if (platforms.includes("android")) validateAndroidEnvironment();
   return hostEnvironment;
+}
+
+async function validateLockedPlatformEnvironment(platforms, { artifactRoot, cleanup }) {
+  if (platforms.includes("ios")) {
+    await validateIosSimulatorEnvironment({ artifactRoot, cleanup });
+  }
 }
 
 function buildPaths(platform) {
@@ -248,10 +255,11 @@ installSignalHandlers(cleanup);
 let operationError = null;
 try {
   validateMaestroVersion();
-  const hostEnvironment = validate(options);
+  const hostEnvironment = validateBeforePlatformLock(options);
   for (const platform of [...options.platforms].sort()) {
     acquireE2ePlatformLock(platform, cleanup);
   }
+  await validateLockedPlatformEnvironment(options.platforms, { artifactRoot, cleanup });
   log("setup", `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`);
   await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
 } catch (error) {
