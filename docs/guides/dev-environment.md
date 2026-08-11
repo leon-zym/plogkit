@@ -34,7 +34,7 @@ pnpm install
 
 ### iOS
 
-- Apple Silicon macOS 和完整安装的 Xcode。L4 E2E 精确使用 Xcode 26.6（build 17F113），并只构建宿主实际执行的 arm64 Simulator slice；日常开发可使用与 Expo SDK 57 兼容的 Xcode。
+- macOS 和完整安装的 Xcode；日常开发可使用与 Expo SDK 57 兼容的版本。本地 L4 E2E 当前要求 Apple Silicon，精确使用 Xcode 26.6（build 17F113），并只构建宿主实际执行的 arm64 Simulator slice。
 - 普通开发至少需要一个兼容的 iOS Simulator runtime；L4 E2E 精确使用 iOS 26.5 runtime 与 iPhone 17 Pro device type。
 - CocoaPods 1.17.0。
 
@@ -54,6 +54,7 @@ xcodebuild -version
 - Android SDK Command-line Tools 22.0、Platform Tools 37.0.1（build 15733141）。
 - Android Emulator 37.1.11.0（build 15917651）。
 - Android SDK Platform 36，以及 revision 2 的 `default` system image。Apple Silicon 本地使用 `arm64-v8a`，GitHub Ubuntu runner 使用 `x86_64`；这是唯一按宿主能力声明的平台差异。
+- L4 设备 profile 为 Pixel 7 Pro、`swiftshader`、2 个 guest core 与 4096 MB 内存。
 
 在 macOS 上配置 Android SDK 环境变量：
 
@@ -77,9 +78,7 @@ Gradle 会根据生成的原生工程下载缺失的 Build Tools、NDK 和 CMake
 
 ### L4 工具链选择原则
 
-这组基线不是照抄某台开发机或某次 CI 的当时状态。选择顺序是：项目框架明确兼容、上游稳定渠道仍支持、本地与 CI 可以安装或 fail closed，最后再由本仓库的 clean Release 证据确认。具体版本的选择证据与候选比较保留在 [Issue #97](https://github.com/leon-zym/plogkit/issues/97#issuecomment-5246445301)；本页只维护当前可执行基线与升级规则。
-
-当前设备基线为 Pixel 7 Pro、`swiftshader`、2 个 guest core 与 4096 MB 内存。设备 profile 或资源参数的调整必须作为独立变更，用相同 App 与工具链比较 readiness、ANR 和完整 L4，不能只依据理论像素负载替换基线。workflow 通过 stable package path 安装 Android Platform Tools 与 Emulator，再精确校验实际 build；这是“漂移即失败”，不是可回放任意历史二进制的不变安装。升级任一 L4 工具时，必须作为独立变更同步版本文件、workflow 和本页，并重新运行受影响平台的完整 L4。
+基线必须同时满足 Expo/React Native 兼容、上游稳定支持、本地与 CI 可获得，并通过 clean Release 验证。工具、设备 profile 或资源参数的升级应作为独立变更，同步版本文件、workflow 与本页，并重新运行受影响平台的完整 L4。
 
 ## 生成和构建原生 App
 
@@ -98,7 +97,7 @@ pnpm android
 
 如果生成目录不存在，这两个命令会先生成原生工程，再解析依赖、编译并安装 App，最后启动 Metro。修改 Expo 配置或原生依赖后仍应显式运行 `pnpm prebuild`，避免旧的生成文件残留。
 
-PlogKit 的日常开发使用包含项目实际原生依赖的标准 `expo-dev-client` development build，不使用 Expo Go。L4 E2E 使用另一条 clean Release standalone 构建路径，不启动 dev client UI 或 Metro；因此产品配置中不再保留为旧 E2E 设置的默认 Metro URL 或 dev-menu 状态。
+PlogKit 的日常开发使用包含项目实际原生依赖的标准 `expo-dev-client` development build，不使用 Expo Go。L4 E2E 使用独立的 clean Release standalone 构建路径，不启动 dev client UI 或 Metro。
 
 ## 日常开发
 
@@ -145,9 +144,9 @@ Android 模拟器通过 `10.0.2.2` 访问主机上的 Metro，iOS 模拟器直�
 pnpm verify
 ```
 
-该命令执行类型检查、lint、宿主 Node 编排器测试、Jest 功能行为测试，以及 headless Skia golden 测试。Node 编排器测试只覆盖 CLI、环境、子进程、文件系统和 artifact 等宿主边界，不形成新的验证层级。
+该命令执行类型检查、lint、Scenario 绑定校验、宿主 Node 编排器测试、Jest 功能行为测试，以及 headless Skia golden 测试。Node 编排器测试只覆盖 CLI、环境、子进程、文件系统和 artifact 等宿主边界，不形成新的验证层级。
 
-本地 E2E 的公开命令由统一 runner 完成 clean prebuild、Release standalone 构建、专用设备创建与 readiness、fixture 注入和 Maestro 执行。测试阶段不启动或依赖 Metro。macOS 上运行双端完整套件：
+本地 E2E 测试阶段不启动或依赖 Metro。macOS 上运行双端完整套件：
 
 ```bash
 pnpm e2e
@@ -160,17 +159,15 @@ pnpm e2e:ios
 pnpm e2e:android
 ```
 
-上述三个命令都会在单次 runner 调用中完成 clean prebuild、Release 构建、产物快照、临时设备、安装与验收，不复用 development build 或可变的旧产物。`pnpm e2e` 在一台 Mac 上按 iOS、Android 顺序验收并在平台之间删除设备，避免两套模拟器争抢宿主资源；GitHub 使用两台独立 runner 并行运行相同的平台入口。两端原生构建在本地和 CI 都固定使用 2 个 worker。
+上述三个命令都会在单次 runner 调用中完成 clean prebuild、Release 构建、产物快照、临时设备、安装与验收，不复用 development build 或可变的旧产物。`pnpm e2e` 在一台 Mac 上按 iOS、Android 顺序执行；GitHub 使用两台独立 runner 并行运行相同的平台入口。
 
 定位已知失败时可只运行一条 flow；它仍走完整 Release 构建与设备生命周期：
 
 ```bash
-node scripts/e2e/run.mjs ios --flow f06-session-persistence
+pnpm e2e:ios --flow f06-session-persistence
 ```
 
-runner 每次按上述精确基线创建唯一 iOS Simulator 或临时 Android AVD。两端设备都验证 `en-US`；Android AVD 还固定 Pixel 7 Pro、`swiftshader`、2 个 guest core、4096 MB guest memory 且禁用 snapshot。缺少或不匹配所需工具、runtime、device type、system image 或 locale 时，测试会在业务 flow 前失败。构建与 Maestro 都使用 runner 生成的受控子进程环境：不继承用户的 `JAVA_HOME` 或构建 override，构建不加载本地 `.env*`，Maestro 的 update check、analytics 和 analysis notification 在本地与 CI 一致关闭。Android Gradle 使用仓库专属的 `.e2e-cache/gradle` 缓存目录，拒绝其中的 `gradle.properties` 或 init script，并显式使用已经校验的 Temurin `java.home`；因此默认 `~/.gradle` 不能改变受测 Release 产物。
-
-每次测试创建唯一临时设备并注入 fixture，不寻找、复用或修改日常开发设备。失败 artifact 的目录会打印到终端；readiness、flow 隔离、预算和诊断要求见[测试策略](testing-strategy.md)。
+runner 不寻找、复用或修改日常开发设备；工具或设备环境不符合基线时会在业务 flow 前失败。失败 artifact 的目录会打印到终端，readiness、flow 隔离和诊断要求见[测试策略](testing-strategy.md)。
 
 日常模拟器或真机开发仍使用 `pnpm start` 与 Metro；这条开发路径的网络要求不属于 standalone E2E 契约。
 
