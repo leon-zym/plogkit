@@ -4,6 +4,7 @@ tags:
   - F04-S02
   - F04-S08
   - F04-S13
+  - F04-S16
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -21,9 +22,12 @@ tags:
     id: export-document
 - runFlow:
     when:
-      visible: Allow
+      platform: iOS
     commands:
-      - tapOn: Allow
+      - extendedWaitUntil:
+          visible: ^Allow$
+          timeout: 10000
+      - tapOn: ^Allow$
 - extendedWaitUntil:
     visible:
       id: export-success
