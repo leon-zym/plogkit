@@ -1,0 +1,16 @@
+flows:
+  - flows/*.yaml
+executionOrder:
+  continueOnFailure: false
+  flowsOrder:
+    - f01-add-text
+    - f01-chinese-auto-wrap
+    - f01-explicit-line-breaks
+    - f01-overlapping-text
+    - f01-right-aligned-small-text
+    - f01-unicode-fallback
+    - f06-session-persistence
+    - f08-draft-library
+    - f09-app-settings
+    # Export mutates the shared system photo library, so it runs last.
+    - f04-export
