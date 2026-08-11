@@ -97,6 +97,10 @@ jobs:
           (cd "$MAESTRO_ARCHIVE" && shasum -a 256 -c checksums_sha256.txt)
           unzip -q "$MAESTRO_ARCHIVE/maestro.zip" -d "$MAESTRO_ARCHIVE"
           echo "$MAESTRO_ARCHIVE/maestro/bin" >> "$GITHUB_PATH"
+      - name: Install Android Emulator host libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libpulse0
       - name: Install Android E2E emulator and system image
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \

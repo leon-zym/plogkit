@@ -13,6 +13,10 @@ test("CI delegates the complete Android simulator lifecycle to the project runne
   assert.match(workflow, /runs-on: ubuntu-24\.04/);
   assert.match(
     workflow,
+    /sudo apt-get update[\s\S]*sudo apt-get install --yes --no-install-recommends libpulse0[\s\S]*sdkmanager/,
+  );
+  assert.match(
+    workflow,
     /sdkmanager"[\s\\]*"cmdline-tools;22\.0"[\s\\]*"emulator"[\s\\]*"platform-tools"/,
   );
   assert.match(workflow, /system-images;android-36;default;x86_64/);
