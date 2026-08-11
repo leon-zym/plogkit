@@ -44,7 +44,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalon
 - `e2e/fixtures/` 存放确定性测试照片；runner 每次创建唯一临时设备后只注入一组 fixture。
 - flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。
 - 同一场景在 Android 与 iOS 使用相同的 Unicode 测试数据，包括中文与 emoji；不得以 ASCII fallback 降低平台验收范围。
-- `clearState` 只重置应用数据，不保证恢复系统权限。需要验证首次授权的场景由 runner 显式重置相应权限，并在 flow 中验证系统授权界面和授权后的业务结果。
+- Maestro 的 `launchApp` 默认允许全部权限，因此每个 flow 必须显式使用 `permissions.all: unset` 建立真实的首次授权边界；需要验证首次授权的场景还要断言系统授权界面和授权后的业务结果，不能依赖默认权限状态。
 - 本地与 CI 共用同一编排入口。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
 当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
@@ -53,7 +53,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalon
 
 项目 runner 必须拥有唯一临时模拟设备从创建到删除的完整生命周期；CI Action 不得先启动设备或绕过项目 readiness。设备准备只等待平台的最小 boot 边界；安装 App 和注入 fixture 后只执行一次语义 readiness，证明真实 Home launcher 可响应、处于前台、UI hierarchy 可读且无 System UI/ANR 故障。该门禁之前不发送业务输入，不允许重复发送 Home 或重启设备把首次失败变成成功；Android 关闭动画也只能在 readiness 之后执行。boot flag、服务注册、广播空闲或固定等待都不能单独视为 ready。
 
-每条业务 flow 以 `launchApp.clearState` 建立 App 数据边界，涉及系统权限或系统照片的场景另由 runner 或 flow 显式建立边界。完整平台套件使用一个 Maestro workspace 进程按 `e2e/config.yaml` 中的顺序执行，任一失败都立即终止，不让后续 flow 在未知设备状态中继续。完整套件的失控边界为 60 分钟，定向单 flow 为 10 分钟；两者都有界终止整个进程组。失败时在共享 deadline 和字节上限内保留原始平台证据，但证据分类不参与“是否继续”的控制决策。timeout 只终止失控阶段，不承担失败恢复。
+每条业务 flow 以 `launchApp.clearState` 建立 App 数据边界，并在同一命令中把系统权限恢复为未决定状态；涉及系统照片的场景再通过系统 UI 建立可观察边界。完整平台套件使用一个 Maestro workspace 进程按 `e2e/config.yaml` 中的顺序执行，任一失败都立即终止，不让后续 flow 在未知设备状态中继续。完整套件的失控边界为 60 分钟，定向单 flow 为 10 分钟；两者都有界终止整个进程组。失败时在共享 deadline 和字节上限内保留原始平台证据，但证据分类不参与“是否继续”的控制决策。timeout 只终止失控阶段，不承担失败恢复。
 
 ## Scenario 可追踪性
 

@@ -34,7 +34,7 @@ pnpm install
 
 ### iOS
 
-- macOS 和完整安装的 Xcode。L4 E2E 精确使用 Xcode 26.6（build 17F113）；日常开发可使用与 Expo SDK 57 兼容的 Xcode。
+- Apple Silicon macOS 和完整安装的 Xcode。L4 E2E 精确使用 Xcode 26.6（build 17F113），并只构建宿主实际执行的 arm64 Simulator slice；日常开发可使用与 Expo SDK 57 兼容的 Xcode。
 - 普通开发至少需要一个兼容的 iOS Simulator runtime；L4 E2E 精确使用 iOS 26.5 runtime 与 iPhone 17 Pro device type。
 - CocoaPods 1.17.0。
 
