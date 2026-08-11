@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md) 和 [ADR 0040](../adr/0040-scenario-verification-traceability.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md)、[ADR 0041](../adr/0041-scenario-verification-traceability.md) 和 [ADR 0042](../adr/0042-controlled-standalone-simulator-e2e.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -37,21 +37,23 @@ Golden 必须使用随包字体，不能依赖系统字体。无头渲染代码�
 
 ### L4 端到端测试
 
-Maestro 在 iOS Simulator 和 Android Emulator 上驱动 PlogKit development build，JS bundle 由 Metro 提供。CI 使用固定的 Maestro CLI 基线，本地工具要求见[开发环境](dev-environment.md)。runner 不自动改变开发机环境。
+Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalone 产物。production Hermes bundle 在构建阶段嵌入 App，测试阶段不启动 Metro、不经过 development launcher，也不依赖宿主网络。CI 与本地使用相同的精确工具链和受控子进程环境；Maestro 不继承用户 JDK，并一致禁用 update check 与遥测。要求见[开发环境](dev-environment.md)。runner 只校验环境，不自动改变开发机工具。
 
-- `e2e/flows/f01-*.yaml` 至 `f09-*.yaml` 对关键跨端路径进行 L4 抽样；具体覆盖的 Scenario 由 Flow 配置区的 tags 声明，不以功能编号相同推定完整覆盖。
+- `e2e/flows/*.yaml` 对关键跨端路径进行 L4 抽样；具体覆盖的 Scenario 由 Flow 配置区的 tags 声明，不以功能编号相同推定完整覆盖。
 - `e2e/subflows/` 存放复用步骤。业务步骤跨平台共享，系统照片选择器等差异用 `platform` 条件进入 iOS 或 Android 子流程，禁止复制完整业务 flow。
-- `e2e/fixtures/` 存放确定性测试照片；runner 每次擦除专用设备后只注入一组 fixture。
+- `e2e/fixtures/` 存放确定性测试照片；runner 每次创建唯一临时设备后只注入一组 fixture。
 - flow 通过 `testID`、`accessibilityLabel` 和可见文案定位界面并断言行为。
 - 同一场景在 Android 与 iOS 使用相同的 Unicode 测试数据，包括中文与 emoji；不得以 ASCII fallback 降低平台验收范围。
-- `clearState` 会重置应用数据。dev menu 的自动界面由项目 config plugin 禁用，避免干扰业务元素定位。
+- `clearState` 只重置应用数据，不保证恢复系统权限。需要验证首次授权的场景由 runner 显式重置相应权限，并在 flow 中验证系统授权界面和授权后的业务结果。
 - 本地与 CI 共用同一编排入口。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
 当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
 ### 设备 readiness 与 flow 隔离
 
-设备进入业务 flow 前必须证明 launcher 与 UI hierarchy 可响应且不存在系统 ANR；boot flag、服务注册或固定等待不能单独视为 ready。每个业务 flow 隔离运行，单个设备或 driver 故障不得污染后续 flow。失败时须保留足以区分产品、Metro、driver 与设备层的 artifacts，具体探针、分类和采集命令由 runner 及其测试定义。
+项目 runner 必须拥有唯一临时模拟设备从创建到删除的完整生命周期；CI Action 不得先启动设备或绕过项目 readiness。设备准备只等待平台的最小 boot 边界；安装 App 和注入 fixture 后只执行一次语义 readiness，证明真实 Home launcher 可响应、处于前台、UI hierarchy 可读且无 System UI/ANR 故障。该门禁之前不发送业务输入，不允许重复发送 Home 或重启设备把首次失败变成成功；Android 关闭动画也只能在 readiness 之后执行。boot flag、服务注册、广播空闲或固定等待都不能单独视为 ready。
+
+每条业务 flow 以 `launchApp.clearState` 建立 App 数据边界，涉及系统权限或系统照片的场景另由 runner 或 flow 显式建立边界。完整平台套件使用一个 Maestro workspace 进程按 `e2e/config.yaml` 中的顺序执行，任一失败都立即终止，不让后续 flow 在未知设备状态中继续。完整套件的失控边界为 60 分钟，定向单 flow 为 10 分钟；两者都有界终止整个进程组。失败时在共享 deadline 和字节上限内保留原始平台证据，但证据分类不参与“是否继续”的控制决策。timeout 只终止失控阶段，不承担失败恢复。
 
 ## Scenario 可追踪性
 
@@ -68,12 +70,12 @@ L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm
 
 ## CI 门禁
 
-| 触发                     | Runner                   | 内容                                                      |
-| ------------------------ | ------------------------ | --------------------------------------------------------- |
-| push 到 `main` / 任意 PR | Ubuntu                   | `pnpm verify`，覆盖 L1、L2 和 L3                          |
-| ready / 正式 PR 的新提交 | macOS + Ubuntu（并行）   | iOS Simulator Debug 与 Android arm64 Debug 原生集成编译   |
-| 每周一 02:30（北京时间） | macOS + Ubuntu（并行）   | iOS Simulator 与 Android Emulator 的完整 Maestro 验收套件 |
-| 手动                     | macOS / Ubuntu（按选择） | 完整双端套件，或指定平台和 flow 的诊断运行                |
+| 触发                     | Runner                   | 内容                                                    |
+| ------------------------ | ------------------------ | ------------------------------------------------------- |
+| push 到 `main` / 任意 PR | Ubuntu                   | `pnpm verify`，覆盖 L1、L2 和 L3                        |
+| ready / 正式 PR 的新提交 | macOS + Ubuntu（并行）   | iOS Simulator Debug 与 Android arm64 Debug 原生集成编译 |
+| 每周一 02:30（北京时间） | macOS + Ubuntu（并行）   | 双端 Release standalone 的完整 Maestro 验收套件         |
+| 手动                     | macOS / Ubuntu（按选择） | 完整双端或指定平台 / flow                               |
 
 Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端编译检查，此后正式 PR 的每次新提交重新运行全部三项检查。`main` ruleset 要求 PR 和这三项检查全部通过后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 
@@ -87,9 +89,9 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 | `pnpm verify:specs`       | 静态校验 Scenario ID、测试标题与 Maestro Flow tags   |
 | `pnpm test:render`        | L3 golden 测试                                       |
 | `pnpm measure:render`     | 先验证 L3，再生成资格门禁的 Mac / CanvasKit 工程测量 |
-| `pnpm e2e`                | 重置专用双端设备并运行两端完整 L4                    |
-| `pnpm e2e:ios`            | 重置专用 iOS Simulator 并运行完整 L4                 |
-| `pnpm e2e:android`        | 重置专用 Android Emulator 并运行完整 L4              |
+| `pnpm e2e`                | 创建临时双端设备并运行两端完整 L4                    |
+| `pnpm e2e:ios`            | 创建临时 iOS Simulator 并运行完整 L4                 |
+| `pnpm e2e:android`        | 创建临时 Android Emulator 并运行完整 L4              |
 | `pnpm verify`             | 聚合静态、Scenario 绑定、Node、App 和渲染验证        |
 
 可靠性 profile 使用以下独立命令；固定输入、artifact 与结论边界见[草稿可靠性 Soak 执行协议](reliability-soak.md)。
@@ -102,7 +104,7 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 
 Draft Library、Current Editing Session、recoverable persistence 或相关 adapter 变更必须运行 quick。高风险持久化/并发改动合并前及 release candidate 验收时运行 evidence，并将 ignored artifact 附到对应 Issue 或 CI run。
 
-E2E 失败但原因不明时，先在相同条件下重跑受影响的平台和 flow，确认能否复现；不得用 retry、sleep 或盲目延长 timeout 掩盖偶发失败。修复后先做同范围验证，再按变更风险决定是否扩大到单平台或双端完整套件。具体诊断命令见[开发环境](dev-environment.md)。
+E2E 失败但原因不明时，先检查该次运行保存的日志、hierarchy、截图、系统诊断和符号产物，在最小受影响 seam 上提出可证伪假设；不要以重跑完整套件代替诊断。每次 Maestro 失败都在一个全局 deadline 内采集有界的原始平台日志和 crash/ANR report，但诊断不改写原始失败，也不决定是否继续；任一 Maestro 或设备通道失败都终止平台套件。不得用 retry、sleep、关闭系统错误界面或盲目延长 timeout 掩盖偶发失败。修复后先运行定向红绿验证与受影响平台验证，完成独立审查后再集中运行一次所需的单平台或双端完整套件。原生并发或生命周期问题仍必须经过 clean 原生编译与有界定向采样，但一次性诊断 harness 和样本证据属于 Issue/PR，不固化为常驻 E2E 公开接口。
 
 ## 验证时机
 
