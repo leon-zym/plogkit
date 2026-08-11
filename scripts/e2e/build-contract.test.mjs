@@ -124,6 +124,8 @@ mkdir -p "${directory}/android/app/build/outputs/apk/release"
 printf '%s' apk > "${directory}/android/app/build/outputs/apk/release/app-release.apk"
 mkdir -p "${directory}/android/app/build/generated/sourcemaps/react/release"
 printf '%s' source-map > "${directory}/android/app/build/generated/sourcemaps/react/release/index.android.bundle.map"
+mkdir -p "${directory}/android/app/build/outputs/native-debug-symbols/release"
+printf '%s' native-symbols > "${directory}/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
 `,
   );
   writeExecutable(
@@ -166,6 +168,10 @@ printf '%s' source-map > "${directory}/android/app/build/generated/sourcemaps/re
       directory,
       "android/app/build/generated/sourcemaps/react/release/index.android.bundle.map",
     ),
+    join(
+      directory,
+      "android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip",
+    ),
   ]);
 });
 
@@ -187,6 +193,45 @@ test("Android Release builds reject configuration in the runner-owned Gradle hom
     }),
     /Runner-owned Gradle home contains build configuration.*gradle\.properties/,
   );
+});
+
+test("Android Release builds reject an empty native debug symbols archive", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-empty-native-symbols-"));
+  const androidDirectory = join(directory, "android");
+  const binaries = join(directory, "bin");
+  mkdirSync(androidDirectory);
+  mkdirSync(binaries);
+  writeExecutable(
+    join(androidDirectory, "gradlew"),
+    `#!/bin/sh
+mkdir -p "${directory}/android/app/build/outputs/apk/release"
+printf '%s' apk > "${directory}/android/app/build/outputs/apk/release/app-release.apk"
+mkdir -p "${directory}/android/app/build/generated/sourcemaps/react/release"
+printf '%s' source-map > "${directory}/android/app/build/generated/sourcemaps/react/release/index.android.bundle.map"
+mkdir -p "${directory}/android/app/build/outputs/native-debug-symbols/release"
+: > "${directory}/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+`,
+  );
+  writeExecutable(
+    join(binaries, "unzip"),
+    "#!/bin/sh\nprintf '\\306\\037\\274\\003\\301\\003\\031\\037bundle'\n",
+  );
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await assert.rejects(
+      buildAndroid({
+        cleanup: { add() {} },
+        javaHome: "/controlled/temurin-17",
+        root: directory,
+        workers: "2",
+      }),
+      /Android Release native debug symbols are missing or empty/,
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });
 
 test("standalone launch does not pass a development server URL", () => {

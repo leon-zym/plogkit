@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,6 +54,26 @@ function createTestCleanup() {
   };
 }
 
+function expectedBoundedEmulatorEvidence() {
+  const maxBytes = 4 * 1024 * 1024;
+  const paddingLine =
+    "emulator-padding-012345678901234567890123456789012345678901234567890123456789\n";
+  const source = Buffer.from(
+    `emulator-evidence-head\n${paddingLine.repeat(70000)}emulator-evidence-tail\n`,
+  );
+  const marker = Buffer.from(
+    `\n--- diagnostic bytes omitted from ${source.length}-byte output ---\n`,
+  );
+  const contentBytes = maxBytes - marker.length;
+  const headBytes = Math.floor(contentBytes / 2);
+  const tailBytes = contentBytes - headBytes;
+  return Buffer.concat([
+    source.subarray(0, headBytes),
+    marker,
+    source.subarray(source.length - tailBytes),
+  ]);
+}
+
 test("Android reads the SDK package revision without mistaking the adb protocol version", () => {
   assert.equal(
     parseAdbPlatformToolsVersion(
@@ -89,6 +110,8 @@ test("each Android device invocation owns one ephemeral AVD and child emulator",
     join(commandLineTools, "avdmanager"),
     `#!/bin/sh
 printf '%s|%s|%s\n' "$ANDROID_AVD_HOME" "$*" "${"${EMULATOR_LOCAL_OVERRIDE-unset}"}" >> ${JSON.stringify(avdLog)}
+IFS= read -r answer
+[ "$answer" = 'no' ] || { printf '%s\n' 'expected avdmanager hardware-profile answer' >&2; exit 1; }
 previous=''
 for argument in "$@"; do
   if [ "$previous" = '--name' ]; then printf '%s' "$argument" > ${JSON.stringify(avdNameFile)}; fi
@@ -98,11 +121,32 @@ done
   );
   writeExecutable(
     join(emulatorDirectory, "emulator"),
-    `#!/bin/sh
-trap 'exit 0' TERM INT
-printf '%s|%s|%s\n' "$ANDROID_AVD_HOME" "$*" "${"${EMULATOR_LOCAL_OVERRIDE-unset}"}" >> ${JSON.stringify(emulatorLog)}
-touch ${JSON.stringify(emulatorStarted)}
-while :; do sleep 0.05; done
+    `#!${process.execPath}
+const fs = require("node:fs");
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));
+fs.appendFileSync(
+  ${JSON.stringify(emulatorLog)},
+  process.env.ANDROID_AVD_HOME + "|" + process.argv.slice(2).join(" ") + "|" +
+    (process.env.EMULATOR_LOCAL_OVERRIDE ?? "unset") + "\\n",
+);
+const padding =
+  "emulator-padding-012345678901234567890123456789012345678901234567890123456789\\n";
+process.stdout.write("emulator-evidence-head\\n");
+let batch = 0;
+function writeEvidenceBatch() {
+  if (batch === 70) {
+    process.stdout.write("emulator-evidence-tail\\n", () =>
+      fs.writeFileSync(${JSON.stringify(emulatorStarted)}, ""),
+    );
+    return;
+  }
+  process.stdout.write(padding.repeat(1000));
+  batch += 1;
+  setImmediate(writeEvidenceBatch);
+}
+writeEvidenceBatch();
+setInterval(() => {}, 1000);
 `,
   );
   writeExecutable(
@@ -149,6 +193,8 @@ esac
         let avdHome;
         let avdName;
         let avdExisted;
+        let emulatorEvidence;
+        let emulatorEvidenceBytes;
         let prepareCommands;
         try {
           device = await prepareAndroidDevice({ artifactRoot, cleanup });
@@ -159,13 +205,16 @@ esac
         } finally {
           await cleanup.run();
         }
+        const emulatorEvidencePath = join(artifactRoot, "android-emulator.log");
+        emulatorEvidence = readFileSync(emulatorEvidencePath);
+        emulatorEvidenceBytes = statSync(emulatorEvidencePath).size;
         assert.equal(device.deviceId, "emulator-5556");
         assert.equal(device.adbPath, join(platformTools, "adb"));
         assert.equal(avdExisted, true);
         assert.notEqual(avdHome, ambientAvdHome);
         assert.doesNotMatch(prepareCommands, /am start -W|uiautomator|settings put global/);
         assert.equal(existsSync(avdHome), false);
-        invocations.push({ avdHome, avdName });
+        invocations.push({ avdHome, avdName, emulatorEvidence, emulatorEvidenceBytes });
       }
 
       rmSync(emulatorStarted, { force: true });
@@ -187,11 +236,20 @@ esac
       } finally {
         await cleanup.run();
       }
+      const prepareEvidencePath = join(timeoutArtifactRoot, "android-prepare.log");
+      assert.ok(statSync(prepareEvidencePath).size <= 1024 * 1024);
+      assert.match(readFileSync(prepareEvidencePath, "utf8"), /finish booting/);
     },
   );
 
   assert.notEqual(invocations[0].avdHome, invocations[1].avdHome);
   assert.notEqual(invocations[0].avdName, invocations[1].avdName);
+  const exactEvidence = expectedBoundedEmulatorEvidence();
+  for (const invocation of invocations) {
+    assert.ok(invocation.emulatorEvidenceBytes <= 4 * 1024 * 1024);
+    assert.equal(invocation.emulatorEvidenceBytes, exactEvidence.length);
+    assert.deepEqual(invocation.emulatorEvidence, exactEvidence);
+  }
   assert.doesNotMatch(readFileSync(adbLog, "utf8"), /emu kill/);
   const emulatorContract = readFileSync(emulatorLog, "utf8");
   assert.match(emulatorContract, /-no-snapshot/);
@@ -383,6 +441,10 @@ case "$*" in
       printf '%s\n' 'mCurrentFocus=Application Not Responding: System UI'
     else
       printf '%s\n' 'mCurrentFocus=com.android.launcher3/.QuickstepLauncher'
+      if [ "$FAKE_MODE" = oversized ]; then
+        awk 'BEGIN { for (i = 0; i < 70000; i++) print "readiness-padding-012345678901234567890123456789012345678901234567890123456789" }'
+        printf '%s\n' 'readiness-tail'
+      fi
     fi
     ;;
   *"logcat -b events -d"*)
@@ -522,5 +584,26 @@ test("Android semantic readiness records its failing launcher probe", async () =
     );
     assert.match(readinessProbe, /Application Not Responding: System UI/);
     assert.match(readinessProbe, /android:id\/aerr_wait/);
+  });
+});
+
+test("Android semantic readiness preserves bounded raw evidence", async () => {
+  await withReadinessFixture("oversized", async (fixture) => {
+    await assertAndroidDeviceReady({
+      artifactRoot: fixture.artifactRoot,
+      device: {
+        platform: "android",
+        adbPath: join(fixture.binaries, "adb"),
+        deviceId: "emulator-test",
+      },
+      stage: "post-install",
+    });
+
+    const readinessPath = join(fixture.artifactRoot, "android-readiness-emulator-test.log");
+    assert.ok(statSync(readinessPath).size <= 3 * 1024 * 1024);
+    const evidence = readFileSync(readinessPath, "utf8");
+    assert.match(evidence, /mCurrentFocus=com\.android\.launcher3/);
+    assert.match(evidence, /diagnostic bytes omitted/);
+    assert.match(evidence, /readiness-tail/);
   });
 });

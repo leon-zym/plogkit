@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -10,6 +9,8 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { arch, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -21,6 +22,8 @@ const avdNamePrefix = "PlogKit_E2E_";
 const appPath = "android/app/build/outputs/apk/release/app-release.apk";
 const sourceMapPath =
   "android/app/build/generated/sourcemaps/react/release/index.android.bundle.map";
+const nativeDebugSymbolsPath =
+  "android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip";
 const requiredEmulatorVersion = "37.1.11.0";
 const requiredEmulatorBuild = "15917651";
 const requiredPlatformToolsVersion = "37.0.1-15733141";
@@ -31,6 +34,13 @@ const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
 const readinessProbeTimeoutMs = 15000;
 const lifecycleProbeTimeoutMs = 15000;
 const systemUiReadinessTimeoutMs = 120000;
+const androidLifecycleEvidenceBudgetBytes = 8 * 1024 * 1024;
+const androidEmulatorEvidenceMaxBytes = androidLifecycleEvidenceBudgetBytes / 2;
+const androidPrepareEvidenceMaxBytes = 1024 * 1024;
+const androidReadinessEvidenceMaxBytes =
+  androidLifecycleEvidenceBudgetBytes -
+  androidEmulatorEvidenceMaxBytes -
+  androidPrepareEvidenceMaxBytes;
 const readinessHierarchyPath = "/sdcard/plogkit-e2e-window.xml";
 const ANDROID_SYSTEM_UI_FAILURE =
   /System\s+UI\s+(?:(?:isn['’]t|is\s+not)\s+responding|has\s+stopped)|Application\s+Not\s+Responding:\s*System\s+UI|\bam_anr\b[^\n]{0,240}\bcom\.android\.systemui\b|(?:ANR|not\s+responding).{0,100}com\.android\.systemui|com\.android\.systemui.{0,100}(?:ANR|not\s+responding)/i;
@@ -43,6 +53,90 @@ function hasAndroidSystemUiFailureEvidence(message) {
 
 function hasAndroidAnrDialogEvidence(message) {
   return ANDROID_ANR_DIALOG.test(message);
+}
+
+function boundedEvidenceFromHeadAndTail(head, tail, sourceBytes, maxBytes) {
+  if (sourceBytes <= maxBytes) return head.subarray(0, sourceBytes);
+  const marker = Buffer.from(
+    `\n--- diagnostic bytes omitted from ${sourceBytes}-byte output ---\n`,
+  );
+  const contentBytes = maxBytes - marker.length;
+  const headBytes = Math.floor(contentBytes / 2);
+  const tailBytes = contentBytes - headBytes;
+  return Buffer.concat([
+    head.subarray(0, headBytes),
+    marker,
+    tail.subarray(tail.length - tailBytes),
+  ]);
+}
+
+function boundedEvidence(value, maxBytes) {
+  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  return boundedEvidenceFromHeadAndTail(source, source, source.length, maxBytes);
+}
+
+function writeFully(fd, value) {
+  let offset = 0;
+  while (offset < value.length) {
+    const written = writeSync(fd, value, offset, value.length - offset);
+    if (written === 0) throw new Error("Unable to make progress writing Android evidence.");
+    offset += written;
+  }
+}
+
+function createBoundedEvidenceFile(path, maxBytes) {
+  const fd = openSync(path, "w");
+  let finalized = false;
+  const head = Buffer.allocUnsafe(maxBytes);
+  let headBytes = 0;
+  let sourceBytes = 0;
+  const tail = Buffer.allocUnsafe(maxBytes);
+  let tailBytes = 0;
+  let tailOffset = 0;
+  return {
+    append(value) {
+      if (finalized) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      sourceBytes += chunk.length;
+      if (headBytes < maxBytes) {
+        const initialBytes = Math.min(chunk.length, maxBytes - headBytes);
+        chunk.copy(head, headBytes, 0, initialBytes);
+        writeFully(fd, chunk.subarray(0, initialBytes));
+        headBytes += initialBytes;
+      }
+      if (chunk.length >= maxBytes) {
+        chunk.copy(tail, 0, chunk.length - maxBytes);
+        tailBytes = maxBytes;
+        tailOffset = 0;
+      } else {
+        const firstBytes = Math.min(chunk.length, maxBytes - tailOffset);
+        chunk.copy(tail, tailOffset, 0, firstBytes);
+        chunk.copy(tail, 0, firstBytes);
+        tailBytes = Math.min(maxBytes, tailBytes + chunk.length);
+        tailOffset = (tailOffset + chunk.length) % maxBytes;
+      }
+    },
+    finish() {
+      if (finalized) return;
+      finalized = true;
+      closeSync(fd);
+      if (sourceBytes > maxBytes) {
+        const orderedTail = Buffer.concat([
+          tail.subarray(tailOffset, tailBytes),
+          tail.subarray(0, tailOffset),
+        ]);
+        writeFileSync(
+          path,
+          boundedEvidenceFromHeadAndTail(
+            head.subarray(0, headBytes),
+            orderedTail,
+            sourceBytes,
+            maxBytes,
+          ),
+        );
+      }
+    },
+  };
 }
 
 function captureReadinessProbe(device, args, { deadlineMs } = {}) {
@@ -283,9 +377,18 @@ function assertAndroidStandaloneArtifact(root) {
   if (bundle.error || bundle.status !== 0 || !isHermesBytecode(bundle.stdout)) {
     throw new Error(`Android Release APK does not contain a Hermes assets/index.android.bundle.`);
   }
-  const [sourceMap] = androidBuildSidecars(root);
+  const [sourceMap, nativeDebugSymbols] = androidBuildSidecars(root);
   if (!existsSync(sourceMap) || !statSync(sourceMap).isFile() || statSync(sourceMap).size === 0) {
     throw new Error(`Android Release source map is missing or empty: ${sourceMap}`);
+  }
+  if (
+    !existsSync(nativeDebugSymbols) ||
+    !statSync(nativeDebugSymbols).isFile() ||
+    statSync(nativeDebugSymbols).size === 0
+  ) {
+    throw new Error(
+      `Android Release native debug symbols are missing or empty: ${nativeDebugSymbols}`,
+    );
   }
 }
 
@@ -472,16 +575,19 @@ async function waitForSystemUi(
   }
 
   const diag = join(artifactRoot, `android-readiness-${serial}.log`);
-  appendFileSync(
+  writeFileSync(
     diag,
-    `=== ${stage} ===\n--- locale ---\n${locale ?? "(failed)"}\n\n` +
-      `--- resolved HOME ---\n${resolvedHome ?? "(failed)"}\n\n` +
-      `--- launcher probe ---\n${home ?? "(failed)"}\n\n` +
-      `--- dumpsys activity activities ---\n${activityState ?? "(failed)"}\n\n` +
-      `--- dumpsys window ---\n${windowState ?? "(failed)"}\n\n` +
-      `--- event log ---\n${eventLog ?? "(failed)"}\n\n` +
-      `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
-      `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`,
+    boundedEvidence(
+      `=== ${stage} ===\n--- locale ---\n${locale ?? "(failed)"}\n\n` +
+        `--- resolved HOME ---\n${resolvedHome ?? "(failed)"}\n\n` +
+        `--- launcher probe ---\n${home ?? "(failed)"}\n\n` +
+        `--- dumpsys activity activities ---\n${activityState ?? "(failed)"}\n\n` +
+        `--- dumpsys window ---\n${windowState ?? "(failed)"}\n\n` +
+        `--- event log ---\n${eventLog ?? "(failed)"}\n\n` +
+        `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
+        `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`,
+      androidReadinessEvidenceMaxBytes,
+    ),
   );
 
   if (eventLog === null) {
@@ -527,7 +633,7 @@ export async function assertAndroidDeviceReady({
   await waitForSystemUi(device, artifactRoot, stage, readinessTimeoutMs);
 }
 
-export async function prepareAndroidDevice({
+async function prepareOwnedAndroidDevice({
   artifactRoot,
   bootTimeoutMs = deviceLifecycleTimeoutMs,
   cleanup,
@@ -547,18 +653,35 @@ export async function prepareAndroidDevice({
   const previouslyConnected = new Set(connectedEmulators(adbPath, { allowFailure: true }));
 
   const emulatorLog = join(artifactRoot, "android-emulator.log");
-  const logFd = openSync(emulatorLog, "w");
+  const emulatorEvidence = createBoundedEvidenceFile(emulatorLog, androidEmulatorEvidenceMaxBytes);
   const emulatorProcess = spawn(emulator, androidEmulatorArguments(avdName), {
     detached: process.platform !== "win32",
     env: avdEnvironment,
-    stdio: ["ignore", logFd, logFd],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   let emulatorSpawnError = null;
+  let emulatorEvidenceError = null;
+  const appendEmulatorEvidence = (value) => {
+    try {
+      emulatorEvidence.append(value);
+    } catch (error) {
+      emulatorEvidenceError ??= error;
+    }
+  };
+  const finishEmulatorEvidence = () => {
+    try {
+      emulatorEvidence.finish();
+    } catch (error) {
+      emulatorEvidenceError ??= error;
+    }
+  };
+  emulatorProcess.stdout.on("data", appendEmulatorEvidence);
+  emulatorProcess.stderr.on("data", appendEmulatorEvidence);
   emulatorProcess.once("error", (error) => {
     emulatorSpawnError = error;
     console.error(`[e2e:android] Emulator failed: ${String(error)}`);
   });
-  closeSync(logFd);
+  emulatorProcess.once("close", finishEmulatorEvidence);
 
   let serial = null;
   cleanup.add(async () => {
@@ -567,10 +690,21 @@ export async function prepareAndroidDevice({
       gracefulTimeoutMs: 20000,
       killTimeoutMs: 5000,
     });
+    finishEmulatorEvidence();
+    if (emulatorEvidenceError) {
+      throw new Error(`Unable to preserve bounded Android Emulator evidence at ${emulatorLog}.`, {
+        cause: emulatorEvidenceError,
+      });
+    }
   });
 
   serial = await waitUntil(
     () => {
+      if (emulatorEvidenceError) {
+        throw new Error(`Unable to preserve bounded Android Emulator evidence at ${emulatorLog}.`, {
+          cause: emulatorEvidenceError,
+        });
+      }
       if (emulatorSpawnError || hasProcessExited(emulatorProcess)) {
         const reason = emulatorSpawnError
           ? String(emulatorSpawnError)
@@ -586,6 +720,33 @@ export async function prepareAndroidDevice({
   const device = { platform: "android", adbPath, deviceId: serial };
   await waitForBoot(device, bootTimeoutMs);
   return device;
+}
+
+export async function prepareAndroidDevice(options) {
+  const prepareEvidencePath = join(options.artifactRoot, "android-prepare.log");
+  try {
+    return await prepareOwnedAndroidDevice(options);
+  } catch (error) {
+    try {
+      writeFileSync(
+        prepareEvidencePath,
+        boundedEvidence(
+          error instanceof Error ? (error.stack ?? error.message) : String(error),
+          androidPrepareEvidenceMaxBytes,
+        ),
+      );
+    } catch (evidenceError) {
+      const aggregate = new AggregateError(
+        [error, evidenceError],
+        `${error instanceof Error ? error.message : String(error)}\n` +
+          `Unable to preserve bounded Android prepare evidence at ${prepareEvidencePath}.`,
+        { cause: error },
+      );
+      if (error?.code) aggregate.code = error.code;
+      throw aggregate;
+    }
+    throw error;
+  }
 }
 
 export async function installAndSeedAndroid({
@@ -671,5 +832,5 @@ export function androidBuildArtifact(root) {
 }
 
 export function androidBuildSidecars(root) {
-  return [resolve(root, sourceMapPath)];
+  return [resolve(root, sourceMapPath), resolve(root, nativeDebugSymbolsPath)];
 }

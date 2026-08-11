@@ -21,25 +21,28 @@ function fixtureRepository() {
 
   const artifact = join(root, "build", "app.apk");
   const sidecar = join(root, "build", "index.android.bundle.map");
+  const nativeSymbols = join(root, "build", "native-debug-symbols.zip");
   mkdirSync(join(root, "build"));
   writeFileSync(artifact, "release artifact v1");
   writeFileSync(sidecar, "release source map v1");
-  return { artifact, root, sidecar };
+  writeFileSync(nativeSymbols, "release native symbols v1");
+  return { artifact, nativeSymbols, root, sidecar };
 }
 
 test("a run snapshot atomically owns the exact build and Maestro inputs under artifactRoot", () => {
-  const { artifact, root, sidecar } = fixtureRepository();
+  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository();
   const artifactRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifacts-"));
   const repositorySha256 = captureBuildInputs(root);
 
   const snapshot = createRunSnapshot({
     artifactRoot,
-    builds: [{ artifact, platform: "android", sidecars: [sidecar] }],
+    builds: [{ artifact, platform: "android", sidecars: [sidecar, nativeSymbols] }],
     repositorySha256,
     root,
   });
   writeFileSync(artifact, "concurrent build replacement");
   writeFileSync(sidecar, "concurrent source map replacement");
+  writeFileSync(nativeSymbols, "concurrent native symbols replacement");
   writeFileSync(join(root, "e2e", "fixtures", "portrait.jpg"), "portrait-v2");
 
   const provenance = JSON.parse(readFileSync(snapshot.provenance, "utf8"));
@@ -50,6 +53,13 @@ test("a run snapshot atomically owns the exact build and Maestro inputs under ar
       "utf8",
     ),
     "release source map v1",
+  );
+  assert.equal(
+    readFileSync(
+      join(dirname(snapshot.provenance), provenance.builds.android.sidecars[1].path),
+      "utf8",
+    ),
+    "release native symbols v1",
   );
   assert.equal(
     readFileSync(join(snapshot.e2eRoot, "fixtures", "portrait.jpg"), "utf8"),
@@ -63,13 +73,15 @@ test("a run snapshot atomically owns the exact build and Maestro inputs under ar
   assert.match(provenance.builds.android.artifact.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     provenance.builds.android.sidecars.map(({ path }) => path),
-    [`android/build/${basename(sidecar)}`],
+    [`android/build/${basename(sidecar)}`, `android/build/${basename(nativeSymbols)}`],
   );
+  assert.match(provenance.builds.android.sidecars[0].sha256, /^[a-f0-9]{64}$/);
+  assert.match(provenance.builds.android.sidecars[1].sha256, /^[a-f0-9]{64}$/);
   assert.match(provenance.e2eSha256, /^[a-f0-9]{64}$/);
 });
 
 test("a run snapshot rejects repository drift since the build started", () => {
-  const { artifact, root, sidecar } = fixtureRepository();
+  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository();
   const artifactRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifacts-"));
   const repositorySha256 = captureBuildInputs(root);
   writeFileSync(join(root, "app.ts"), "export const version = 2;\n");
@@ -78,7 +90,7 @@ test("a run snapshot rejects repository drift since the build started", () => {
     () =>
       createRunSnapshot({
         artifactRoot,
-        builds: [{ artifact, platform: "android", sidecars: [sidecar] }],
+        builds: [{ artifact, platform: "android", sidecars: [sidecar, nativeSymbols] }],
         repositorySha256,
         root,
       }),
