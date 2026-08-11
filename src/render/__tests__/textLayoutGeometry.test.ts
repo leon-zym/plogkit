@@ -24,10 +24,16 @@ describe("text layout geometry projection", () => {
     });
   });
 
-  it("maps logical placement and actual visual bounds using the current screen scale", () => {
-    const [projected] = projectTextLayoutGeometry([geometry("headline", 12, 24, 160, 48)], 1.25);
+  it("[F01-S06][F01-S13] keeps complete multiline visual bounds inside the touch target", () => {
+    const [projected] = projectTextLayoutGeometry(
+      [geometry("explicit-hard-break", 12, 24, 160, 72)],
+      1.25,
+    );
 
-    expect(projected?.visualBounds).toEqual({ x: 20, y: 37.5, width: 200, height: 60 });
-    expect(projected?.touchBounds).toEqual(projected?.visualBounds);
+    expect(projected).toBeDefined();
+    if (projected === undefined) return;
+
+    expect(projected.visualBounds).toEqual({ x: 20, y: 37.5, width: 200, height: 90 });
+    expect(projected.touchBounds).toEqual(projected.visualBounds);
   });
 });

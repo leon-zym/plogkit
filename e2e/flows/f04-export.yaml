@@ -14,10 +14,10 @@ tags:
     id: export-preset-social
 - tapOn:
     id: export-retain-basic
-- scrollUntilVisible:
-    element:
-      id: export-document
-    direction: DOWN
+- runFlow:
+    file: ../subflows/scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: export-document
 - tapOn:
     id: export-document
 - runFlow:
@@ -44,10 +44,10 @@ tags:
 - assertVisible: "导出后更新 ✨"
 - tapOn:
     id: editor-open-export
-- scrollUntilVisible:
-    element:
-      id: export-document
-    direction: DOWN
+- runFlow:
+    file: ../subflows/scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: export-document
 - tapOn:
     id: export-document
 - extendedWaitUntil:

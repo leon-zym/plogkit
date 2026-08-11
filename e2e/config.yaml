@@ -3,14 +3,14 @@ flows:
 executionOrder:
   continueOnFailure: false
   flowsOrder:
-    - f01-add-text
-    - f01-chinese-auto-wrap
-    - f01-explicit-line-breaks
-    - f01-overlapping-text
-    - f01-right-aligned-small-text
-    - f01-unicode-fallback
-    - f06-session-persistence
-    - f08-draft-library
-    - f09-app-settings
+    - Import photos and add a text element
+    - Long Chinese text wraps and remains draggable
+    - Explicit Chinese line breaks remain selectable and draggable
+    - Overlapping text selects the visually upper element
+    - Right-aligned small text uses an extended touch target
+    - Chinese emoji and fallback glyphs remain selectable and draggable
+    - Reopen a persisted Draft from the Library after relaunch
+    - Browse, switch, and delete local Drafts
+    - App settings remain durable and independent
     # Export mutates the shared system photo library, so it runs last.
-    - f04-export
+    - Export from the document with a one-time metadata override

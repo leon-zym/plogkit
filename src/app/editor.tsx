@@ -524,6 +524,7 @@ function ConnectedEditor({ assets, editing }: PreparedEditor) {
           keyboardShouldPersistTaps="always"
           ref={panelScrollRef}
           style={styles.panelScroll}
+          testID="editor-tool-panel"
         >
           {renderPanel()}
         </ScrollView>

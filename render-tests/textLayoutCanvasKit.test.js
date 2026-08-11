@@ -10,6 +10,8 @@ import {
 import { createTextLayoutSnapshot } from "../src/render/textLayout";
 
 const FONT_DIR = join(__dirname, "fonts");
+const LONG_CJK_TEXT = "周末海边日记".repeat(20);
+const LONG_CJK_WIDTH = 96;
 
 const text = (id, content, overrides = {}) => ({
   id,
@@ -63,21 +65,43 @@ describe("real CanvasKit text layout snapshot", () => {
     }
   }
 
-  it("[F01-S05][F01-S06] lays out CJK fallback, automatic wrapping, and explicit hard breaks", () => {
+  it("[F01-S05] lays out every glyph of a long CJK paragraph within its configured width", () => {
+    withSnapshot([text("wrapped", LONG_CJK_TEXT, { width: LONG_CJK_WIDTH })], (snapshot) => {
+      const [wrapped] = snapshot.geometry;
+      const lines = snapshot.layouts[0].paragraph.getLineMetrics();
+      const lastLine = lines.at(-1);
+
+      expect(LONG_CJK_TEXT).toHaveLength(120);
+      expect(lines.length).toBeGreaterThan(1);
+      expect(lastLine).toBeDefined();
+      if (lastLine === undefined) return;
+
+      expect(lastLine.endIncludingNewline).toBe(LONG_CJK_TEXT.length);
+      expect(lines.every(({ width }) => width <= LONG_CJK_WIDTH)).toBe(true);
+      expect(wrapped.localVisualBounds.width).toBeLessThanOrEqual(LONG_CJK_WIDTH);
+      expect(wrapped.localVisualBounds.y + wrapped.localVisualBounds.height).toBeGreaterThanOrEqual(
+        lastLine.baseline + lastLine.descent,
+      );
+    });
+  });
+
+  it("[F01-S06] keeps three explicit hard-break lines inside the visual geometry", () => {
     withSnapshot(
-      [
-        text("fallback", "AB周末"),
-        text("wrapped", "周末的海边日记", { width: 54 }),
-        text("single", "第一行第二行"),
-        text("hard-break", "第一行\n第二行"),
-      ],
+      [text("single", "第一行"), text("hard-break", "第一行\n第二行\n第三行")],
       (snapshot) => {
-        const [fallback, wrapped, single, hardBreak] = snapshot.geometry;
-        expect(fallback.localVisualBounds).toMatchObject({ x: 0 });
-        expect(fallback.localVisualBounds.width).toBeGreaterThan(0);
-        expect(wrapped.localVisualBounds.width).toBeLessThanOrEqual(54);
-        expect(wrapped.localVisualBounds.height).toBeGreaterThan(fallback.localVisualBounds.height);
+        const [single, hardBreak] = snapshot.geometry;
+        const hardBreakLines = snapshot.layouts[1].paragraph.getLineMetrics();
+        const thirdLine = hardBreakLines[2];
+
+        expect(hardBreakLines).toHaveLength(3);
+        expect(hardBreakLines.slice(0, 2).map(({ isHardBreak }) => isHardBreak)).toEqual([
+          true,
+          true,
+        ]);
         expect(hardBreak.localVisualBounds.height).toBeGreaterThan(single.localVisualBounds.height);
+        expect(
+          hardBreak.localVisualBounds.y + hardBreak.localVisualBounds.height,
+        ).toBeGreaterThanOrEqual(thirdLine.baseline + thirdLine.descent);
       },
     );
   });
@@ -97,9 +121,7 @@ describe("real CanvasKit text layout snapshot", () => {
 
     try {
       const fallbackResult = createTextLayoutSnapshot(environment, [text("fallback", "周末")]);
-      const notdefResult = createTextLayoutSnapshot(latinOnlyEnvironment, [
-        text("notdef", "周末"),
-      ]);
+      const notdefResult = createTextLayoutSnapshot(latinOnlyEnvironment, [text("notdef", "周末")]);
       expect(fallbackResult.status).toBe("ready");
       expect(notdefResult.status).toBe("ready");
       if (fallbackResult.status !== "ready" || notdefResult.status !== "ready") return;

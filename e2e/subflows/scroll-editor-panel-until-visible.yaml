@@ -1,0 +1,15 @@
+appId: com.leonzym.plogkit
+---
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        id: ${TARGET_ID}
+    commands:
+      - swipe:
+          from:
+            id: editor-tool-panel
+          direction: UP
+          duration: 500
+- assertVisible:
+    id: ${TARGET_ID}

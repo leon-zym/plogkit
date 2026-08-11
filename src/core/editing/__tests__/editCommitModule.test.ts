@@ -405,7 +405,7 @@ describe("edit commit module", () => {
     expect(editing.read().document.textElements[0]?.position).toEqual({ x: 80, y: 80 });
   });
 
-  it("keeps overlapping text layer order when the upper text moves", () => {
+  it("[F01-S15] keeps overlapping text layer order when the upper text moves", () => {
     const textIds = ["text-lower", "text-upper"];
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),

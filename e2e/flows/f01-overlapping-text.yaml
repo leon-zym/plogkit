@@ -13,11 +13,8 @@ tags:
 - pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- scrollUntilVisible:
-    element:
-      id: select-new-text
-    direction: UP
-    centerElement: true
+- assertVisible:
+    id: select-new-text
 - tapOn:
     id: select-new-text
 - tapOn:
@@ -39,15 +36,15 @@ tags:
       - hideKeyboard
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
 - assertVisible:
-    id: canvas-text-hit-0-.*
-- assertVisible:
-    id: canvas-text-hit-1-.*
-- runFlow: ../subflows/reenter-session-unselected.yaml
-# Both texts start at the same document position. Tapping their shared visual
-# bounds must enter the later element's production gesture detector.
+    id: select-new-text
 - tapOn:
-    id: document-canvas
-    point: 14%, 8%
+    id: select-new-text
+- assertNotVisible:
+    id: canvas-text-selection-.*
+# Both texts start at the same document position. Maestro locates the lower
+# element, while the physical tap must enter the later element's upper detector.
+- tapOn:
+    id: canvas-text-hit-0-.*
 - assertVisible:
     id: canvas-text-hit-1-.*
     selected: true

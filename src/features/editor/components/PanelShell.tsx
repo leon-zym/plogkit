@@ -9,7 +9,7 @@ interface PanelShellProps extends PropsWithChildren {
 
 export function PanelShell({ title, children }: PanelShellProps) {
   return (
-    <View style={styles.root} testID="editor-tool-panel">
+    <View style={styles.root}>
       <Text style={styles.title}>{title}</Text>
       {children}
     </View>

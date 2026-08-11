@@ -1,9 +1,8 @@
 appId: com.leonzym.plogkit
 ---
-- scrollUntilVisible:
-    element:
-      id: commit-text
-    direction: DOWN
-    visibilityPercentage: 60
+- runFlow:
+    file: scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: commit-text
 - tapOn:
     id: commit-text
