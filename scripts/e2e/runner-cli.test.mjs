@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,57 +13,73 @@ function writeExecutable(path, contents) {
   chmodSync(path, 0o755);
 }
 
-test("a Maestro version older than the minimum warns and the run continues past the version check", () => {
+function runCli(arguments_, options) {
+  return spawnSync(process.execPath, arguments_, { timeout: 15000, ...options });
+}
+
+test("a Maestro version older than the pinned version is rejected", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-version-"));
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.6.1'\n");
 
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "android", "--phase", "test", "--flow", "runner-version-probe"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${binaries}:${process.env.PATH}`,
-      },
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
     },
-  );
+  });
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /Maestro 2\.6\.1 is older than the minimum supported version 2\.7\.0/);
-  assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required, but 2\.6\.1 is installed/);
+  assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
 });
 
-test("a Maestro version at or above the minimum passes without a version notice", () => {
+test("a Maestro version newer than the pinned version is rejected", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-newer-version-"));
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
-  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.8.1'\n");
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.9.0'\n");
 
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "android", "--phase", "test", "--flow", "runner-version-probe"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${binaries}:${process.env.PATH}`,
-      },
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
     },
-  );
+  });
 
   assert.equal(result.status, 1);
-  assert.doesNotMatch(result.stdout, /Maestro \d+\.\d+\.\d+/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required, but 2\.9\.0 is installed/);
+  assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
+});
+
+test("the pinned Maestro version continues to E2E input validation", () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-pinned-version-"));
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries);
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.8.0'\n");
+
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stderr, /Maestro .* is required/);
   assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
 });
 
-test("iOS test phase reports a missing Maestro before host validation", () => {
+test("iOS reports a missing Maestro before host validation", () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-missing-version-"));
-  const result = spawnSync(process.execPath, ["scripts/e2e/run.mjs", "ios", "--phase", "test"], {
+  const result = runCli(["scripts/e2e/run.mjs", "ios"], {
     cwd: root,
     encoding: "utf8",
     env: {
@@ -73,36 +89,25 @@ test("iOS test phase reports a missing Maestro before host validation", () => {
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Maestro 2\.7\.0 or newer is required but was not found on PATH/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required but was not found on PATH/);
 });
 
-test("iOS rejects an external device before invoking simulator tooling", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-ios-device-"));
-  const binaries = join(directory, "bin");
-  const xcrunLog = join(directory, "xcrun-commands.log");
-  mkdirSync(binaries);
-  writeExecutable(
-    join(binaries, "xcrun"),
-    `#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
-`,
-  );
-
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "ios", "--phase", "test", "--device", "daily-simulator"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        FAKE_XCRUN_LOG: xcrunLog,
-        PATH: `${binaries}:${process.env.PATH}`,
-      },
-    },
-  );
+test("the runner rejects the removed cross-process phase interface", () => {
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--phase", "test"], {
+    cwd: root,
+    encoding: "utf8",
+  });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /--device is supported only for Android/);
-  assert.equal(existsSync(xcrunLog), false);
+  assert.match(result.stderr, /Unknown argument: --phase/);
+});
+
+test("the runner rejects an incomplete flow selector before validation", () => {
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--flow requires a flow basename/);
 });

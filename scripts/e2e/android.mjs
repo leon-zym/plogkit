@@ -1,56 +1,59 @@
-import { spawn } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, openSync, readdirSync } from "node:fs";
-import { arch } from "node:os";
-import { join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { arch, tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 
-import { capture, collectFailureDiagnostics, log, run, waitUntil } from "./runtime.mjs";
+import { capture, log, run, terminateProcessTree, waitUntil } from "./runtime.mjs";
+import { createStandaloneBuildEnvironment, isHermesBytecode } from "./environment.mjs";
 
-const avdName = "PlogKit_E2E";
-const appPath = "android/app/build/outputs/apk/debug/app-debug.apk";
+const avdNamePrefix = "PlogKit_E2E_";
+const appPath = "android/app/build/outputs/apk/release/app-release.apk";
+const sourceMapPath =
+  "android/app/build/generated/sourcemaps/react/release/index.android.bundle.map";
+const requiredEmulatorVersion = "37.1.11.0";
+const requiredEmulatorBuild = "15917651";
+const requiredPlatformToolsVersion = "37.0.1-15733141";
+const requiredCommandLineToolsRevision = "22.0";
+const requiredSystemImageRevision = "2";
+const buildTimeoutMs = 45 * 60 * 1000;
+const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
 const readinessProbeTimeoutMs = 15000;
+const lifecycleProbeTimeoutMs = 15000;
+const systemUiReadinessTimeoutMs = 120000;
 const readinessHierarchyPath = "/sdcard/plogkit-e2e-window.xml";
+const ANDROID_SYSTEM_UI_FAILURE =
+  /System\s+UI\s+(?:(?:isn['’]t|is\s+not)\s+responding|has\s+stopped)|Application\s+Not\s+Responding:\s*System\s+UI|\bam_anr\b[^\n]{0,240}\bcom\.android\.systemui\b|(?:ANR|not\s+responding).{0,100}com\.android\.systemui|com\.android\.systemui.{0,100}(?:ANR|not\s+responding)/i;
+const ANDROID_ANR_DIALOG =
+  /AppNotRespondingDialog|android:id\/aerr_(?:close|wait)|Application\s+Not\s+Responding/i;
 
-function captureReadinessProbe(serial, args) {
-  return capture("adb", ["-s", serial, ...args], {
-    allowFailure: true,
-    timeoutMs: readinessProbeTimeoutMs,
-  });
+function hasAndroidSystemUiFailureEvidence(message) {
+  return ANDROID_SYSTEM_UI_FAILURE.test(message);
 }
 
-export function recordAndroidReadinessSnapshot({ artifactRoot, deviceId: serial, stage }) {
-  try {
-    let content = `=== ${stage} state snapshot ===\n`;
-    for (const [label, args] of [
-      ["boot completed", ["shell", "getprop", "sys.boot_completed"]],
-      ["boot animation", ["shell", "getprop", "init.svc.bootanim"]],
-      ["device provisioned", ["shell", "settings", "get", "global", "device_provisioned"]],
-      ["package manager", ["shell", "pm", "path", "android"]],
-      ["service check window", ["shell", "service", "check", "window"]],
-      ["service check accessibility", ["shell", "service", "check", "accessibility"]],
-      ["dumpsys window", ["shell", "dumpsys", "window"]],
-      ["dumpsys activity", ["shell", "dumpsys", "activity"]],
-      ["service list", ["shell", "service", "list"]],
-      ["getprop", ["shell", "getprop"]],
-    ]) {
-      const output = captureReadinessProbe(serial, args);
-      content += `--- ${label} ---\n${output ?? "(failed)"}\n\n`;
-    }
-    const hierarchyDump = captureReadinessProbe(serial, [
-      "shell",
-      "uiautomator",
-      "dump",
-      readinessHierarchyPath,
-    ]);
-    const hierarchy = hierarchyDump
-      ? captureReadinessProbe(serial, ["exec-out", "cat", readinessHierarchyPath])
-      : null;
-    content +=
-      `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
-      `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`;
-    appendFileSync(join(artifactRoot, `android-readiness-${serial}.log`), content);
-  } catch {
-    // Readiness diagnostics are best-effort and must preserve the original failure.
-  }
+function hasAndroidAnrDialogEvidence(message) {
+  return ANDROID_ANR_DIALOG.test(message);
+}
+
+function captureReadinessProbe(device, args, { deadlineMs } = {}) {
+  const timeoutMs = deadlineMs
+    ? Math.max(0, Math.min(readinessProbeTimeoutMs, deadlineMs - Date.now()))
+    : readinessProbeTimeoutMs;
+  if (timeoutMs === 0) return null;
+  return capture(device.adbPath, ["-s", device.deviceId, ...args], {
+    allowFailure: true,
+    timeoutMs,
+  });
 }
 
 function androidHome() {
@@ -59,26 +62,123 @@ function androidHome() {
   return value;
 }
 
-function findTool(home, name) {
-  const candidates = [
-    join(home, "cmdline-tools", "latest", "bin", name),
-    join(home, "tools", "bin", name),
-  ];
-  const commandLineTools = join(home, "cmdline-tools");
-  if (existsSync(commandLineTools)) {
-    for (const entry of readdirSync(commandLineTools).sort().reverse()) {
-      candidates.push(join(commandLineTools, entry, "bin", name));
-    }
-  }
-  return candidates.find(existsSync) ?? name;
+function androidAdbPath(home = androidHome()) {
+  return join(home, "platform-tools", "adb");
+}
+
+function androidAvdManagerPath(home = androidHome()) {
+  return join(home, "cmdline-tools", requiredCommandLineToolsRevision, "bin", "avdmanager");
 }
 
 function imageArchitecture() {
   return process.env.E2E_ANDROID_ARCH ?? (arch() === "arm64" ? "arm64-v8a" : "x86_64");
 }
 
-function connectedEmulators() {
-  return capture("adb", ["devices"])
+export function parseAdbPlatformToolsVersion(output) {
+  return output?.match(/^\s*Version\s+([0-9][0-9A-Za-z.+-]*)(?:\s|$)/m)?.[1] ?? null;
+}
+
+export function validateAndroidEnvironment() {
+  const home = androidHome();
+  const imageArch = imageArchitecture();
+  const emulator = join(home, "emulator", "emulator");
+  if (!existsSync(emulator)) throw new Error(`Android Emulator is missing: ${emulator}`);
+  const adbPath = androidAdbPath(home);
+  if (!existsSync(adbPath))
+    throw new Error(`Android SDK Platform-Tools adb is missing: ${adbPath}`);
+
+  const adbVersionOutput = capture(adbPath, ["version"], { timeoutMs: lifecycleProbeTimeoutMs });
+  const adbVersion = parseAdbPlatformToolsVersion(adbVersionOutput);
+  if (!adbVersion) {
+    throw new Error(
+      `Unable to determine the Android SDK Platform-Tools package revision from adb version:\n${
+        adbVersionOutput || "(empty output)"
+      }`,
+    );
+  }
+  if (adbVersion !== requiredPlatformToolsVersion) {
+    throw new Error(
+      `Android SDK Platform-Tools ${requiredPlatformToolsVersion} is required, but ${adbVersion} is installed.`,
+    );
+  }
+  const avdmanager = androidAvdManagerPath(home);
+  if (!existsSync(avdmanager)) {
+    throw new Error(`Android SDK Command-line Tools are missing: ${avdmanager}`);
+  }
+  const commandLineToolsMetadata = join(
+    home,
+    "cmdline-tools",
+    requiredCommandLineToolsRevision,
+    "source.properties",
+  );
+  if (!existsSync(commandLineToolsMetadata)) {
+    throw new Error(
+      `Android SDK Command-line Tools metadata is missing: ${commandLineToolsMetadata}`,
+    );
+  }
+  const commandLineToolsRevision = readFileSync(commandLineToolsMetadata, "utf8")
+    .match(/^Pkg\.Revision\s*=\s*(.+)$/m)?.[1]
+    ?.trim();
+  if (!commandLineToolsRevision) {
+    throw new Error(
+      `Unable to determine the Android SDK Command-line Tools version from ${commandLineToolsMetadata}.`,
+    );
+  }
+  if (commandLineToolsRevision !== requiredCommandLineToolsRevision) {
+    throw new Error(
+      `Android SDK Command-line Tools ${requiredCommandLineToolsRevision} is required, but ${commandLineToolsRevision} is installed.`,
+    );
+  }
+  log(
+    "android",
+    `Platform-Tools Version ${adbVersion}; Command-line Tools Version ${commandLineToolsRevision}.`,
+  );
+
+  const versionOutput = capture(emulator, ["-version"], { timeoutMs: lifecycleProbeTimeoutMs });
+  const versionMatch = versionOutput.match(
+    /Android emulator version\s+(\S+)\s+\(build_id\s+(\d+)\)/,
+  );
+  const installedVersion = versionMatch?.[1] ?? "unknown";
+  const installedBuild = versionMatch?.[2] ?? "unknown";
+  if (installedVersion !== requiredEmulatorVersion || installedBuild !== requiredEmulatorBuild) {
+    throw new Error(
+      `Android Emulator ${requiredEmulatorVersion} (build ${requiredEmulatorBuild}) is required, ` +
+        `but ${installedVersion} (build ${installedBuild}) is installed.`,
+    );
+  }
+
+  const sourceProperties = join(
+    home,
+    "system-images",
+    "android-36",
+    "default",
+    imageArch,
+    "source.properties",
+  );
+  if (!existsSync(sourceProperties)) {
+    throw new Error(`Required Android system image metadata is missing: ${sourceProperties}`);
+  }
+  const imageMetadata = readFileSync(sourceProperties, "utf8");
+  const installedRevision = imageMetadata.match(/^Pkg\.Revision=(.+)$/m)?.[1]?.trim() ?? "unknown";
+  if (installedRevision !== requiredSystemImageRevision) {
+    throw new Error(
+      `Android 36 default ${imageArch} system image revision ${requiredSystemImageRevision} is ` +
+        `required, but revision ${installedRevision} is installed.`,
+    );
+  }
+  log(
+    "android",
+    `Emulator ${installedVersion} (${installedBuild}); Android 36 default ${imageArch} revision ${installedRevision}.`,
+  );
+}
+
+function connectedEmulators(adbPath, { allowFailure = false } = {}) {
+  const output = capture(adbPath, ["devices"], {
+    allowFailure,
+    timeoutMs: lifecycleProbeTimeoutMs,
+  });
+  if (output === null) return [];
+  return output
     .split("\n")
     .slice(1)
     .map((line) => line.trim().split(/\s+/, 2))
@@ -86,17 +186,26 @@ function connectedEmulators() {
     .map(([serial]) => serial);
 }
 
-function findDedicatedSerial() {
-  for (const serial of connectedEmulators()) {
-    const output = capture("adb", ["-s", serial, "emu", "avd", "name"], {
+function findInvocationSerial(adbPath, avdName, previouslyConnected) {
+  for (const serial of connectedEmulators(adbPath, { allowFailure: true })) {
+    if (previouslyConnected.has(serial)) continue;
+    const output = capture(adbPath, ["-s", serial, "emu", "avd", "name"], {
       allowFailure: true,
+      timeoutMs: lifecycleProbeTimeoutMs,
     });
     if (output?.split("\n", 1)[0]?.trim() === avdName) return serial;
   }
   return null;
 }
 
-function ensureAvd(home, emulator, imageArch) {
+function createAvd(
+  home,
+  emulator,
+  imageArch,
+  avdHome,
+  avdName,
+  { timeoutMs = lifecycleProbeTimeoutMs } = {},
+) {
   const systemImage = `system-images;android-36;default;${imageArch}`;
   const imagePath = join(home, "system-images", "android-36", "default", imageArch);
   if (!existsSync(emulator)) throw new Error(`Android Emulator is missing: ${emulator}`);
@@ -105,68 +214,152 @@ function ensureAvd(home, emulator, imageArch) {
       `Required Android system image is missing: ${systemImage}. Install it with sdkmanager first.`,
     );
   }
-  const avds = capture(emulator, ["-list-avds"])
-    .split("\n")
-    .map((value) => value.trim());
-  if (avds.includes(avdName)) return;
-  const avdmanager = findTool(home, "avdmanager");
-  const result = capture(
+  const avdmanager = androidAvdManagerPath(home);
+  if (!existsSync(avdmanager)) {
+    throw new Error(`Android SDK Command-line Tools are missing: ${avdmanager}`);
+  }
+  capture(
     avdmanager,
-    [
-      "create",
-      "avd",
-      "--force",
-      "--name",
-      avdName,
-      "--package",
-      systemImage,
-      "--device",
-      "pixel_7_pro",
-    ],
-    { allowFailure: true, input: "no\n" },
+    ["create", "avd", "--name", avdName, "--package", systemImage, "--device", "pixel_7_pro"],
+    {
+      env: { ...createStandaloneBuildEnvironment(), ANDROID_AVD_HOME: avdHome },
+      input: "no\n",
+      timeoutMs,
+    },
   );
-  if (result === null) {
+  log("android", `Created ephemeral AVD ${avdName} from ${systemImage}.`);
+}
+
+function controlledGradleUserHome(root) {
+  const gradleHome = resolve(root, ".e2e-cache/gradle");
+  mkdirSync(gradleHome, { recursive: true });
+  const configuredPaths = ["gradle.properties", "init.gradle", "init.gradle.kts"]
+    .map((name) => join(gradleHome, name))
+    .filter(existsSync);
+  const initDirectory = join(gradleHome, "init.d");
+  if (existsSync(initDirectory) && readdirSync(initDirectory).length > 0) {
+    configuredPaths.push(initDirectory);
+  }
+  if (configuredPaths.length > 0) {
     throw new Error(
-      `Unable to create ${avdName}. Run avdmanager with package ${systemImage} and device pixel_7_pro.`,
+      `Runner-owned Gradle home contains build configuration: ${configuredPaths.join(", ")}`,
     );
   }
-  log("android", `Created dedicated AVD ${avdName}.`);
+  return gradleHome;
 }
 
-export async function buildAndroid({ cleanup, root, workers }) {
-  log("android", "Building the development build without booting an emulator.");
-  const args = ["app:assembleDebug", "--no-daemon"];
+export async function buildAndroid({ cleanup, javaHome, root, workers }) {
+  if (!javaHome || javaHome === "unknown") {
+    throw new Error("Android Release build requires the validated Temurin java.home.");
+  }
+  log("android", "Building the standalone Release APK without booting an emulator.");
+  const args = ["app:assembleRelease", "--no-daemon"];
   if (workers) args.push(`--max-workers=${workers}`);
+  args.push(`-Dorg.gradle.java.home=${javaHome}`);
   args.push(`-PreactNativeArchitectures=${imageArchitecture()}`);
-  await run("./gradlew", args, { cleanup, cwd: resolve(root, "android") });
+  await run("./gradlew", args, {
+    cleanup,
+    cwd: resolve(root, "android"),
+    env: {
+      ...createStandaloneBuildEnvironment(),
+      GRADLE_USER_HOME: controlledGradleUserHome(root),
+    },
+    timeoutMs: buildTimeoutMs,
+  });
+  assertAndroidStandaloneArtifact(root);
 }
 
-async function waitForBoot(serial) {
+function assertAndroidStandaloneArtifact(root) {
+  const artifact = androidBuildArtifact(root);
+  if (!existsSync(artifact) || !statSync(artifact).isFile() || statSync(artifact).size === 0) {
+    throw new Error(`Android Release APK is missing or empty: ${artifact}`);
+  }
+  const bundle = spawnSync("unzip", ["-p", artifact, "assets/index.android.bundle"], {
+    encoding: null,
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 15000,
+  });
+  if (bundle.error || bundle.status !== 0 || !isHermesBytecode(bundle.stdout)) {
+    throw new Error(`Android Release APK does not contain a Hermes assets/index.android.bundle.`);
+  }
+  const [sourceMap] = androidBuildSidecars(root);
+  if (!existsSync(sourceMap) || !statSync(sourceMap).isFile() || statSync(sourceMap).size === 0) {
+    throw new Error(`Android Release source map is missing or empty: ${sourceMap}`);
+  }
+}
+
+async function waitForBoot(device, timeoutMs) {
   await waitUntil(
-    () => captureReadinessProbe(serial, ["shell", "getprop", "sys.boot_completed"]) === "1",
-    180000,
-    `Android device ${serial} to finish booting`,
+    (deadlineMs) =>
+      captureReadinessProbe(device, ["shell", "getprop", "sys.boot_completed"], {
+        deadlineMs,
+      }) === "1",
+    timeoutMs,
+    `Android device ${device.deviceId} to finish booting`,
     2000,
   );
 }
 
-const SYSTEM_UI_ANR_PATTERN =
-  /(System UI isn['’]t responding|Application Not Responding:\s*System UI|AppNotRespondingDialog|android:id\/aerr_(?:close|wait))/i;
-
-export function isAndroidServiceAvailable(output) {
-  return output !== null && /^Service(?:\s+\S+:)?\s+found$/im.test(output);
+function isAndroidEnglishLocaleConfig(output) {
+  return output !== null && /(?:^|-)en-rUS(?:-|$)/m.test(output);
 }
 
-export function androidEmulatorArguments() {
+function parseAndroidComponent(output) {
+  if (!output) return null;
+  const match = output.match(
+    /([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\/(\.?[A-Za-z][A-Za-z0-9_.$]*)/,
+  );
+  if (!match) return null;
+  const packageName = match[1];
+  const className = match[2].startsWith(".") ? `${packageName}${match[2]}` : match[2];
+  return { className, packageName };
+}
+
+function sameAndroidComponent(left, right) {
+  return (
+    left !== null &&
+    right !== null &&
+    left.packageName === right.packageName &&
+    left.className === right.className
+  );
+}
+
+function isExpectedLauncherStart(output, launcher) {
+  if (!output || !launcher || !/^Status:\s*ok\s*$/im.test(output)) return false;
+  const activityLine = output.split(/\r?\n/).find((line) => /^\s*Activity:\s*/i.test(line));
+  return sameAndroidComponent(parseAndroidComponent(activityLine), launcher);
+}
+
+function isLauncherForeground({ activityState, hierarchy, launcher, windowState }) {
+  if (!launcher || !activityState || !hierarchy || !windowState) return false;
+  const resumedLine = activityState
+    .split(/\r?\n/)
+    .find((line) => /^\s*(?:mResumedActivity|ResumedActivity)\s*[:=]/.test(line));
+  const focusedLine = windowState.split(/\r?\n/).find((line) => /\bmCurrentFocus\b/.test(line));
+  const hierarchyOwnsWindow =
+    hierarchy.includes(`package="${launcher.packageName}"`) ||
+    hierarchy.includes(`package='${launcher.packageName}'`);
+  return (
+    sameAndroidComponent(parseAndroidComponent(resumedLine), launcher) &&
+    sameAndroidComponent(parseAndroidComponent(focusedLine), launcher) &&
+    hierarchyOwnsWindow
+  );
+}
+
+function androidEmulatorArguments(avdName) {
   return [
     "-avd",
     avdName,
-    "-wipe-data",
     "-no-snapshot",
     "-no-boot-anim",
     "-no-window",
     "-gpu",
-    "host",
+    "swiftshader",
+    "-cores",
+    "2",
+    "-memory",
+    "4096",
     "-no-audio",
     "-camera-back",
     "none",
@@ -175,247 +368,254 @@ export function androidEmulatorArguments() {
   ];
 }
 
-async function waitForSystemUi(serial, artifactRoot, stage) {
-  // Boot animation must be done — either "stopped", or the property was
-  // never set (common with -no-boot-anim). Only "running" means still in
-  // progress.
-  await waitUntil(
-    () => {
-      const value = captureReadinessProbe(serial, ["shell", "getprop", "init.svc.bootanim"]);
-      return value !== null && value !== "running";
+function hasProcessExited(process) {
+  return process.exitCode !== null || process.signalCode !== null;
+}
+
+async function waitForSystemUi(
+  device,
+  artifactRoot,
+  stage,
+  readinessTimeoutMs = systemUiReadinessTimeoutMs,
+) {
+  const serial = device.deviceId;
+  let locale = null;
+  let resolvedHome = null;
+  const launcher = await waitUntil(
+    (deadlineMs) => {
+      locale = captureReadinessProbe(device, ["shell", "am", "get-config"], { deadlineMs });
+      if (!isAndroidEnglishLocaleConfig(locale)) return false;
+      resolvedHome = captureReadinessProbe(
+        device,
+        [
+          "shell",
+          "cmd",
+          "package",
+          "resolve-activity",
+          "--brief",
+          "-a",
+          "android.intent.action.MAIN",
+          "-c",
+          "android.intent.category.HOME",
+        ],
+        { deadlineMs },
+      );
+      const component = parseAndroidComponent(resolvedHome);
+      return component && !/(?:^|\.)FallbackHome$/.test(component.className) ? component : false;
     },
-    30000,
-    `Android device ${serial} boot animation to finish`,
+    readinessTimeoutMs,
+    `Android device ${serial} to expose an en-US real HOME activity`,
     2000,
   );
 
-  // Device must be provisioned (setup wizard completed).
-  await waitUntil(
-    () =>
-      captureReadinessProbe(serial, [
-        "shell",
-        "settings",
-        "get",
-        "global",
-        "device_provisioned",
-      ]) === "1",
-    30000,
-    `Android device ${serial} to be provisioned`,
-    2000,
-  );
-
-  // Package manager must be able to resolve at least the android system package.
-  await waitUntil(
-    () => {
-      const output = captureReadinessProbe(serial, ["shell", "pm", "path", "android"]);
-      return output !== null && output.length > 0;
-    },
-    30000,
-    `Android device ${serial} package manager to respond`,
-    2000,
-  );
-
-  // Window and accessibility services must be registered before the
-  // functional launcher and hierarchy probes below can be meaningful.
-  await waitUntil(
-    () => {
-      const wm = captureReadinessProbe(serial, ["shell", "service", "check", "window"]);
-      const acc = captureReadinessProbe(serial, ["shell", "service", "check", "accessibility"]);
-      return isAndroidServiceAvailable(wm) && isAndroidServiceAvailable(acc);
-    },
-    120000,
-    `Android device ${serial} system services to become ready`,
-    2000,
-  );
-
-  // Exercise the same launcher and accessibility surfaces Maestro depends on.
-  // A registered Binder service alone does not prove that either surface can
-  // respond, and an ANR dialog must fail readiness rather than be dismissed.
-  const home = await waitUntil(
-    () => {
-      const output = captureReadinessProbe(serial, [
-        "shell",
-        "am",
-        "start",
-        "-W",
-        "-a",
-        "android.intent.action.MAIN",
-        "-c",
-        "android.intent.category.HOME",
-      ]);
-      return output && /^Status:\s*ok$/im.test(output) && !/\bFallbackHome\b/.test(output)
-        ? output
-        : false;
-    },
-    120000,
-    `Android device ${serial} launcher to replace FallbackHome`,
-    2000,
-  );
+  // HOME is sent exactly once. Subsequent readiness polling is observational.
+  const home = captureReadinessProbe(device, [
+    "shell",
+    "am",
+    "start",
+    "-W",
+    "-a",
+    "android.intent.action.MAIN",
+    "-c",
+    "android.intent.category.HOME",
+  ]);
+  if (!isExpectedLauncherStart(home, launcher)) {
+    throw new Error(
+      `Android device ${serial} did not start resolved HOME ` +
+        `${launcher.packageName}/${launcher.className} on the single readiness attempt:\n` +
+        `${home ?? "(command failed)"}`,
+    );
+  }
   let hierarchyDump = null;
   let hierarchy = null;
+  let activityState = null;
+  let windowState = null;
+  let eventLog = null;
   let hierarchyError = null;
   try {
-    hierarchy = await waitUntil(
-      () => {
-        hierarchyDump = captureReadinessProbe(serial, [
-          "shell",
-          "uiautomator",
-          "dump",
-          readinessHierarchyPath,
-        ]);
-        return hierarchyDump
-          ? captureReadinessProbe(serial, ["exec-out", "cat", readinessHierarchyPath])
-          : false;
+    await waitUntil(
+      (deadlineMs) => {
+        hierarchyDump = captureReadinessProbe(
+          device,
+          ["shell", "uiautomator", "dump", readinessHierarchyPath],
+          { deadlineMs },
+        );
+        hierarchy = hierarchyDump
+          ? captureReadinessProbe(device, ["exec-out", "cat", readinessHierarchyPath], {
+              deadlineMs,
+            })
+          : null;
+        activityState = captureReadinessProbe(
+          device,
+          ["shell", "dumpsys", "activity", "activities"],
+          { deadlineMs },
+        );
+        windowState = captureReadinessProbe(device, ["shell", "dumpsys", "window"], {
+          deadlineMs,
+        });
+        eventLog = captureReadinessProbe(device, ["logcat", "-b", "events", "-d"], {
+          deadlineMs,
+        });
+        const evidence = `${windowState ?? ""}\n${hierarchy ?? ""}\n${eventLog ?? ""}`;
+        return (
+          hasAndroidSystemUiFailureEvidence(evidence) ||
+          hasAndroidAnrDialogEvidence(evidence) ||
+          isLauncherForeground({ activityState, hierarchy, launcher, windowState })
+        );
       },
-      120000,
-      `Android device ${serial} UI hierarchy to respond`,
+      readinessTimeoutMs,
+      `Android device ${serial} resolved HOME to own the foreground UI`,
       2000,
     );
   } catch (error) {
     hierarchyError = error;
   }
-  const windowState = captureReadinessProbe(serial, ["shell", "dumpsys", "window"]);
 
   const diag = join(artifactRoot, `android-readiness-${serial}.log`);
   appendFileSync(
     diag,
-    `=== ${stage} ===\n--- launcher probe ---\n${home ?? "(failed)"}\n\n` +
+    `=== ${stage} ===\n--- locale ---\n${locale ?? "(failed)"}\n\n` +
+      `--- resolved HOME ---\n${resolvedHome ?? "(failed)"}\n\n` +
+      `--- launcher probe ---\n${home ?? "(failed)"}\n\n` +
+      `--- dumpsys activity activities ---\n${activityState ?? "(failed)"}\n\n` +
       `--- dumpsys window ---\n${windowState ?? "(failed)"}\n\n` +
+      `--- event log ---\n${eventLog ?? "(failed)"}\n\n` +
       `--- UI hierarchy dump ---\n${hierarchyDump ?? "(failed)"}\n\n` +
       `--- UI hierarchy ---\n${hierarchy ?? "(failed)"}\n\n`,
   );
 
-  const functionalEvidence = `${windowState ?? ""}\n${hierarchy ?? ""}`;
-  if (SYSTEM_UI_ANR_PATTERN.test(functionalEvidence)) {
-    throw new Error(`Android System UI ANR dialog detected on ${serial}.`);
+  if (eventLog === null) {
+    throw new Error(`Android event log did not respond on ${serial}.`);
+  }
+  const functionalEvidence = `${windowState ?? ""}\n${hierarchy ?? ""}\n${eventLog}`;
+  if (
+    hasAndroidSystemUiFailureEvidence(functionalEvidence) ||
+    hasAndroidAnrDialogEvidence(functionalEvidence)
+  ) {
+    throw new Error(`Android blocking ANR detected on ${serial}.`);
   }
   if (!hierarchy) {
     throw new Error(`Android UI hierarchy did not respond on ${serial}.`, {
       cause: hierarchyError,
     });
   }
+  if (!isLauncherForeground({ activityState, hierarchy, launcher, windowState })) {
+    throw new Error(`Android resolved HOME is not the foreground UI on ${serial}.`, {
+      cause: hierarchyError,
+    });
+  }
 
-  // Save a snapshot of system state for diagnostics.
-  try {
-    let content = "";
-    for (const [label, cmd] of [
-      ["dumpsys window", ["shell", "dumpsys", "window"]],
-      ["dumpsys activity", ["shell", "dumpsys", "activity"]],
-      ["service list", ["shell", "service", "list"]],
-      ["getprop", ["shell", "getprop"]],
-    ]) {
-      const out = captureReadinessProbe(serial, cmd);
-      content += `--- ${label} ---\n${out ?? "(failed)"}\n\n`;
-    }
-    appendFileSync(diag, content);
-  } catch {
-    // Diagnostic collection is best-effort; never block readiness on it.
+  for (const setting of [
+    "window_animation_scale",
+    "transition_animation_scale",
+    "animator_duration_scale",
+  ]) {
+    capture(device.adbPath, ["-s", serial, "shell", "settings", "put", "global", setting, "0"], {
+      timeoutMs: readinessProbeTimeoutMs,
+    });
   }
 
   log("android", `System UI ready on ${serial}.`);
 }
 
-export async function assertAndroidDeviceReady({ artifactRoot, device, stage = "readiness" }) {
-  try {
-    await waitForSystemUi(device.deviceId, artifactRoot, stage);
-  } catch (error) {
-    recordAndroidReadinessSnapshot({ artifactRoot, deviceId: device.deviceId, stage });
-    const message = error instanceof Error ? error.message : String(error);
-    await collectFailureDiagnostics({
-      diagnosticDirectory: join(artifactRoot, "android", `readiness-${stage}`),
-      device,
-      error: message,
-      kind: "system-ui",
-    });
-    throw error;
-  }
+export async function assertAndroidDeviceReady({
+  artifactRoot,
+  device,
+  readinessTimeoutMs = systemUiReadinessTimeoutMs,
+  stage = "readiness",
+}) {
+  await waitForSystemUi(device, artifactRoot, stage, readinessTimeoutMs);
 }
 
-export async function prepareAndroidDevice({ artifactRoot, cleanup, externalDeviceId }) {
-  if (externalDeviceId) {
-    await run("adb", ["-s", externalDeviceId, "wait-for-device"], { cleanup });
-    await waitForBoot(externalDeviceId);
-    const device = { platform: "android", deviceId: externalDeviceId };
-    await assertAndroidDeviceReady({ artifactRoot, device, stage: "boot" });
-    return device;
-  }
-
+export async function prepareAndroidDevice({
+  artifactRoot,
+  bootTimeoutMs = deviceLifecycleTimeoutMs,
+  cleanup,
+}) {
   const home = androidHome();
+  const adbPath = androidAdbPath(home);
   const emulator = join(home, "emulator", "emulator");
   const imageArch = imageArchitecture();
-  ensureAvd(home, emulator, imageArch);
-
-  const running = findDedicatedSerial();
-  if (running) {
-    capture("adb", ["-s", running, "emu", "kill"], { allowFailure: true });
-    await waitUntil(() => !findDedicatedSerial(), 30000, "the previous E2E emulator to stop");
-  }
+  const avdHome = mkdtempSync(join(tmpdir(), "plogkit-e2e-android-avd-"));
+  const avdName = `${avdNamePrefix}${basename(avdHome).replace(/[^A-Za-z0-9_]/g, "_")}`;
+  const avdEnvironment = {
+    ...createStandaloneBuildEnvironment(),
+    ANDROID_AVD_HOME: avdHome,
+  };
+  cleanup.add(() => rmSync(avdHome, { force: true, recursive: true }));
+  createAvd(home, emulator, imageArch, avdHome, avdName);
+  const previouslyConnected = new Set(connectedEmulators(adbPath, { allowFailure: true }));
 
   const emulatorLog = join(artifactRoot, "android-emulator.log");
   const logFd = openSync(emulatorLog, "w");
-  const emulatorProcess = spawn(
-    emulator,
-    androidEmulatorArguments(),
-    { detached: false, stdio: ["ignore", logFd, logFd] },
-  );
+  const emulatorProcess = spawn(emulator, androidEmulatorArguments(avdName), {
+    detached: process.platform !== "win32",
+    env: avdEnvironment,
+    stdio: ["ignore", logFd, logFd],
+  });
+  let emulatorSpawnError = null;
   emulatorProcess.once("error", (error) => {
+    emulatorSpawnError = error;
     console.error(`[e2e:android] Emulator failed: ${String(error)}`);
   });
   closeSync(logFd);
 
   let serial = null;
   cleanup.add(async () => {
-    log("android", "Stopping the dedicated emulator.");
-    const activeSerial = serial ?? findDedicatedSerial();
-    if (activeSerial) {
-      capture("adb", ["-s", activeSerial, "emu", "kill"], { allowFailure: true });
-    } else if (emulatorProcess.exitCode === null) {
-      emulatorProcess.kill("SIGTERM");
-    }
-    if (emulatorProcess.exitCode === null) {
-      await Promise.race([
-        new Promise((resolvePromise) => emulatorProcess.once("exit", resolvePromise)),
-        new Promise((resolvePromise) => setTimeout(resolvePromise, 20000)),
-      ]);
-    }
+    log("android", `Stopping owned emulator ${avdName}.`);
+    await terminateProcessTree(emulatorProcess, {
+      gracefulTimeoutMs: 20000,
+      killTimeoutMs: 5000,
+    });
   });
 
   serial = await waitUntil(
     () => {
-      if (emulatorProcess.exitCode !== null) {
-        throw new Error(`Android Emulator exited early. See ${emulatorLog}`);
+      if (emulatorSpawnError || hasProcessExited(emulatorProcess)) {
+        const reason = emulatorSpawnError
+          ? String(emulatorSpawnError)
+          : `exit ${emulatorProcess.exitCode ?? emulatorProcess.signalCode}`;
+        throw new Error(`Android Emulator exited early (${reason}). See ${emulatorLog}`);
       }
-      return findDedicatedSerial();
+      return findInvocationSerial(adbPath, avdName, previouslyConnected);
     },
     180000,
-    `Android AVD ${avdName} to appear`,
+    `ephemeral Android AVD ${avdName} to appear`,
     2000,
   );
-  await waitForBoot(serial);
-  const device = { platform: "android", deviceId: serial };
-  await assertAndroidDeviceReady({ artifactRoot, device, stage: "boot" });
+  const device = { platform: "android", adbPath, deviceId: serial };
+  await waitForBoot(device, bootTimeoutMs);
   return device;
 }
 
-export async function installAndSeedAndroid({ cleanup, device, fixtures, root }) {
-  log("android", "Installing the development build and seeding photos.");
-  await run("adb", ["-s", device.deviceId, "install", "-r", resolve(root, appPath)], {
+export async function installAndSeedAndroid({
+  artifact,
+  cleanup,
+  device,
+  fixtures,
+  lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  root,
+}) {
+  log("android", "Installing the standalone Release APK and seeding photos.");
+  await run(device.adbPath, ["-s", device.deviceId, "install", artifact], {
     cleanup,
     cwd: root,
+    timeoutMs: lifecycleTimeoutMs,
   });
   const fixtureDirectory = "/sdcard/Pictures/PlogKitE2E";
-  await run("adb", ["-s", device.deviceId, "shell", "rm", "-rf", fixtureDirectory], {
+  await run(device.adbPath, ["-s", device.deviceId, "shell", "mkdir", "-p", fixtureDirectory], {
     cleanup,
-  });
-  await run("adb", ["-s", device.deviceId, "shell", "mkdir", "-p", fixtureDirectory], {
-    cleanup,
+    timeoutMs: lifecycleTimeoutMs,
   });
   for (const fixture of fixtures) {
     const name = fixture.split("/").at(-1);
     const destination = `${fixtureDirectory}/${name}`;
-    await run("adb", ["-s", device.deviceId, "push", fixture, destination], { cleanup });
+    await run(device.adbPath, ["-s", device.deviceId, "push", fixture, destination], {
+      cleanup,
+      timeoutMs: lifecycleTimeoutMs,
+    });
     await run(
-      "adb",
+      device.adbPath,
       [
         "-s",
         device.deviceId,
@@ -427,7 +627,7 @@ export async function installAndSeedAndroid({ cleanup, device, fixtures, root })
         "-d",
         `file://${destination}`,
       ],
-      { cleanup },
+      { cleanup, timeoutMs: lifecycleTimeoutMs },
     );
   }
   const fixtureNames = fixtures.map((fixture) => fixture.split("/").at(-1));
@@ -443,17 +643,21 @@ export async function installAndSeedAndroid({ cleanup, device, fixtures, root })
 }
 
 function queryAndroidPhotos(device) {
-  return capture("adb", [
-    "-s",
-    device.deviceId,
-    "shell",
-    "content",
-    "query",
-    "--uri",
-    "content://media/external/images/media",
-    "--projection",
-    "_id:_display_name:mime_type",
-  ]);
+  return capture(
+    device.adbPath,
+    [
+      "-s",
+      device.deviceId,
+      "shell",
+      "content",
+      "query",
+      "--uri",
+      "content://media/external/images/media",
+      "--projection",
+      "_id:_display_name:mime_type",
+    ],
+    { timeoutMs: lifecycleProbeTimeoutMs },
+  );
 }
 
 export function captureAndroidPhotoResources(device) {
@@ -464,4 +668,8 @@ export function captureAndroidPhotoResources(device) {
 
 export function androidBuildArtifact(root) {
   return resolve(root, appPath);
+}
+
+export function androidBuildSidecars(root) {
+  return [resolve(root, sourceMapPath)];
 }

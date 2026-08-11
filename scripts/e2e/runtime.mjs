@@ -1,18 +1,25 @@
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import {
-  appendFileSync,
-  copyFileSync,
+  closeSync,
   createWriteStream,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
+  renameSync,
+  rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
-import { connect } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { finished } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
+
+import { createMaestroEnvironment } from "./environment.mjs";
 
 export function log(scope, message) {
   console.log(`[e2e:${scope}] ${message}`);
@@ -52,24 +59,183 @@ export function capture(
   return result.stdout.trim();
 }
 
-export async function endWritable(stream) {
+async function endWritable(stream) {
   const completion = finished(stream, { cleanup: true });
   stream.end();
   await completion;
 }
 
+function processTreeIsAlive(child) {
+  if (!child?.pid) return false;
+  if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function signalProcessTree(child, signal) {
+  if (!child?.pid || !processTreeIsAlive(child)) return;
+  try {
+    if (process.platform === "win32") child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+}
+
+async function waitForProcessTreeExit(child, timeoutMs) {
+  const deadlineMs = Date.now() + timeoutMs;
+  while (processTreeIsAlive(child) && Date.now() < deadlineMs) {
+    await new Promise((resolvePromise) =>
+      setTimeout(resolvePromise, Math.min(50, Math.max(1, deadlineMs - Date.now()))),
+    );
+  }
+  return !processTreeIsAlive(child);
+}
+
+export async function terminateProcessTree(
+  child,
+  { gracefulTimeoutMs = 5000, killTimeoutMs = 5000 } = {},
+) {
+  if (!processTreeIsAlive(child)) return;
+  signalProcessTree(child, "SIGTERM");
+  if (await waitForProcessTreeExit(child, gracefulTimeoutMs)) return;
+  signalProcessTree(child, "SIGKILL");
+  if (!(await waitForProcessTreeExit(child, killTimeoutMs))) {
+    throw new Error(`Process tree ${child.pid} did not exit after SIGKILL.`);
+  }
+}
+
+function createBoundedCapture(maxBytes) {
+  let first = Buffer.alloc(0);
+  let last = Buffer.alloc(0);
+  let sourceBytes = 0;
+  return {
+    append(value) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      sourceBytes += chunk.length;
+      if (first.length < maxBytes) {
+        first = Buffer.concat([first, chunk.subarray(0, maxBytes - first.length)]);
+      }
+      last = Buffer.concat([last, chunk]);
+      if (last.length > maxBytes) last = last.subarray(last.length - maxBytes);
+    },
+    finish() {
+      if (sourceBytes <= maxBytes) {
+        return { output: first, sourceBytes, truncated: false };
+      }
+      const marker = Buffer.from(
+        `\n--- diagnostic bytes omitted from ${sourceBytes}-byte output ---\n`,
+      );
+      if (marker.length >= maxBytes) {
+        return { output: first.subarray(0, maxBytes), sourceBytes, truncated: true };
+      }
+      const contentBytes = maxBytes - marker.length;
+      const headBytes = Math.floor(contentBytes / 2);
+      const tailBytes = contentBytes - headBytes;
+      return {
+        output: Buffer.concat([
+          first.subarray(0, headBytes),
+          marker,
+          last.subarray(Math.max(0, last.length - tailBytes)),
+        ]),
+        sourceBytes,
+        truncated: true,
+      };
+    },
+  };
+}
+
+async function captureDiagnostic(command, args, { env = process.env, maxBytes, timeoutMs }) {
+  const captureWindow = createBoundedCapture(maxBytes);
+  const killGraceMs = Math.min(100, Math.max(1, Math.floor(timeoutMs / 4)));
+  let child;
+  try {
+    child = spawn(command, args, {
+      detached: process.platform !== "win32",
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    return { ...captureWindow.finish(), error, ok: false, timedOut: false };
+  }
+  child.stdout.on("data", (value) => captureWindow.append(value));
+  child.stderr.on("data", (value) => captureWindow.append(value));
+
+  return new Promise((resolvePromise) => {
+    let exitCode = null;
+    let finalizing = false;
+    let spawnError = null;
+    let stopPromise = null;
+    let timeoutHandle = null;
+    const stopTree = () =>
+      (stopPromise ??= terminateProcessTree(child, {
+        gracefulTimeoutMs: killGraceMs,
+        killTimeoutMs: killGraceMs,
+      }));
+    const finish = async (timedOut = false) => {
+      if (finalizing) return;
+      finalizing = true;
+      clearTimeout(timeoutHandle);
+      let terminationFailed = false;
+      try {
+        await stopTree();
+      } catch {
+        terminationFailed = true;
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      const captured = captureWindow.finish();
+      resolvePromise({
+        ...captured,
+        error: spawnError,
+        ok: !timedOut && !spawnError && !terminationFailed && !captured.truncated && exitCode === 0,
+        timedOut,
+      });
+    };
+    child.once("error", (error) => {
+      spawnError = error;
+      void finish();
+    });
+    child.once("exit", (code) => {
+      exitCode = code;
+      void stopTree().catch(() => {});
+    });
+    child.once("close", (code) => {
+      exitCode ??= code;
+      void finish();
+    });
+    const commandTimeoutMs = Math.max(1, timeoutMs - killGraceMs * 2);
+    timeoutHandle = setTimeout(() => void finish(true), commandTimeoutMs);
+  });
+}
+
 export function run(
   command,
   args,
-  { cleanup, cwd, env = process.env, input, outputPath, stdio = "inherit" } = {},
+  {
+    cleanup,
+    cwd,
+    env = process.env,
+    input,
+    outputPath,
+    stdio = "inherit",
+    terminate = terminateProcessTree,
+    timeoutMs,
+  } = {},
 ) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd,
+      detached: process.platform !== "win32",
       env,
       stdio: outputPath ? [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] : stdio,
     });
     const output = outputPath ? createWriteStream(outputPath, { flags: "w" }) : null;
+    let processTreeActive = true;
     if (output) {
       for (const [stream, destination] of [
         [child.stdout, process.stdout],
@@ -80,24 +246,45 @@ export function run(
       }
     }
     cleanup?.add(async () => {
-      if (child.exitCode === null) child.kill("SIGTERM");
+      if (!processTreeActive) return;
+      await terminate(child);
+      processTreeActive = false;
+      if (output && !output.destroyed) await endWritable(output);
     });
     let finalizing = false;
     let settled = false;
+    let timeoutHandle = null;
     const settle = (callback) => {
       if (settled) return;
       settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       callback();
     };
     const failOutput = (error) => {
       if (settled) return;
-      if (child.exitCode === null) child.kill("SIGTERM");
-      settle(() =>
-        reject(
-          new Error(`Unable to write command output to ${outputPath}: ${error.message}`, {
-            cause: error,
-          }),
-        ),
+      finalizing = true;
+      const outputError = new Error(
+        `Unable to write command output to ${outputPath}: ${error.message}`,
+        {
+          cause: error,
+        },
+      );
+      void terminate(child).then(
+        () => {
+          processTreeActive = false;
+          settle(() => reject(outputError));
+        },
+        (terminationError) => {
+          settle(() =>
+            reject(
+              processTreeTerminationError(
+                [outputError, terminationError],
+                `Command output failed and process tree ${child.pid} could not be terminated.`,
+                outputError,
+              ),
+            ),
+          );
+        },
       );
     };
     const finish = (callback) => {
@@ -110,39 +297,92 @@ export function run(
       }
     };
     output?.once("error", failOutput);
-    child.once("error", (error) => finish(() => reject(error)));
+    child.once("error", (error) => {
+      processTreeActive = false;
+      finish(() => reject(error));
+    });
     child.once("close", (code, signal) => {
-      finish(() => {
-        if (code === 0) {
-          resolvePromise();
-        } else {
-          reject(
-            new Error(
+      const commandFailure =
+        code === 0
+          ? null
+          : new Error(
               `Command failed (${code ?? signal ?? "unknown"}): ${command} ${args.join(" ")}`,
+            );
+      void terminate(child).then(
+        () => {
+          processTreeActive = false;
+          finish(() => (commandFailure ? reject(commandFailure) : resolvePromise()));
+        },
+        (terminationError) => {
+          finish(() =>
+            reject(
+              commandFailure
+                ? processTreeTerminationError(
+                    [commandFailure, terminationError],
+                    `Command failed and process tree ${child.pid} could not be terminated.`,
+                    commandFailure,
+                  )
+                : processTreeTerminationError(
+                    [terminationError],
+                    `Process tree ${child.pid} could not be terminated after command completion.`,
+                    terminationError,
+                  ),
             ),
           );
-        }
-      });
+        },
+      );
     });
+    if (timeoutMs !== undefined) {
+      timeoutHandle = setTimeout(() => {
+        if (settled || finalizing) return;
+        finalizing = true;
+        const timeoutError = Object.assign(
+          new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`),
+          { code: "E2E_COMMAND_TIMEOUT" },
+        );
+        void (async () => {
+          try {
+            await terminate(child);
+            processTreeActive = false;
+            if (output && !output.destroyed) await endWritable(output);
+            settle(() => reject(timeoutError));
+          } catch (terminationError) {
+            settle(() =>
+              reject(
+                processTreeTerminationError(
+                  [timeoutError, terminationError],
+                  `Command timed out and process tree ${child.pid} could not be terminated.`,
+                  timeoutError,
+                ),
+              ),
+            );
+          }
+        })();
+      }, timeoutMs);
+    }
     if (input !== undefined && child.stdin) child.stdin.end(input);
+  });
+}
+
+function processTreeTerminationError(errors, message, cause) {
+  return Object.assign(new AggregateError(errors, message, { cause }), {
+    code: "E2E_PROCESS_TREE_TERMINATION_FAILED",
   });
 }
 
 export async function waitUntil(check, timeoutMs, description, intervalMs = 1000) {
   const deadline = Date.now() + timeoutMs;
-  let lastError = null;
   while (Date.now() < deadline) {
-    try {
-      const value = await check();
-      if (value) return value;
-    } catch (error) {
-      lastError = error;
+    const value = await check(deadline);
+    if (value) return value;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) {
+      await new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, Math.min(intervalMs, remainingMs)),
+      );
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, intervalMs));
   }
-  throw new Error(
-    `Timed out waiting for ${description}${lastError ? `: ${String(lastError)}` : ""}`,
-  );
+  throw new Error(`Timed out waiting for ${description}`);
 }
 
 export function createCleanupManager() {
@@ -155,17 +395,119 @@ export function createCleanupManager() {
     run() {
       if (cleanupPromise) return cleanupPromise;
       cleanupPromise = (async () => {
+        const errors = [];
         for (const task of tasks.reverse()) {
           try {
             await task();
           } catch (error) {
             console.error(`[e2e:cleanup] ${String(error)}`);
+            errors.push(error);
           }
         }
+        if (errors.length === 1) throw errors[0];
+        if (errors.length > 1)
+          throw new AggregateError(errors, "Multiple E2E cleanup tasks failed.");
       })();
       return cleanupPromise;
     },
   };
+}
+
+export async function finalizeCleanup(cleanup, operationError = null) {
+  try {
+    await cleanup.run();
+  } catch (cleanupError) {
+    if (operationError) {
+      throw new AggregateError(
+        [operationError, cleanupError],
+        "The E2E operation failed and its cleanup also failed.",
+        { cause: operationError },
+      );
+    }
+    throw cleanupError;
+  }
+  if (operationError) throw operationError;
+}
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+export function acquireE2ePlatformLock(
+  platform,
+  cleanup,
+  {
+    isProcessAlive = processIsAlive,
+    lockRoot = join(tmpdir(), "plogkit-e2e-device-locks"),
+    ownerPid = process.pid,
+  } = {},
+) {
+  if (!new Set(["android", "ios"]).has(platform)) {
+    throw new Error(`Unsupported E2E device lock platform: ${platform}`);
+  }
+  mkdirSync(lockRoot, { recursive: true });
+  const lockDirectory = join(lockRoot, platform);
+  const ownerPath = join(lockDirectory, "owner.json");
+  const token = randomUUID();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      mkdirSync(lockDirectory);
+      try {
+        writeFileSync(
+          ownerPath,
+          `${JSON.stringify({ ownerPid, startedAt: new Date().toISOString(), token })}\n`,
+        );
+      } catch (error) {
+        rmSync(lockDirectory, { force: true, recursive: true });
+        throw error;
+      }
+      cleanup.add(() => {
+        let owner;
+        try {
+          owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+        } catch (error) {
+          throw new Error(`Unable to verify the ${platform} E2E device lock owner.`, {
+            cause: error,
+          });
+        }
+        if (owner.token !== token || owner.ownerPid !== ownerPid) {
+          throw new Error(`The ${platform} E2E device lock owner changed before cleanup.`);
+        }
+        rmSync(lockDirectory, { recursive: true });
+      });
+      return lockDirectory;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+
+    let owner = null;
+    try {
+      owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    } catch {
+      throw new Error(
+        `The ${platform} E2E device is locked by another runner whose owner is not yet readable.`,
+      );
+    }
+    if (isProcessAlive(owner.ownerPid)) {
+      throw new Error(
+        `The ${platform} E2E device is already owned by runner PID ${owner.ownerPid}.`,
+      );
+    }
+    const staleDirectory = `${lockDirectory}.stale-${randomUUID()}`;
+    try {
+      renameSync(lockDirectory, staleDirectory);
+      rmSync(staleDirectory, { force: true, recursive: true });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`Unable to acquire the ${platform} E2E device lock after stale-owner recovery.`);
 }
 
 export function installSignalHandlers(cleanup) {
@@ -173,7 +515,10 @@ export function installSignalHandlers(cleanup) {
   const handle = (exitCode) => {
     if (handlingSignal) return;
     handlingSignal = true;
-    void cleanup.run().finally(() => process.exit(exitCode));
+    void cleanup
+      .run()
+      .catch((error) => console.error(`[e2e:cleanup] ${String(error)}`))
+      .finally(() => process.exit(exitCode));
   };
   process.once("SIGINT", () => handle(130));
   process.once("SIGTERM", () => handle(143));
@@ -182,380 +527,456 @@ export function installSignalHandlers(cleanup) {
 export function createArtifactRoot() {
   const configured = process.env.E2E_ARTIFACTS_DIR;
   const timestamp = new Date().toISOString().replaceAll(":", "-");
-  const directory = configured ? resolve(configured) : join(tmpdir(), "plogkit-maestro", timestamp);
+  const baseDirectory = configured ? resolve(configured) : join(tmpdir(), "plogkit-maestro");
+  const directory = join(baseDirectory, `${timestamp}-${process.pid}-${randomUUID()}`);
   mkdirSync(directory, { recursive: true });
   return directory;
 }
 
-const MAESTRO_MIN_VERSION = "2.7.0";
-
-function compareVersions(left, right) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
-  for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] !== rightParts[index]) {
-      return leftParts[index] - rightParts[index];
-    }
-  }
-  return 0;
-}
+const runtimeRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const MAESTRO_VERSION = readFileSync(join(runtimeRoot, ".maestro-version"), "utf8").trim();
+const MAESTRO_FLOW_TIMEOUT_MS = 10 * 60 * 1000;
+const MAESTRO_SUITE_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function validateMaestroVersion() {
   let output;
   try {
-    output = capture("maestro", ["--version"]);
+    output = capture("maestro", ["--version"], {
+      env: createMaestroEnvironment(),
+      timeoutMs: 15000,
+    });
   } catch {
-    throw new Error(
-      `Maestro ${MAESTRO_MIN_VERSION} or newer is required but was not found on PATH.`,
-    );
+    throw new Error(`Maestro ${MAESTRO_VERSION} is required but was not found on PATH.`);
   }
   const installedVersion = output.match(/\d+\.\d+\.\d+/)?.[0];
   if (!installedVersion) {
     throw new Error(`Unable to determine the installed Maestro version from: ${output}`);
   }
-  if (compareVersions(installedVersion, MAESTRO_MIN_VERSION) < 0) {
-    log(
-      "setup",
-      `Maestro ${installedVersion} is older than the minimum supported version ${MAESTRO_MIN_VERSION}; flows are verified on ${MAESTRO_MIN_VERSION} or newer.`,
-    );
-  }
-}
-
-function portIsOpen(port) {
-  return new Promise((resolvePromise) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.setTimeout(500);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolvePromise(true);
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      resolvePromise(false);
-    });
-    socket.once("error", () => resolvePromise(false));
-  });
-}
-
-export async function assertMetroPortAvailable() {
-  if (await portIsOpen(8081)) {
+  if (installedVersion !== MAESTRO_VERSION) {
     throw new Error(
-      "Port 8081 is already in use. Stop the existing Metro or other service before running E2E.",
+      `Maestro ${MAESTRO_VERSION} is required, but ${installedVersion} is installed. ` +
+        "Install the repository-pinned version from .maestro-version.",
     );
   }
 }
 
-async function metroIsHealthy() {
-  try {
-    const response = await fetch("http://127.0.0.1:8081/status", {
-      signal: AbortSignal.timeout(1000),
-    });
-    return response.ok && (await response.text()).trim() === "packager-status:running";
-  } catch {
-    return false;
-  }
-}
-
-export async function startMetro({ artifactRoot, cleanup, root }) {
-  const logPath = join(artifactRoot, "metro.log");
-  const logStream = createWriteStream(logPath, { flags: "w" });
-  log("metro", `Starting an owned Metro server; log: ${logPath}`);
-  const child = spawn(
-    process.execPath,
-    [
-      "--dns-result-order=ipv4first",
-      "./node_modules/expo/bin/cli",
-      "start",
-      "--dev-client",
-      "--localhost",
-    ],
-    { cwd: root, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  for (const [stream, destination] of [
-    [child.stdout, process.stdout],
-    [child.stderr, process.stderr],
-  ]) {
-    stream.on("data", (chunk) => {
-      destination.write(chunk);
-      logStream.write(chunk);
-    });
-  }
-  child.once("error", (error) => {
-    console.error(`[e2e:metro] ${String(error)}`);
-  });
-  cleanup.add(async () => {
-    if (child.exitCode === null) {
-      log("metro", "Stopping Metro.");
-      child.kill("SIGINT");
-      await Promise.race([
-        new Promise((resolvePromise) => child.once("exit", resolvePromise)),
-        new Promise((resolvePromise) => setTimeout(resolvePromise, 10000)),
-      ]);
-      if (child.exitCode === null) child.kill("SIGTERM");
-    }
-    await new Promise((resolvePromise) => logStream.end(resolvePromise));
-  });
-  await waitUntil(
-    async () => {
-      if (child.exitCode !== null) throw new Error(`Metro exited early. See ${logPath}`);
-      return metroIsHealthy();
-    },
-    60000,
-    "Metro to become healthy on 127.0.0.1:8081",
-  );
-}
-
-async function runMaestro({ artifactRoot, cleanup, device, kind, root, target }) {
-  const outputDirectory = join(artifactRoot, device.platform, kind);
-  const startedAtMs = Date.now();
+async function runMaestro({ artifactRoot, cleanup, device, root, target, timeoutMs }) {
+  const outputDirectory = join(artifactRoot, device.platform, "flows");
   mkdirSync(outputDirectory, { recursive: true });
   log(
     device.platform,
-    `${kind === "warmup" ? "Warming the app" : "Running Maestro flows"} on ${device.deviceId}; artifacts: ${outputDirectory}`,
+    `Running Maestro flows on ${device.deviceId}; artifacts: ${outputDirectory}`,
   );
-  try {
-    await run(
-      "pnpm",
-      [
-        "exec",
-        "maestro",
-        "--device",
-        device.deviceId,
-        "test",
-        `--test-output-dir=${outputDirectory}`,
-        target,
-      ],
-      { cleanup, cwd: root, outputPath: join(outputDirectory, "runner-output.log") },
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const evidence = `${message}\n${readArtifactEvidence(outputDirectory)}`;
-    const category = classifyFailure(evidence);
-    await collectFailureDiagnostics({
-      diagnosticDirectory: outputDirectory,
-      device,
-      error: message,
-      kind: category,
-      sinceMs: startedAtMs,
+  if (device.platform === "android") {
+    capture(device.adbPath, ["-s", device.deviceId, "logcat", "-b", "all", "-c"], {
+      timeoutMs: 15000,
     });
-    const label = kind === "warmup" ? "Warm-up" : "Maestro flow";
-    const failure = new Error(`${label} failed [${category}]: ${message}`, { cause: error });
-    failure.category = category;
-    throw failure;
   }
-}
-
-export function warmUpApp(options) {
-  return runMaestro({
-    ...options,
-    kind: "warmup",
-    target: "e2e/subflows/warmup.yaml",
-  });
-}
-
-const SUITE_ABORT_CATEGORIES = new Set(["metro", "system-ui"]);
-
-export function shouldAbortMaestroSuite(category) {
-  return SUITE_ABORT_CATEGORIES.has(category);
+  await run(
+    "pnpm",
+    [
+      "exec",
+      "maestro",
+      "--device",
+      device.deviceId,
+      "test",
+      `--test-output-dir=${outputDirectory}`,
+      ...(target.endsWith("/e2e") ? [`--config=${resolve(target, "config.yaml")}`] : []),
+      target,
+    ],
+    {
+      cleanup,
+      cwd: root,
+      env: createMaestroEnvironment(),
+      outputPath: join(outputDirectory, "runner-output.log"),
+      timeoutMs,
+    },
+  );
 }
 
 export async function runMaestroSuite(options) {
   const { artifactRoot, cleanup, device, flow, root } = options;
+  const e2eRoot = options.e2eRoot ?? resolve(root, "e2e");
+  const target = flow ? resolve(e2eRoot, "flows", `${flow}.yaml`) : e2eRoot;
+  return runMaestro({
+    artifactRoot,
+    cleanup,
+    device,
+    root,
+    target,
+    timeoutMs: flow ? MAESTRO_FLOW_TIMEOUT_MS : MAESTRO_SUITE_TIMEOUT_MS,
+  });
+}
 
-  if (flow) {
-    const target = `e2e/flows/${flow}.yaml`;
-    return runMaestro({ artifactRoot, cleanup, device, kind: "flows", root, target });
+const DIAGNOSTIC_TIMEOUT_MS = 20000;
+const DIAGNOSTIC_PROBE_TIMEOUT_MS = 5000;
+const DIAGNOSTIC_TOTAL_BYTES = 16 * 1024 * 1024;
+const DIAGNOSTIC_SUMMARY_BYTES = 16 * 1024;
+const DIAGNOSTIC_FILE_BYTES = 2 * 1024 * 1024;
+const DIAGNOSTIC_REPORT_BYTES = 8 * 1024 * 1024;
+const DIAGNOSTIC_REPORT_FILES = 8;
+const DIAGNOSTIC_CLOCK_SKEW_MS = 5000;
+const IOS_REPORT_EXTENSION = /\.(ips|crash|diag)$/i;
+const IOS_RELEVANT_REPORT =
+  /(PlogKit|Maestro|XCTest|XCTRunner|SpringBoard|backboardd|CoreSimulator)/i;
+const ANDROID_REPORT_DIRECTORIES = [
+  { artifactName: "tombstones", remotePath: "/data/tombstones" },
+  { artifactName: "anr", remotePath: "/data/anr" },
+];
+
+function readFileChunk(fileDescriptor, length, position) {
+  const buffer = Buffer.alloc(length);
+  let bytesRead = 0;
+  while (bytesRead < length) {
+    const count = readSync(
+      fileDescriptor,
+      buffer,
+      bytesRead,
+      length - bytesRead,
+      position + bytesRead,
+    );
+    if (count === 0) break;
+    bytesRead += count;
   }
+  return buffer.subarray(0, bytesRead);
+}
 
-  // Isolate each flow in a separate maestro invocation so that a single
-  // XCTest hierarchy failure or driver error cannot cascade and cause
-  // subsequent independent flows to falsely report an app crash.
-  const flowsDir = resolve(root, "e2e", "flows");
-  const flowFiles = readdirSync(flowsDir)
-    .filter((f) => f.endsWith(".yaml"))
-    .sort();
+function readBoundedFile(path, byteLimit) {
+  const size = statSync(path).size;
+  const bytesToRead = Math.min(size, byteLimit);
+  const fileDescriptor = openSync(path, "r");
+  try {
+    if (size <= bytesToRead) {
+      const body = readFileChunk(fileDescriptor, bytesToRead, 0);
+      return { body, size };
+    }
+    const marker = Buffer.from(`\n--- evidence bytes omitted from ${size}-byte file ---\n`);
+    if (marker.length >= bytesToRead) {
+      return { body: readFileChunk(fileDescriptor, bytesToRead, 0), size };
+    }
+    const contentBytes = bytesToRead - marker.length;
+    const headBytes = Math.floor(contentBytes / 2);
+    const tailBytes = contentBytes - headBytes;
+    return {
+      body: Buffer.concat([
+        readFileChunk(fileDescriptor, headBytes, 0),
+        marker,
+        readFileChunk(fileDescriptor, tailBytes, size - tailBytes),
+      ]),
+      size,
+    };
+  } finally {
+    closeSync(fileDescriptor);
+  }
+}
 
-  const failures = [];
-  for (const flowFile of flowFiles) {
-    const flowName = flowFile.replace(/\.yaml$/, "");
-    const target = resolve(flowsDir, flowFile);
-    try {
-      await runMaestro({
-        artifactRoot,
-        cleanup,
-        device,
-        kind: `flows/${flowName}`,
-        root,
-        target,
-      });
-      log(device.platform, `Flow ${flowName} passed.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const category = error?.category ?? "business-assertion";
-      log(device.platform, `Flow ${flowName} FAILED [${category}]: ${message}`);
-      failures.push({ flow: flowName, error: message, category });
-      if (shouldAbortMaestroSuite(category)) throw error;
-      // A new Maestro process isolates the remaining flow-local failures.
+function createDiagnosticState(timeoutMs) {
+  return {
+    complete: true,
+    deadlineMs: Date.now() + Math.max(0, timeoutMs),
+    remainingBytes: DIAGNOSTIC_TOTAL_BYTES - DIAGNOSTIC_SUMMARY_BYTES,
+  };
+}
+
+function diagnosticTimeout(state, maximumMs = DIAGNOSTIC_PROBE_TIMEOUT_MS) {
+  const timeoutMs = Math.max(0, Math.min(maximumMs, state.deadlineMs - Date.now()));
+  if (timeoutMs === 0) state.complete = false;
+  return timeoutMs;
+}
+
+function storeEvidence(path, value, state, knownTruncated = false) {
+  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  if (state.remainingBytes < source.length) knownTruncated = true;
+  const body = source.subarray(0, state.remainingBytes);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, body);
+    state.remainingBytes -= body.length;
+  } catch {
+    state.complete = false;
+    return 0;
+  }
+  if (knownTruncated) state.complete = false;
+  return body.length;
+}
+
+async function runDiagnostic(command, args, state, maximumBytes, maximumMs) {
+  const timeoutMs = diagnosticTimeout(state, maximumMs);
+  const maxBytes = Math.min(maximumBytes, state.remainingBytes);
+  if (timeoutMs === 0 || maxBytes === 0) {
+    state.complete = false;
+    return null;
+  }
+  let result;
+  try {
+    result = await captureDiagnostic(command, args, { maxBytes, timeoutMs });
+  } catch {
+    state.complete = false;
+    return null;
+  }
+  if (!result.ok) state.complete = false;
+  if (Date.now() >= state.deadlineMs) state.complete = false;
+  return result;
+}
+
+async function captureEvidence(path, command, args, state, maximumBytes, maximumMs) {
+  const result = await runDiagnostic(command, args, state, maximumBytes, maximumMs);
+  if (!result) return null;
+  storeEvidence(path, result.output, state, result.truncated);
+  return result;
+}
+
+function parseAndroidReportListing(output, remotePath, sinceMs) {
+  const minimumMtimeMs = Math.max(0, sinceMs - DIAGNOSTIC_CLOCK_SKEW_MS);
+  return output
+    .toString("utf8")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^(\d+)\|(\d+)\|(.+)$/))
+    .filter(Boolean)
+    .map((match) => ({
+      mtimeMs: Number(match[1]) * 1000,
+      path: match[3],
+      size: Number(match[2]),
+    }))
+    .filter((report) => {
+      const prefix = `${remotePath}/`;
+      const name = report.path.slice(prefix.length);
+      return (
+        report.path.startsWith(prefix) &&
+        report.mtimeMs >= minimumMtimeMs &&
+        name.length > 0 &&
+        !name.includes("/") &&
+        /^[A-Za-z0-9._-]+$/.test(name) &&
+        Number.isFinite(report.size) &&
+        report.size >= 0
+      );
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path));
+}
+
+async function collectAndroidReports(diagnosticDirectory, device, sinceMs, state) {
+  const adb = (args) => ["-s", device.deviceId, ...args];
+  let groupRemainingBytes = Math.min(DIAGNOSTIC_REPORT_BYTES, state.remainingBytes);
+  let storedFiles = 0;
+  for (const directory of ANDROID_REPORT_DIRECTORIES) {
+    if (groupRemainingBytes === 0 || storedFiles >= DIAGNOSTIC_REPORT_FILES) {
+      state.complete = false;
+      break;
+    }
+    const listingCommand =
+      `for report in ${directory.remotePath}/*; do ` +
+      `if [ -f "$report" ]; then stat -c '%Y|%s|%n' "$report"; fi; done`;
+    const listing = await runDiagnostic(
+      device.adbPath,
+      adb(["shell", listingCommand]),
+      state,
+      256 * 1024,
+    );
+    if (!listing?.ok) continue;
+    const reports = parseAndroidReportListing(listing.output, directory.remotePath, sinceMs);
+    for (const report of reports) {
+      if (groupRemainingBytes === 0 || storedFiles >= DIAGNOSTIC_REPORT_FILES) {
+        state.complete = false;
+        break;
+      }
+      const allocation = Math.min(DIAGNOSTIC_FILE_BYTES, groupRemainingBytes, state.remainingBytes);
+      const captured = await runDiagnostic(
+        device.adbPath,
+        adb(["exec-out", "cat", report.path]),
+        state,
+        allocation,
+      );
+      if (!captured) continue;
+      const truncated = captured.truncated || report.size > captured.sourceBytes;
+      const name = report.path.slice(report.path.lastIndexOf("/") + 1);
+      const storedBytes = storeEvidence(
+        join(diagnosticDirectory, directory.artifactName, truncated ? `${name}.excerpt.txt` : name),
+        captured.output,
+        state,
+        truncated,
+      );
+      groupRemainingBytes -= storedBytes;
+      storedFiles += 1;
     }
   }
+}
 
-  if (failures.length > 0) {
-    const summary = failures.map((f) => `  ${f.flow} [${f.category}]`).join("\n");
-    throw new Error(
-      `${failures.length}/${flowFiles.length} flows failed:\n${summary}\n` +
-        "See per-flow artifact directories for details.",
+async function collectAndroidDiagnostics(diagnosticDirectory, device, sinceMs, state) {
+  if (!device.adbPath) {
+    state.complete = false;
+    return;
+  }
+  const adb = (args) => ["-s", device.deviceId, ...args];
+  for (const [artifact, args, maxBytes] of [
+    [
+      "logcat.txt",
+      ["logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-t", "4000"],
+      4 * 1024 * 1024,
+    ],
+    ["events-logcat.txt", ["logcat", "-b", "events", "-d", "-t", "4000"], DIAGNOSTIC_FILE_BYTES],
+    ["dumpsys-window.txt", ["shell", "dumpsys", "window"], DIAGNOSTIC_FILE_BYTES],
+    ["dumpsys-activity.txt", ["shell", "dumpsys", "activity", "activities"], 1024 * 1024],
+  ]) {
+    await captureEvidence(
+      join(diagnosticDirectory, artifact),
+      device.adbPath,
+      adb(args),
+      state,
+      maxBytes,
     );
   }
+  await collectAndroidReports(diagnosticDirectory, device, sinceMs, state);
 }
 
-const APP_CRASH_PATTERNS =
-  /\b(app\s+(stopped|not\s+running|crash)|FATAL\s+EXCEPTION|AndroidRuntime|SIGABRT|SIGSEGV|EXC_CRASH|EXC_BAD_ACCESS)\b/i;
-const XCTEST_DRIVER_PATTERNS =
-  /\b(kAXErrorInvalidUIElement|AXErrorInvalidUIElement|hierarchy\s+(failed|error)|cannot\s+determine\s+UI)\b|\bXCTest.{0,100}\b(failed|error|timed?\s*out|unavailable)\b/i;
-const BENIGN_XCTEST_PENDING_RECORD_PATTERN =
-  /\bXCTestDriver:\s+Recorded pending request for target session\b.*\btimeout\b/i;
-const XCTEST_FAILURE_TERMS = /\b(failed|error|timed\s*out|unavailable)\b/i;
-const METRO_FAILURE_PATTERNS =
-  /\b(?:Metro|packager).{0,100}\b(?:exited|failed|error|unavailable|not\s+running)\b|\b(?:exited|failed|error|unavailable).{0,100}\b(?:Metro|packager)\b|\b(?:bundling\s+failed|ERR_STREAM_PREMATURE_CLOSE|ECONNREFUSED(?:\s+127\.0\.0\.1)?:8081)\b/i;
-const COLD_BUNDLE_PROGRESS_PATTERN = /\bBundling\s+\d{1,3}%/i;
-const WARMUP_HOME_SCREEN_FAILURE_PATTERN =
-  /\bAssertion is false:\s*(?:id:\s*)?home-screen is visible\b/i;
-const SYSTEM_UI_PATTERNS =
-  /\b(System\s+UI\s+(?:(?:isn['’]t|is\s+not)\s+responding|has\s+stopped)|Application\s+Not\s+Responding:\s*System\s+UI|AppNotRespondingDialog|android:id\/aerr_(?:close|wait)|device\s+(offline|not\s+found)|simulator\s+(unavailable|failed|error)|emulator\s+(exited|failed))\b|(?:ANR|not\s+responding).{0,100}com\.android\.systemui|com\.android\.systemui.{0,100}(?:ANR|not\s+responding)/i;
-const BUSINESS_ASSERTION_PATTERNS =
-  /\b(Assertion is false|No visible element found|Could not find a visible element matching selector)\b/i;
-
-const TEXT_ARTIFACT_EXTENSIONS = /\.(json|log|txt|xml|yaml|yml)$/i;
-
-function readArtifactEvidence(directory) {
-  if (!existsSync(directory)) return "";
-  const evidence = [];
-  const visit = (path) => {
-    for (const entry of readdirSync(path, { withFileTypes: true })) {
-      const entryPath = join(path, entry.name);
-      if (entry.isDirectory()) visit(entryPath);
-      else if (entry.isFile() && TEXT_ARTIFACT_EXTENSIONS.test(entry.name)) {
-        try {
-          evidence.push(readFileSync(entryPath, "utf8"));
-        } catch {
-          // Failure classification is best-effort and must preserve the original error.
-        }
-      }
-    }
-  };
-  visit(directory);
-  return evidence.join("\n");
-}
-
-function withoutBenignXCTestPendingRecords(message) {
-  return message
-    .split(/\r?\n/)
-    .filter(
-      (line) =>
-        !BENIGN_XCTEST_PENDING_RECORD_PATTERN.test(line) || XCTEST_FAILURE_TERMS.test(line),
-    )
-    .join("\n");
-}
-
-export function classifyFailure(message) {
-  if (
-    METRO_FAILURE_PATTERNS.test(message) ||
-    (COLD_BUNDLE_PROGRESS_PATTERN.test(message) &&
-      WARMUP_HOME_SCREEN_FAILURE_PATTERN.test(message))
-  ) {
-    return "metro";
-  }
-  if (SYSTEM_UI_PATTERNS.test(message)) return "system-ui";
-  if (XCTEST_DRIVER_PATTERNS.test(withoutBenignXCTestPendingRecords(message))) {
-    return "xctest-driver";
-  }
-  if (APP_CRASH_PATTERNS.test(message)) return "app-crash";
-  if (BUSINESS_ASSERTION_PATTERNS.test(message)) return "business-assertion";
-  return "business-assertion";
-}
-
-const DIAGNOSTIC_REPORT_EXTENSION = /\.(ips|crash|diag)$/i;
-const RELEVANT_DIAGNOSTIC_REPORT =
-  /(PlogKit|Maestro|XCTest|XCTRunner|SpringBoard|backboardd|CoreSimulator)/i;
-const DIAGNOSTIC_CLOCK_SKEW_MS = 5000;
-
-export function copyRelevantDiagnosticReports({ destinationDirectory, reportsDirectory, sinceMs }) {
+function copyIosReports(diagnosticDirectory, reportsDirectory, sinceMs, state) {
   if (!existsSync(reportsDirectory)) return;
-  for (const entry of readdirSync(reportsDirectory)) {
-    if (!DIAGNOSTIC_REPORT_EXTENSION.test(entry) || !RELEVANT_DIAGNOSTIC_REPORT.test(entry)) {
-      continue;
+  let entries;
+  try {
+    entries = readdirSync(reportsDirectory).sort();
+  } catch {
+    state.complete = false;
+    return;
+  }
+  let groupRemainingBytes = Math.min(DIAGNOSTIC_REPORT_BYTES, state.remainingBytes);
+  let storedFiles = 0;
+  for (const entry of entries) {
+    if (!IOS_REPORT_EXTENSION.test(entry) || !IOS_RELEVANT_REPORT.test(entry)) continue;
+    if (Date.now() >= state.deadlineMs) {
+      state.complete = false;
+      break;
+    }
+    if (storedFiles >= DIAGNOSTIC_REPORT_FILES || groupRemainingBytes === 0) {
+      state.complete = false;
+      break;
     }
     const source = join(reportsDirectory, entry);
+    let report;
     try {
       if (statSync(source).mtimeMs < sinceMs - DIAGNOSTIC_CLOCK_SKEW_MS) continue;
-      copyFileSync(source, join(destinationDirectory, entry));
+      report = readBoundedFile(
+        source,
+        Math.min(DIAGNOSTIC_FILE_BYTES, groupRemainingBytes, state.remainingBytes),
+      );
     } catch {
-      // One unreadable or concurrently removed report must not hide the remaining evidence.
+      state.complete = false;
+      continue;
     }
+    const truncated = report.size > report.body.length;
+    const storedBytes = storeEvidence(
+      join(diagnosticDirectory, truncated ? `${entry}.excerpt.txt` : entry),
+      report.body,
+      state,
+      truncated,
+    );
+    groupRemainingBytes -= storedBytes;
+    storedFiles += 1;
+  }
+}
+
+async function collectIosDiagnostics(
+  diagnosticDirectory,
+  device,
+  iosReportsDirectory,
+  sinceMs,
+  state,
+) {
+  const lookbackSeconds = Math.max(30, Math.ceil((Date.now() - sinceMs) / 1000) + 5);
+  await captureEvidence(
+    join(diagnosticDirectory, "simulator-system.log"),
+    "xcrun",
+    [
+      "simctl",
+      "spawn",
+      device.deviceId,
+      "log",
+      "show",
+      "--style",
+      "compact",
+      "--last",
+      `${lookbackSeconds}s`,
+      "--predicate",
+      'process == "PlogKit" OR process == "SpringBoard" OR process == "backboardd" OR process == "XCTRunner" OR eventMessage CONTAINS[c] "crash" OR eventMessage CONTAINS[c] "jetsam"',
+    ],
+    state,
+    8 * 1024 * 1024,
+    10000,
+  );
+  copyIosReports(
+    diagnosticDirectory,
+    iosReportsDirectory ?? join(homedir(), "Library", "Logs", "DiagnosticReports"),
+    sinceMs,
+    state,
+  );
+}
+
+function writeFailureSummary(diagnosticDirectory, error, state) {
+  const originalError = error instanceof Error ? error.message : String(error);
+  const prefix = `diagnostics: ${state.complete ? "complete" : "incomplete"}\noriginal error: `;
+  const availableErrorBytes = DIAGNOSTIC_SUMMARY_BYTES - Buffer.byteLength(prefix) - 1;
+  const errorBuffer = createBoundedCapture(availableErrorBytes);
+  errorBuffer.append(originalError);
+  const boundedError = errorBuffer.finish();
+  if (boundedError.truncated) state.complete = false;
+  const body = Buffer.concat([
+    Buffer.from(`diagnostics: ${state.complete ? "complete" : "incomplete"}\noriginal error: `),
+    boundedError.output,
+    Buffer.from("\n"),
+  ]);
+  try {
+    writeFileSync(join(diagnosticDirectory, "failure-summary.txt"), body);
+    return true;
+  } catch {
+    state.complete = false;
+    return false;
   }
 }
 
 export async function collectFailureDiagnostics({
-  diagnosticDirectory: diagDir,
+  diagnosticDirectory,
   device,
   error,
-  kind,
+  iosReportsDirectory,
+  sinceMs = Date.now(),
+  timeoutMs = DIAGNOSTIC_TIMEOUT_MS,
+}) {
+  const state = createDiagnosticState(timeoutMs);
+  try {
+    mkdirSync(diagnosticDirectory, { recursive: true });
+  } catch {
+    return { complete: false };
+  }
+  try {
+    if (device.platform === "android") {
+      await collectAndroidDiagnostics(diagnosticDirectory, device, sinceMs, state);
+    } else if (device.platform === "ios") {
+      await collectIosDiagnostics(diagnosticDirectory, device, iosReportsDirectory, sinceMs, state);
+    } else {
+      state.complete = false;
+    }
+  } catch {
+    state.complete = false;
+  }
+  writeFailureSummary(diagnosticDirectory, error, state);
+  return { complete: state.complete };
+}
+
+export async function withFailureDiagnostics({
+  diagnosticDirectory,
+  device,
+  iosReportsDirectory,
+  operation,
   sinceMs = Date.now(),
 }) {
   try {
-    mkdirSync(diagDir, { recursive: true });
-    // Always save the failure classification and error message.
-    appendFileSync(join(diagDir, "failure-summary.txt"), `category: ${kind}\nerror: ${error}\n`);
-  } catch {
-    // Diagnostics are best-effort and must never replace the original E2E failure.
-    return;
-  }
-
-  // Collect platform-specific crash and system UI diagnostics.
-  if (kind === "app-crash" || kind === "xctest-driver" || kind === "system-ui") {
-    if (device.platform === "ios") {
-      try {
-        const reportsDir = join(homedir(), "Library", "Logs", "DiagnosticReports");
-        copyRelevantDiagnosticReports({
-          destinationDirectory: diagDir,
-          reportsDirectory: reportsDir,
-          sinceMs,
-        });
-
-        // Capture the simulator system log if the device is still reachable.
-        const log = capture(
-          "xcrun",
-          ["simctl", "spawn", device.deviceId, "log", "show", "--last", "30s"],
-          { allowFailure: true, timeoutMs: 15000 },
-        );
-        if (log) appendFileSync(join(diagDir, "simulator-system.log"), log);
-      } catch {
-        // Diagnostic collection is best-effort.
-      }
-    } else {
-      try {
-        // Capture logcat buffer for crash analysis.
-        const logcat = capture("adb", ["-s", device.deviceId, "logcat", "-d", "-t", "4000"], {
-          allowFailure: true,
-          timeoutMs: 15000,
-        });
-        if (logcat) appendFileSync(join(diagDir, "logcat.txt"), logcat);
-
-        // Capture ANR traces if any.
-        const anr = capture(
-          "adb",
-          ["-s", device.deviceId, "shell", "cat", "/data/anr/traces.txt"],
-          { allowFailure: true, timeoutMs: 15000 },
-        );
-        if (anr) appendFileSync(join(diagDir, "anr-traces.txt"), anr);
-
-        capture("adb", ["-s", device.deviceId, "pull", "/data/anr", join(diagDir, "anr")], {
-          allowFailure: true,
-          timeoutMs: 15000,
-        });
-      } catch {
-        // Diagnostic collection is best-effort.
-      }
-    }
+    return await operation();
+  } catch (error) {
+    await collectFailureDiagnostics({
+      diagnosticDirectory,
+      device,
+      error,
+      iosReportsDirectory,
+      sinceMs,
+    });
+    throw error;
   }
 }
