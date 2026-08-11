@@ -103,6 +103,20 @@ async function validateLockedPlatformEnvironment(platforms, { artifactRoot, clea
   }
 }
 
+export async function validateAfterAcquiringPlatformLocks(
+  platforms,
+  options,
+  {
+    acquirePlatformLock = acquireE2ePlatformLock,
+    validateLockedEnvironment = validateLockedPlatformEnvironment,
+  } = {},
+) {
+  for (const platform of [...platforms].sort()) {
+    acquirePlatformLock(platform, options.cleanup);
+  }
+  await validateLockedEnvironment(platforms, options);
+}
+
 function buildPaths(platform) {
   return platform === "ios"
     ? { artifact: iosBuildArtifact(root), sidecars: iosBuildSidecars(root) }
@@ -247,27 +261,30 @@ async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment) {
   });
 }
 
-const options = parseArguments(process.argv.slice(2));
-const cleanup = createCleanupManager();
-const artifactRoot = createArtifactRoot();
-installSignalHandlers(cleanup);
+async function main() {
+  const options = parseArguments(process.argv.slice(2));
+  const cleanup = createCleanupManager();
+  const artifactRoot = createArtifactRoot();
+  installSignalHandlers(cleanup);
 
-let operationError = null;
-try {
-  validateMaestroVersion();
-  const hostEnvironment = validateBeforePlatformLock(options);
-  for (const platform of [...options.platforms].sort()) {
-    acquireE2ePlatformLock(platform, cleanup);
+  let operationError = null;
+  try {
+    validateMaestroVersion();
+    const hostEnvironment = validateBeforePlatformLock(options);
+    await validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup });
+    log("setup", `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`);
+    await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
+  } catch (error) {
+    operationError = error;
   }
-  await validateLockedPlatformEnvironment(options.platforms, { artifactRoot, cleanup });
-  log("setup", `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`);
-  await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
-} catch (error) {
-  operationError = error;
+  try {
+    await finalizeCleanup(cleanup, operationError);
+  } catch (error) {
+    console.error(`[e2e:error] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }
-try {
-  await finalizeCleanup(cleanup, operationError);
-} catch (error) {
-  console.error(`[e2e:error] ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
 }

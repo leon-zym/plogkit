@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -160,48 +160,54 @@ test("the runner rejects an incomplete flow selector before validation", () => {
   assert.match(result.stderr, /--flow requires a flow basename/);
 });
 
-test("iOS acquires its platform lock before CoreSimulator host initialization", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-ios-lock-order-"));
-  const binaries = join(directory, "bin");
-  const runtimeProbeMarker = join(directory, "runtime-probe-invoked");
-  mkdirSync(binaries);
-  writeLivePlatformLock(directory, "ios");
-  writePinnedRunnerHostBinaries(binaries);
-  writeExecutable(
-    join(binaries, "xcode-select"),
-    "#!/bin/sh\nprintf '%s\\n' '/Applications/Xcode_26.6.app/Contents/Developer'\n",
-  );
-  writeExecutable(
-    join(binaries, "xcodebuild"),
-    "#!/bin/sh\nprintf '%s\\n' 'Xcode 26.6' 'Build version 17F113'\n",
-  );
-  writeExecutable(join(binaries, "pod"), "#!/bin/sh\nprintf '%s\\n' '1.17.0'\n");
-  writeExecutable(
-    join(binaries, "xcrun"),
-    `#!/bin/sh
-printf '%s\n' invoked > "$FAKE_RUNTIME_PROBE_MARKER"
-case "$*" in
-  "simctl list runtimes -j") printf '%s\n' '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5","isAvailable":true,"name":"iOS 26.5","version":"26.5"}]}' ;;
-  "simctl list devicetypes -j") printf '%s\n' '{"devicetypes":[{"identifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","name":"iPhone 17 Pro"}]}' ;;
-esac
-`,
-  );
+test("sorted platform locks precede locked CoreSimulator validation", async () => {
+  const { validateAfterAcquiringPlatformLocks } = await import("./run.mjs");
+  assert.equal(typeof validateAfterAcquiringPlatformLocks, "function");
 
-  const result = runCli(["scripts/e2e/run.mjs", "ios"], {
-    cwd: root,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      E2E_ARTIFACTS_DIR: join(directory, "artifacts"),
-      FAKE_RUNTIME_PROBE_MARKER: runtimeProbeMarker,
-      PATH: `${binaries}:${process.env.PATH}`,
-      TEMP: directory,
-      TMP: directory,
-      TMPDIR: directory,
+  const events = [];
+  const cleanup = { add() {} };
+  await validateAfterAcquiringPlatformLocks(
+    ["ios", "android"],
+    { artifactRoot: "/tmp/artifacts", cleanup },
+    {
+      acquirePlatformLock(platform, receivedCleanup) {
+        assert.equal(receivedCleanup, cleanup);
+        events.push(`lock:${platform}`);
+      },
+      async validateLockedEnvironment(platforms, options) {
+        assert.equal(options.artifactRoot, "/tmp/artifacts");
+        assert.equal(options.cleanup, cleanup);
+        events.push(`validate:${platforms.join("+")}`);
+      },
     },
-  });
+  );
 
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, new RegExp(`already owned by runner PID ${process.pid}`));
-  assert.equal(existsSync(runtimeProbeMarker), false);
+  assert.deepEqual(events, ["lock:android", "lock:ios", "validate:ios+android"]);
 });
+
+test(
+  "iOS CLI fails fast on a non-macOS host before native toolchain validation",
+  { skip: process.platform === "darwin" },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-ios-non-macos-"));
+    const binaries = join(directory, "bin");
+    mkdirSync(binaries);
+    writePinnedRunnerHostBinaries(binaries);
+
+    const result = runCli(["scripts/e2e/run.mjs", "ios"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binaries}:${process.env.PATH}`,
+        TEMP: directory,
+        TMP: directory,
+        TMPDIR: directory,
+      },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /iOS E2E requires macOS/);
+    assert.doesNotMatch(result.stderr, /Xcode|CocoaPods|already owned by runner PID/);
+  },
+);
