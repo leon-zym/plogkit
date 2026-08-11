@@ -2,6 +2,8 @@ appId: com.leonzym.plogkit
 ---
 - launchApp:
     clearState: true
+    permissions:
+      all: unset
 - extendedWaitUntil:
     visible:
       id: home-screen

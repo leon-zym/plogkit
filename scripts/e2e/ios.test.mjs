@@ -194,7 +194,7 @@ esac
   );
 });
 
-test("iOS bounds every install, media, and Photos permission command", async (t) => {
+test("iOS bounds every install and media command", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-mutation-timeout-"));
   const binaries = join(directory, "bin");
   const deviceId = "44444444-4444-4444-4444-444444444444";
@@ -207,12 +207,7 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 0.15; fi
 `,
   );
 
-  const commands = [
-    `simctl install ${deviceId} ${artifact}`,
-    `simctl addmedia ${deviceId}`,
-    `simctl privacy ${deviceId} reset photos-add com.leonzym.plogkit`,
-    `simctl privacy ${deviceId} reset photos com.leonzym.plogkit`,
-  ];
+  const commands = [`simctl install ${deviceId} ${artifact}`, `simctl addmedia ${deviceId}`];
   await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
     for (const command of commands) {
       await t.test(command, async () => {

@@ -18,7 +18,6 @@ const requiredCocoaPodsVersion = "1.17.0";
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-26-5";
 const deviceTypeName = "iPhone 17 Pro";
 const deviceTypeIdentifier = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
-const appIdentifier = "com.leonzym.plogkit";
 const appPath = "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app";
 const buildTimeoutMs = 45 * 60 * 1000;
 const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
@@ -324,21 +323,6 @@ export async function installAndSeedIos({
     `iOS Photos to index ${fixtures.length} seeded resources`,
     500,
   );
-  await resetIosPhotoPermissions({ cleanup, device, lifecycleTimeoutMs });
-}
-
-export async function resetIosPhotoPermissions({
-  cleanup,
-  device,
-  lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
-}) {
-  for (const service of ["photos-add", "photos"]) {
-    await run("xcrun", ["simctl", "privacy", device.deviceId, "reset", service, appIdentifier], {
-      cleanup,
-      timeoutMs: lifecycleTimeoutMs,
-    });
-  }
-  log("ios", "Reset Photos add-only and full-access decisions for first-permission coverage.");
 }
 
 function captureMediaFiles(directory, relativeDirectory = "") {

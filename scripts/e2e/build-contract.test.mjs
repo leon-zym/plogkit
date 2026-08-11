@@ -194,6 +194,7 @@ test("standalone launch does not pass a development server URL", () => {
   assert.doesNotMatch(launchFlow, /initialUrl|localhost:8081|10\.0\.2\.2:8081/);
   assert.equal((launchFlow.match(/launchApp:/g) ?? []).length, 1);
   assert.equal((launchFlow.match(/clearState: true/g) ?? []).length, 1);
+  assert.match(launchFlow, /permissions:\s*\n\s+all: unset/);
 });
 
 test("iOS export accepts only the add-only Photos permission action", () => {
