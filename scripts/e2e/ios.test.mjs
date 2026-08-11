@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -146,17 +146,31 @@ esac
   );
   for (const { deviceId } of devices) {
     const owned = commands.split("\n").filter((command) => command.includes(deviceId));
-    assert.equal(owned.filter((command) => command === `simctl boot ${deviceId}`).length, 2);
-    assert.equal(owned.filter((command) => command === `simctl shutdown ${deviceId}`).length, 2);
+    const bootstatus = `simctl bootstatus ${deviceId} -b`;
+    const localeWrites = owned.filter((command) =>
+      command.startsWith(`simctl spawn --standalone ${deviceId} defaults write `),
+    );
+    const localeReads = owned.filter((command) =>
+      command.startsWith(`simctl spawn --standalone ${deviceId} defaults read `),
+    );
+    assert.equal(owned.filter((command) => command === `simctl boot ${deviceId}`).length, 0);
+    assert.equal(owned.filter((command) => command === bootstatus).length, 1);
+    assert.equal(localeWrites.length, 2);
+    assert.equal(localeReads.length, 2);
+    assert.ok(owned.indexOf(localeWrites.at(-1)) < owned.indexOf(bootstatus));
+    assert.ok(owned.indexOf(localeReads.at(-1)) < owned.indexOf(bootstatus));
+    assert.equal(owned.filter((command) => command === `simctl shutdown ${deviceId}`).length, 1);
     assert.equal(owned.at(-1), `simctl delete ${deviceId}`);
   }
 });
 
-test("iOS bounds both simulator bootstatus stages", async (t) => {
+test("iOS bounds its single simulator boot transition", async () => {
   const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-boot-timeout-"));
+  const artifactRoot = join(directory, "artifacts");
   const binaries = join(directory, "bin");
   const bootstatusCount = join(directory, "bootstatus-count");
   mkdirSync(binaries);
+  mkdirSync(artifactRoot);
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
@@ -166,32 +180,36 @@ case "$*" in
     count=$(($(cat "$FAKE_BOOTSTATUS_COUNT") + 1)); printf '%s' "$count" > "$FAKE_BOOTSTATUS_COUNT"
     if [ "$count" -eq "$FAKE_HANG_BOOTSTATUS" ]; then sleep 0.15; fi ;;
   "simctl list devices -j")
-    printf '%s\n' '{"devices":{"runtime":[{"udid":"33333333-3333-3333-3333-333333333333","state":"Shutdown"}]}}' ;;
+    printf '%s\n' 'ios-simulator-state-head'
+    awk 'BEGIN { for (i = 0; i < 18000; i++) print "ios-state-padding-012345678901234567890123456789012345678901234567890123456789" }'
+    printf '%s\n' 'ios-simulator-state-tail' ;;
   *"defaults read NSGlobalDomain AppleLanguages") printf '%s\n' '("en-US")' ;;
   *"defaults read NSGlobalDomain AppleLocale") printf '%s\n' 'en_US' ;;
 esac
 `,
   );
 
+  writeFileSync(bootstatusCount, "0");
   await withEnvironment(
     {
       FAKE_BOOTSTATUS_COUNT: bootstatusCount,
+      FAKE_HANG_BOOTSTATUS: "1",
       PATH: `${binaries}:${process.env.PATH}`,
     },
     async () => {
-      for (const stage of [1, 2]) {
-        await t.test(`bootstatus stage ${stage}`, async () => {
-          writeFileSync(bootstatusCount, "0");
-          await withEnvironment({ FAKE_HANG_BOOTSTATUS: String(stage) }, async () => {
-            await assert.rejects(
-              prepareIosDevice({ cleanup: { add() {} }, lifecycleTimeoutMs: 25 }),
-              (error) => error.code === "E2E_COMMAND_TIMEOUT",
-            );
-          });
-        });
-      }
+      await assert.rejects(
+        prepareIosDevice({ artifactRoot, cleanup: { add() {} }, lifecycleTimeoutMs: 25 }),
+        (error) => error.code === "E2E_COMMAND_TIMEOUT",
+      );
     },
   );
+  assert.equal(readFileSync(bootstatusCount, "utf8"), "1");
+  const prepareEvidencePath = join(artifactRoot, "ios-prepare.log");
+  assert.ok(statSync(prepareEvidencePath).size <= 1024 * 1024);
+  const prepareEvidence = readFileSync(prepareEvidencePath, "utf8");
+  assert.match(prepareEvidence, /Command timed out/);
+  assert.match(prepareEvidence, /diagnostic bytes omitted/);
+  assert.match(prepareEvidence, /ios-simulator-state-tail/);
 });
 
 test("iOS bounds every install and media command", async (t) => {

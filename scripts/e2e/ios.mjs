@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -21,6 +21,24 @@ const deviceTypeIdentifier = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pr
 const appPath = "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app";
 const buildTimeoutMs = 45 * 60 * 1000;
 const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
+const iosPrepareEvidenceMaxBytes = 1024 * 1024;
+const iosPrepareEvidenceProbeTimeoutMs = 5000;
+
+function boundedEvidence(value, maxBytes) {
+  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  if (source.length <= maxBytes) return source;
+  const marker = Buffer.from(
+    `\n--- diagnostic bytes omitted from ${source.length}-byte output ---\n`,
+  );
+  const contentBytes = maxBytes - marker.length;
+  const headBytes = Math.floor(contentBytes / 2);
+  const tailBytes = contentBytes - headBytes;
+  return Buffer.concat([
+    source.subarray(0, headBytes),
+    marker,
+    source.subarray(source.length - tailBytes),
+  ]);
+}
 
 export function validateIosHost() {
   if (platform() !== "darwin") {
@@ -163,31 +181,23 @@ export function isIosEnglishLocale({ languages, locale }) {
   );
 }
 
-async function configureIosEnglishLocale({ cleanup, deviceId, lifecycleTimeoutMs }) {
+function configureIosEnglishLocale(deviceId) {
+  const spawnPrefix = ["simctl", "spawn", "--standalone", deviceId];
   for (const args of [
     ["defaults", "write", "NSGlobalDomain", "AppleLanguages", "-array", "en-US"],
     ["defaults", "write", "NSGlobalDomain", "AppleLocale", "-string", "en_US"],
   ]) {
-    capture("xcrun", ["simctl", "spawn", deviceId, ...args], { timeoutMs: 15000 });
+    capture("xcrun", [...spawnPrefix, ...args], { timeoutMs: 15000 });
   }
-
-  // SpringBoard and permission prompts read locale at process startup. A
-  // shutdown/boot boundary makes the preference effective for system UI too.
-  await shutdownIosDevice(deviceId);
-  capture("xcrun", ["simctl", "boot", deviceId], { timeoutMs: 30000 });
-  await run("xcrun", ["simctl", "bootstatus", deviceId, "-b"], {
-    cleanup,
-    timeoutMs: lifecycleTimeoutMs,
-  });
 
   const languages = capture(
     "xcrun",
-    ["simctl", "spawn", deviceId, "defaults", "read", "NSGlobalDomain", "AppleLanguages"],
+    [...spawnPrefix, "defaults", "read", "NSGlobalDomain", "AppleLanguages"],
     { timeoutMs: 15000 },
   );
   const locale = capture(
     "xcrun",
-    ["simctl", "spawn", deviceId, "defaults", "read", "NSGlobalDomain", "AppleLocale"],
+    [...spawnPrefix, "defaults", "read", "NSGlobalDomain", "AppleLocale"],
     { timeoutMs: 15000 },
   );
   if (!isIosEnglishLocale({ languages, locale })) {
@@ -248,26 +258,61 @@ export function assertIosStandaloneArtifact(root) {
   assertIosExpoModulesCoreAbi(artifact);
 }
 
-export async function prepareIosDevice({ cleanup, lifecycleTimeoutMs = deviceLifecycleTimeoutMs }) {
-  const device = createEphemeralIosDevice();
+export async function prepareIosDevice({
+  artifactRoot,
+  cleanup,
+  lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+}) {
+  try {
+    const device = createEphemeralIosDevice();
 
-  cleanup.add(async () => {
-    log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
-    await deleteOwnedIosDevice(device.udid);
-  });
-  log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
+    cleanup.add(async () => {
+      log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
+      await deleteOwnedIosDevice(device.udid);
+    });
+    log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
 
-  capture("xcrun", ["simctl", "boot", device.udid], { timeoutMs: 30000 });
-  await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
-    cleanup,
-    timeoutMs: lifecycleTimeoutMs,
-  });
-  await configureIosEnglishLocale({
-    cleanup,
-    deviceId: device.udid,
-    lifecycleTimeoutMs,
-  });
-  return { platform: "ios", deviceId: device.udid };
+    // SpringBoard and permission prompts read locale at first process startup.
+    // Configure the newly-created, still-shutdown device before its only boot.
+    configureIosEnglishLocale(device.udid);
+    await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
+      cleanup,
+      timeoutMs: lifecycleTimeoutMs,
+    });
+    return { platform: "ios", deviceId: device.udid };
+  } catch (error) {
+    const prepareEvidencePath = artifactRoot ? join(artifactRoot, "ios-prepare.log") : null;
+    try {
+      if (!prepareEvidencePath) {
+        throw new Error("iOS prepare evidence requires artifactRoot.");
+      }
+      const simulatorState = capture("xcrun", ["simctl", "list", "devices", "-j"], {
+        allowFailure: true,
+        timeoutMs: iosPrepareEvidenceProbeTimeoutMs,
+      });
+      writeFileSync(
+        prepareEvidencePath,
+        boundedEvidence(
+          `=== prepare failure ===\n${
+            error instanceof Error ? (error.stack ?? error.message) : String(error)
+          }\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
+          iosPrepareEvidenceMaxBytes,
+        ),
+      );
+    } catch (evidenceError) {
+      const aggregate = new AggregateError(
+        [error, evidenceError],
+        `${error instanceof Error ? error.message : String(error)}\n` +
+          `Unable to preserve bounded iOS prepare evidence${
+            prepareEvidencePath ? ` at ${prepareEvidencePath}` : ""
+          }.`,
+        { cause: error },
+      );
+      if (error?.code) aggregate.code = error.code;
+      throw aggregate;
+    }
+    throw error;
+  }
 }
 
 const IOS_SYSTEM_UI_FAULT_PATTERN =

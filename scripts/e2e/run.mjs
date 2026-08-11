@@ -130,7 +130,7 @@ async function build(platforms, cleanup, hostEnvironment) {
 
 async function prepareDevice(platform, { artifactRoot, cleanup }) {
   return platform === "ios"
-    ? prepareIosDevice({ cleanup })
+    ? prepareIosDevice({ artifactRoot, cleanup })
     : prepareAndroidDevice({ artifactRoot, cleanup });
 }
 
