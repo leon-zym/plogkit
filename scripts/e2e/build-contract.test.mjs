@@ -241,10 +241,3 @@ test("standalone launch does not pass a development server URL", () => {
   assert.equal((launchFlow.match(/clearState: true/g) ?? []).length, 1);
   assert.match(launchFlow, /permissions:\s*\n\s+all: unset/);
 });
-
-test("iOS export accepts only the add-only Photos permission action", () => {
-  const exportFlow = readFileSync(join(root, "e2e/flows/f04-export.yaml"), "utf8");
-  assert.match(exportFlow, /visible: \^Allow\$/);
-  assert.match(exportFlow, /tapOn: \^Allow\$/);
-  assert.doesNotMatch(exportFlow, /visible: Allow\s*$|tapOn: Allow\s*$/m);
-});

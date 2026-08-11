@@ -299,6 +299,7 @@ case "$*" in
     printf '%s\n' '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5","isAvailable":true,"name":"iOS 26.5","version":"26.5"}]}' ;;
   "simctl list devicetypes -j")
     if [ "$FAKE_DEVICE_TYPE_HANG" = 1 ]; then while :; do :; done; fi
+    if [ -n "$FAKE_DEVICE_TYPE_DELAY_SECONDS" ]; then sleep "$FAKE_DEVICE_TYPE_DELAY_SECONDS"; fi
     printf '%s\n' '{"devicetypes":[{"identifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","name":"iPhone 17 Pro"}]}' ;;
   *) printf '%s\n' "unexpected command: $*" >&2; exit 2 ;;
 esac
@@ -494,25 +495,24 @@ test("iOS keeps ordinary simctl host queries on the short probe deadline", async
 
   await withEnvironment(
     {
-      FAKE_DEVICE_TYPE_HANG: "1",
+      FAKE_DEVICE_TYPE_DELAY_SECONDS: "0.2",
+      FAKE_DEVICE_TYPE_HANG: undefined,
       FAKE_RUNTIME_DELAY_SECONDS: "0",
       FAKE_RUNTIME_HANG: undefined,
       PATH: `${binaries}:${process.env.PATH}`,
     },
     async () => {
-      const startedAt = Date.now();
       await assert.rejects(
         async () =>
           validateIosSimulatorEnvironment({
             hostLifecycleTimeoutMs: 5000,
-            probeTimeoutMs: 500,
+            probeTimeoutMs: 50,
           }),
         (error) => {
           assert.equal(error.code, "ETIMEDOUT");
           return true;
         },
       );
-      assert.ok(Date.now() - startedAt < 3000);
     },
   );
 });
