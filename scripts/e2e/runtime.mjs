@@ -251,122 +251,120 @@ export function run(
       processTreeActive = false;
       if (output && !output.destroyed) await endWritable(output);
     });
-    let finalizing = false;
     let settled = false;
     let timeoutHandle = null;
-    const settle = (callback) => {
+    let commandOutcome;
+    let outputError = null;
+    let terminationError = null;
+    let terminationPromise = null;
+    let outputCompletionPromise = null;
+    let commandCompletionPromise = null;
+    const settle = () => {
       if (settled) return;
       settled = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      callback();
+      const errors = [
+        commandOutcome instanceof Error ? commandOutcome : null,
+        outputError,
+        terminationError,
+      ].filter(Boolean);
+      if (errors.length === 0) {
+        resolvePromise();
+        return;
+      }
+      if (errors.length === 1 && !terminationError) {
+        reject(errors[0]);
+        return;
+      }
+      const primaryError = errors[0];
+      const additionalErrors = errors.slice(1);
+      const aggregate = new AggregateError(
+        errors,
+        additionalErrors.length === 0
+          ? `Process tree ${child.pid} could not be terminated: ${primaryError.message}`
+          : `${primaryError.message}\nAdditional command finalization failure: ${additionalErrors
+              .map((error) => error.message)
+              .join("; ")}`,
+        { cause: primaryError },
+      );
+      if (terminationError) {
+        aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
+      } else if (primaryError.code) {
+        aggregate.code = primaryError.code;
+      }
+      reject(aggregate);
+    };
+    const terminateOnce = () => {
+      terminationPromise ??= (async () => {
+        try {
+          await terminate(child);
+          processTreeActive = false;
+        } catch (error) {
+          terminationError = error;
+        }
+      })();
+      return terminationPromise;
+    };
+    const recordOutputError = (error) => {
+      outputError ??= new Error(
+        `Unable to write command output to ${outputPath}: ${error.message}`,
+        { cause: error },
+      );
+      return outputError;
+    };
+    const finishOutput = () => {
+      outputCompletionPromise ??= (async () => {
+        if (!output || output.destroyed) return;
+        try {
+          await endWritable(output);
+        } catch (error) {
+          recordOutputError(error);
+        }
+      })();
+      return outputCompletionPromise;
+    };
+    const finishCommand = () => {
+      commandCompletionPromise ??= (async () => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        await terminateOnce();
+        await finishOutput();
+        settle();
+      })();
+      return commandCompletionPromise;
     };
     const failOutput = (error) => {
-      if (settled) return;
-      finalizing = true;
-      const outputError = new Error(
-        `Unable to write command output to ${outputPath}: ${error.message}`,
-        {
-          cause: error,
-        },
-      );
-      void terminate(child).then(
-        () => {
-          processTreeActive = false;
-          settle(() => reject(outputError));
-        },
-        (terminationError) => {
-          settle(() =>
-            reject(
-              processTreeTerminationError(
-                [outputError, terminationError],
-                `Command output failed and process tree ${child.pid} could not be terminated.`,
-                outputError,
-              ),
-            ),
-          );
-        },
-      );
+      recordOutputError(error);
+      if (settled || commandCompletionPromise) return;
+      void terminateOnce().then(() => {
+        if (terminationError && commandOutcome === undefined) settle();
+      });
     };
-    const finish = (callback) => {
-      if (settled || finalizing) return;
-      if (output && !output.destroyed) {
-        finalizing = true;
-        void endWritable(output).then(() => settle(callback), failOutput);
-      } else {
-        settle(callback);
-      }
-    };
-    output?.once("error", failOutput);
+    output?.on("error", failOutput);
     child.once("error", (error) => {
       processTreeActive = false;
-      finish(() => reject(error));
+      commandOutcome = error;
+      void finishCommand();
     });
     child.once("close", (code, signal) => {
-      const commandFailure =
+      commandOutcome ??=
         code === 0
           ? null
           : new Error(
               `Command failed (${code ?? signal ?? "unknown"}): ${command} ${args.join(" ")}`,
             );
-      void terminate(child).then(
-        () => {
-          processTreeActive = false;
-          finish(() => (commandFailure ? reject(commandFailure) : resolvePromise()));
-        },
-        (terminationError) => {
-          finish(() =>
-            reject(
-              commandFailure
-                ? processTreeTerminationError(
-                    [commandFailure, terminationError],
-                    `Command failed and process tree ${child.pid} could not be terminated.`,
-                    commandFailure,
-                  )
-                : processTreeTerminationError(
-                    [terminationError],
-                    `Process tree ${child.pid} could not be terminated after command completion.`,
-                    terminationError,
-                  ),
-            ),
-          );
-        },
-      );
+      void finishCommand();
     });
     if (timeoutMs !== undefined) {
       timeoutHandle = setTimeout(() => {
-        if (settled || finalizing) return;
-        finalizing = true;
-        const timeoutError = Object.assign(
+        if (settled || commandCompletionPromise) return;
+        commandOutcome = Object.assign(
           new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`),
           { code: "E2E_COMMAND_TIMEOUT" },
         );
-        void (async () => {
-          try {
-            await terminate(child);
-            processTreeActive = false;
-            if (output && !output.destroyed) await endWritable(output);
-            settle(() => reject(timeoutError));
-          } catch (terminationError) {
-            settle(() =>
-              reject(
-                processTreeTerminationError(
-                  [timeoutError, terminationError],
-                  `Command timed out and process tree ${child.pid} could not be terminated.`,
-                  timeoutError,
-                ),
-              ),
-            );
-          }
-        })();
+        void finishCommand();
       }, timeoutMs);
     }
     if (input !== undefined && child.stdin) child.stdin.end(input);
-  });
-}
-
-function processTreeTerminationError(errors, message, cause) {
-  return Object.assign(new AggregateError(errors, message, { cause }), {
-    code: "E2E_PROCESS_TREE_TERMINATION_FAILED",
   });
 }
 
@@ -573,10 +571,8 @@ async function runMaestro({ artifactRoot, cleanup, device, root, target, timeout
     });
   }
   await run(
-    "pnpm",
+    "maestro",
     [
-      "exec",
-      "maestro",
       "--device",
       device.deviceId,
       "test",
@@ -828,19 +824,48 @@ async function collectAndroidDiagnostics(diagnosticDirectory, device, sinceMs, s
   await collectAndroidReports(diagnosticDirectory, device, sinceMs, state);
 }
 
-function copyIosReports(diagnosticDirectory, reportsDirectory, sinceMs, state) {
-  if (!existsSync(reportsDirectory)) return;
+function listIosReports(reportsDirectory, artifactDirectory, sinceMs, state) {
+  if (!existsSync(reportsDirectory)) return [];
   let entries;
   try {
     entries = readdirSync(reportsDirectory).sort();
   } catch {
     state.complete = false;
-    return;
+    return [];
   }
-  let groupRemainingBytes = Math.min(DIAGNOSTIC_REPORT_BYTES, state.remainingBytes);
-  let storedFiles = 0;
+  const reports = [];
   for (const entry of entries) {
     if (!IOS_REPORT_EXTENSION.test(entry) || !IOS_RELEVANT_REPORT.test(entry)) continue;
+    if (Date.now() >= state.deadlineMs) {
+      state.complete = false;
+      break;
+    }
+    const source = join(reportsDirectory, entry);
+    try {
+      const mtimeMs = statSync(source).mtimeMs;
+      if (mtimeMs < sinceMs - DIAGNOSTIC_CLOCK_SKEW_MS) continue;
+      reports.push({ artifactDirectory, entry, mtimeMs, source });
+    } catch {
+      state.complete = false;
+    }
+  }
+  return reports;
+}
+
+function copyIosReports(diagnosticDirectory, reportsDirectory, sinceMs, state) {
+  const reports = [
+    ...listIosReports(reportsDirectory, "", sinceMs, state),
+    ...listIosReports(join(reportsDirectory, "Retired"), "Retired", sinceMs, state),
+  ].sort(
+    (left, right) =>
+      right.mtimeMs - left.mtimeMs ||
+      join(left.artifactDirectory, left.entry).localeCompare(
+        join(right.artifactDirectory, right.entry),
+      ),
+  );
+  let groupRemainingBytes = Math.min(DIAGNOSTIC_REPORT_BYTES, state.remainingBytes);
+  let storedFiles = 0;
+  for (const { artifactDirectory, entry, source } of reports) {
     if (Date.now() >= state.deadlineMs) {
       state.complete = false;
       break;
@@ -849,10 +874,8 @@ function copyIosReports(diagnosticDirectory, reportsDirectory, sinceMs, state) {
       state.complete = false;
       break;
     }
-    const source = join(reportsDirectory, entry);
     let report;
     try {
-      if (statSync(source).mtimeMs < sinceMs - DIAGNOSTIC_CLOCK_SKEW_MS) continue;
       report = readBoundedFile(
         source,
         Math.min(DIAGNOSTIC_FILE_BYTES, groupRemainingBytes, state.remainingBytes),
@@ -863,7 +886,7 @@ function copyIosReports(diagnosticDirectory, reportsDirectory, sinceMs, state) {
     }
     const truncated = report.size > report.body.length;
     const storedBytes = storeEvidence(
-      join(diagnosticDirectory, truncated ? `${entry}.excerpt.txt` : entry),
+      join(diagnosticDirectory, artifactDirectory, truncated ? `${entry}.excerpt.txt` : entry),
       report.body,
       state,
       truncated,

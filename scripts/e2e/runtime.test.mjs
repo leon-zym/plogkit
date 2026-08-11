@@ -26,6 +26,7 @@ import {
   run,
   runMaestroSuite,
   terminateProcessTree,
+  validateMaestroVersion,
   waitUntil,
   withFailureDiagnostics,
 } from "./runtime.mjs";
@@ -195,6 +196,25 @@ test("run rejects an artifact write failure without an uncaught stream error", a
   );
 });
 
+test("run preserves a command failure when its output artifact also fails", async () => {
+  const outputPath = mkdtempSync(join(tmpdir(), "plogkit-e2e-command-combined-error-"));
+
+  await assert.rejects(
+    run(process.execPath, ["-e", "process.exit(23)"], {
+      outputPath,
+      stdio: "ignore",
+      terminate: async () => {},
+    }),
+    (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.cause.message, /Command failed \(23\):/);
+      assert.equal(error.errors[0], error.cause);
+      assert.match(error.errors[1].message, /Unable to write command output/);
+      return true;
+    },
+  );
+});
+
 test("run bounds a hung process tree and reports the stage timeout", async () => {
   const startedAt = Date.now();
   await assert.rejects(
@@ -332,7 +352,7 @@ test("the acceptance transaction preserves an Android log-boundary failure", asy
   mkdirSync(flows, { recursive: true });
   writeFileSync(join(flows, "f00-first.yaml"), "appId: test\n---\n");
   writeExecutable(
-    join(binaries, "pnpm"),
+    join(binaries, "maestro"),
     `#!/bin/sh
 printf '%s\n' started >> "${invocationLog}"
 exit 0
@@ -349,9 +369,7 @@ esac
   );
 
   const previousPath = process.env.PATH;
-  const previousInvocationLog = process.env.FAKE_INVOCATION_LOG;
   process.env.PATH = `${binaries}:${previousPath}`;
-  process.env.FAKE_INVOCATION_LOG = invocationLog;
   try {
     const device = {
       platform: "android",
@@ -375,8 +393,6 @@ esac
     );
   } finally {
     process.env.PATH = previousPath;
-    if (previousInvocationLog === undefined) delete process.env.FAKE_INVOCATION_LOG;
-    else process.env.FAKE_INVOCATION_LOG = previousInvocationLog;
   }
 
   assert.equal(existsSync(invocationLog), false);
@@ -387,6 +403,63 @@ esac
     ),
     /original error: Command failed \(1\): .*\/adb /,
   );
+});
+
+test("Maestro validation and execution use the same PATH executable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-maestro-path-"));
+  const binaries = join(directory, "bin");
+  const packageBinaries = join(directory, "node_modules", ".bin");
+  const invocationLog = join(directory, "path-maestro.log");
+  const shadowSentinel = join(directory, "shadow-maestro-ran");
+  mkdirSync(binaries, { recursive: true });
+  mkdirSync(packageBinaries, { recursive: true });
+  mkdirSync(join(directory, "e2e", "flows"), { recursive: true });
+  writeFileSync(join(directory, "package.json"), '{"private":true}\n');
+  writeFileSync(join(directory, "e2e", "config.yaml"), "flows:\n  - flows/*.yaml\n");
+  writeExecutable(
+    join(binaries, "maestro"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' version >> ${JSON.stringify(invocationLog)}
+  printf '%s\n' 2.8.0
+  exit 0
+fi
+printf '%s\n' "$*" >> ${JSON.stringify(invocationLog)}
+exit 0
+`,
+  );
+  writeExecutable(
+    join(packageBinaries, "maestro"),
+    `#!/bin/sh
+printf '%s\n' shadow > ${JSON.stringify(shadowSentinel)}
+exit 79
+`,
+  );
+  writeExecutable(join(binaries, "adb"), "#!/bin/sh\nexit 0\n");
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    validateMaestroVersion();
+    await runMaestroSuite({
+      artifactRoot: join(directory, "artifacts"),
+      cleanup: { add() {} },
+      device: {
+        platform: "android",
+        deviceId: "emulator-test",
+        adbPath: join(binaries, "adb"),
+      },
+      flow: null,
+      root: directory,
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const invocations = readFileSync(invocationLog, "utf8").trim().split("\n");
+  assert.equal(invocations[0], "version");
+  assert.match(invocations[1], /^--device emulator-test test /);
+  assert.equal(existsSync(shadowSentinel), false);
 });
 
 test("the acceptance transaction saves bounded evidence without rewriting a Maestro failure", async () => {
@@ -400,7 +473,7 @@ test("the acceptance transaction saves bounded evidence without rewriting a Maes
   writeFileSync(join(flows, "f00-first.yaml"), "appId: test\n---\n");
   writeFileSync(join(flows, "f01-second.yaml"), "appId: test\n---\n");
   writeExecutable(
-    join(binaries, "pnpm"),
+    join(binaries, "maestro"),
     `#!/bin/sh
 for argument in "$@"; do target="$argument"; done
 printf '%s\n' "$target" >> "${invocationLog}"
@@ -427,16 +500,14 @@ esac
 `,
   );
 
+  const device = {
+    platform: "android",
+    deviceId: "emulator-test",
+    adbPath: join(binaries, "adb"),
+  };
   const previousPath = process.env.PATH;
-  const previousInvocationLog = process.env.FAKE_INVOCATION_LOG;
   process.env.PATH = `${binaries}:${previousPath}`;
-  process.env.FAKE_INVOCATION_LOG = invocationLog;
   try {
-    const device = {
-      platform: "android",
-      deviceId: "emulator-test",
-      adbPath: join(binaries, "adb"),
-    };
     await assert.rejects(
       withFailureDiagnostics({
         diagnosticDirectory: join(artifactRoot, "android", "acceptance-failure"),
@@ -450,12 +521,10 @@ esac
             root: directory,
           }),
       }),
-      /Command failed \(1\): pnpm exec maestro /,
+      /Command failed \(1\): maestro /,
     );
   } finally {
     process.env.PATH = previousPath;
-    if (previousInvocationLog === undefined) delete process.env.FAKE_INVOCATION_LOG;
-    else process.env.FAKE_INVOCATION_LOG = previousInvocationLog;
   }
 
   assert.equal(readFileSync(invocationLog, "utf8").trim().split("\n").length, 1);
@@ -485,7 +554,7 @@ test("Maestro owns full-suite ordering and fail-fast execution in one process", 
     "flows:\n  - flows/*.yaml\nexecutionOrder:\n  continueOnFailure: false\n",
   );
   writeExecutable(
-    join(binaries, "pnpm"),
+    join(binaries, "maestro"),
     `#!/bin/sh
 printf '%s\n' "$*" >> "${invocationLog}"
 exit 0
@@ -494,9 +563,7 @@ exit 0
   writeExecutable(join(binaries, "adb"), "#!/bin/sh\nexit 0\n");
 
   const previousPath = process.env.PATH;
-  const previousInvocationLog = process.env.FAKE_INVOCATION_LOG;
   process.env.PATH = `${binaries}:${previousPath}`;
-  process.env.FAKE_INVOCATION_LOG = invocationLog;
   try {
     await runMaestroSuite({
       artifactRoot: join(directory, "artifacts"),
@@ -511,8 +578,6 @@ exit 0
     });
   } finally {
     process.env.PATH = previousPath;
-    if (previousInvocationLog === undefined) delete process.env.FAKE_INVOCATION_LOG;
-    else process.env.FAKE_INVOCATION_LOG = previousInvocationLog;
   }
 
   const invocations = readFileSync(invocationLog, "utf8").trim().split("\n");
@@ -657,6 +722,104 @@ test("iOS diagnostics copy only fresh relevant reports through the high-level se
   assert.equal(existsSync(join(artifacts, "Unrelated-fresh.diag")), false);
   assert.equal(existsSync(join(artifacts, "PlogKit-old.ips")), false);
   assert.match(readFileSync(join(artifacts, "simulator-system.log"), "utf8"), /raw simulator/);
+});
+
+test("iOS diagnostics preserve fresh relevant reports retired by macOS", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-retired-diagnostics-"));
+  const binaries = join(directory, "bin");
+  const reports = join(directory, "reports");
+  const retiredReports = join(reports, "Retired");
+  const nestedReports = join(retiredReports, "nested");
+  const artifacts = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(nestedReports, { recursive: true });
+  const startedAt = Date.now();
+  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nexit 0\n");
+  writeFileSync(join(reports, "PlogKit-current.ips"), "current app crash");
+  writeFileSync(join(retiredReports, "PlogKit-retired.ips"), "retired app crash");
+  writeFileSync(join(retiredReports, "Unrelated-retired.ips"), "unrelated crash");
+  writeFileSync(join(retiredReports, "PlogKit-old.ips"), "old retired crash");
+  writeFileSync(join(nestedReports, "PlogKit-deep.ips"), "deep retired crash");
+  utimesSync(join(retiredReports, "PlogKit-old.ips"), new Date(0), new Date(0));
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  let result;
+  try {
+    result = await collectFailureDiagnostics({
+      diagnosticDirectory: artifacts,
+      device: { platform: "ios", deviceId: "simulator-test" },
+      error: new Error("original iOS dyld failure"),
+      iosReportsDirectory: reports,
+      sinceMs: startedAt,
+      timeoutMs: 2000,
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  assert.deepEqual(result, { complete: true });
+  assert.equal(readFileSync(join(artifacts, "PlogKit-current.ips"), "utf8"), "current app crash");
+  assert.equal(
+    readFileSync(join(artifacts, "Retired", "PlogKit-retired.ips"), "utf8"),
+    "retired app crash",
+  );
+  assert.equal(existsSync(join(artifacts, "Retired", "Unrelated-retired.ips")), false);
+  assert.equal(existsSync(join(artifacts, "Retired", "PlogKit-old.ips")), false);
+  assert.equal(existsSync(join(artifacts, "Retired", "nested", "PlogKit-deep.ips")), false);
+  assert.match(
+    readFileSync(join(artifacts, "failure-summary.txt"), "utf8"),
+    /original error: original iOS dyld failure/,
+  );
+});
+
+test("iOS diagnostics prioritize the newest reports across current and Retired under one cap", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-report-cap-"));
+  const binaries = join(directory, "bin");
+  const reports = join(directory, "reports");
+  const retiredReports = join(reports, "Retired");
+  const artifacts = join(directory, "artifacts");
+  mkdirSync(binaries);
+  mkdirSync(retiredReports, { recursive: true });
+  const startedAt = Date.now();
+  const currentDate = new Date(startedAt);
+  const newestDate = new Date(startedAt + 1000);
+  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nexit 0\n");
+  for (let index = 0; index < 8; index += 1) {
+    const report = join(reports, `PlogKit-current-${index}.ips`);
+    writeFileSync(report, `current crash ${index}`);
+    utimesSync(report, currentDate, currentDate);
+  }
+  const newestReport = join(retiredReports, "PlogKit-retired-latest.ips");
+  writeFileSync(newestReport, "latest retired app crash");
+  utimesSync(newestReport, newestDate, newestDate);
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  let result;
+  try {
+    result = await collectFailureDiagnostics({
+      diagnosticDirectory: artifacts,
+      device: { platform: "ios", deviceId: "simulator-test" },
+      error: "original failure",
+      iosReportsDirectory: reports,
+      sinceMs: startedAt,
+      timeoutMs: 2000,
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  assert.deepEqual(result, { complete: false });
+  assert.equal(
+    readFileSync(join(artifacts, "Retired", "PlogKit-retired-latest.ips"), "utf8"),
+    "latest retired app crash",
+  );
+  assert.equal(
+    readdirSync(artifacts).filter((entry) => entry.endsWith(".ips")).length +
+      readdirSync(join(artifacts, "Retired")).filter((entry) => entry.endsWith(".ips")).length,
+    8,
+  );
 });
 
 test("iOS report read and artifact write failures make diagnostics incomplete", async () => {
