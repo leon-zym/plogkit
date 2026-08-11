@@ -677,8 +677,10 @@ async function runMaestro({ artifactRoot, cleanup, device, root, target, timeout
 }
 
 export async function runMaestroSuite(options) {
-  const { artifactRoot, cleanup, device, flow, root } = options;
-  const e2eRoot = options.e2eRoot ?? resolve(root, "e2e");
+  const { artifactRoot, cleanup, device, e2eRoot, flow, root } = options;
+  if (!e2eRoot) {
+    throw new Error("An immutable E2E run snapshot root is required for Maestro execution.");
+  }
   const target = flow ? resolve(e2eRoot, "flows", `${flow}.yaml`) : e2eRoot;
   return runMaestro({
     artifactRoot,

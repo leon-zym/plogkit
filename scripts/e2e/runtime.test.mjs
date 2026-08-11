@@ -140,7 +140,6 @@ esac
     device: { platform: "android", deviceId: "emulator-test", adbPath },
     error: new Error("original Android failure"),
     sinceMs: Date.now(),
-    timeoutMs: 2000,
   });
 
   assert.deepEqual(result, { complete: true });
@@ -421,6 +420,7 @@ esac
             artifactRoot: join(directory, "artifacts"),
             cleanup: { add() {} },
             device,
+            e2eRoot: join(directory, "e2e"),
             flow: null,
             root: directory,
           }),
@@ -485,6 +485,7 @@ exit 79
         deviceId: "emulator-test",
         adbPath: join(binaries, "adb"),
       },
+      e2eRoot: join(directory, "e2e"),
       flow: null,
       root: directory,
     });
@@ -553,6 +554,7 @@ esac
             artifactRoot,
             cleanup: { add() {} },
             device,
+            e2eRoot: join(directory, "e2e"),
             flow: null,
             root: directory,
           }),
@@ -609,6 +611,7 @@ exit 0
         deviceId: "emulator-test",
         adbPath: join(binaries, "adb"),
       },
+      e2eRoot: join(directory, "e2e"),
       flow: null,
       root: directory,
     });
@@ -621,6 +624,37 @@ exit 0
   assert.match(invocations[0], /--config=.*\/e2e\/config\.yaml/);
   assert.match(invocations[0], /\s.*\/e2e$/);
   assert.doesNotMatch(invocations[0], /f00-first\.yaml|f01-second\.yaml/);
+});
+
+test("Maestro execution requires an immutable E2E run snapshot root", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-snapshot-root-"));
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries, { recursive: true });
+  mkdirSync(join(directory, "e2e"), { recursive: true });
+  writeFileSync(join(directory, "e2e", "config.yaml"), "flows:\n  - flows/*.yaml\n");
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nexit 0\n");
+  writeExecutable(join(binaries, "adb"), "#!/bin/sh\nexit 0\n");
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await assert.rejects(
+      runMaestroSuite({
+        artifactRoot: join(directory, "artifacts"),
+        cleanup: { add() {} },
+        device: {
+          platform: "android",
+          deviceId: "emulator-test",
+          adbPath: join(binaries, "adb"),
+        },
+        flow: null,
+        root: directory,
+      }),
+      /immutable E2E run snapshot root is required/,
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });
 
 test("Android diagnostics mark an accessible fresh report read failure incomplete", async () => {
