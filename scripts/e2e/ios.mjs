@@ -9,6 +9,7 @@ import {
   createStandaloneBuildEnvironment,
   isHermesBytecode,
 } from "./environment.mjs";
+import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
 
 const deviceNamePrefix = "PlogKit E2E";
 const requiredXcodeVersion = "26.6";
@@ -215,7 +216,7 @@ export async function buildIos({ cleanup, root, workers }) {
     "ios/build",
   ];
   if (workers) args.push("-jobs", workers);
-  args.push("-quiet", "CODE_SIGNING_ALLOWED=NO", "build");
+  args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
   await run("xcodebuild", args, {
     cleanup,
     cwd: root,
@@ -245,6 +246,7 @@ export function assertIosStandaloneArtifact(root) {
   if (statSync(dwarf).size === 0) {
     throw new Error(`iOS Release dSYM DWARF binary is empty: ${dwarf}`);
   }
+  assertIosExpoModulesCoreAbi(artifact);
 }
 
 export async function prepareIosDevice({ cleanup, lifecycleTimeoutMs = deviceLifecycleTimeoutMs }) {
