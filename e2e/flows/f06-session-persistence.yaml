@@ -16,6 +16,7 @@ tags:
 - pressKey: Home
 - launchApp:
     stopApp: false
+    permissions: {}
 - extendedWaitUntil:
     visible:
       id: editor-screen
@@ -37,7 +38,8 @@ tags:
       id: draft-item-0
     timeout: 10000
 - stopApp
-- launchApp
+- launchApp:
+    permissions: {}
 - extendedWaitUntil:
     visible:
       id: home-screen

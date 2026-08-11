@@ -80,7 +80,8 @@ tags:
       id: draft-item-1
     timeout: 10000
 - stopApp
-- launchApp
+- launchApp:
+    permissions: {}
 - extendedWaitUntil:
     visible:
       id: draft-item-0

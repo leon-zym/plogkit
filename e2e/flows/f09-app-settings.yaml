@@ -46,7 +46,8 @@ tags:
 - tapOn:
     id: settings-back
 - stopApp
-- launchApp
+- launchApp:
+    permissions: {}
 - extendedWaitUntil:
     visible:
       id: home-screen

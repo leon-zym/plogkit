@@ -61,3 +61,29 @@ test("the Maestro workspace orders every top-level flow by its exact name and ex
     "the system-photo-mutating export flow must run last",
   );
 });
+
+test("direct lifecycle relaunches declare an empty permission override", () => {
+  const flows = readdirSync(join(root, "e2e/flows"))
+    .filter((name) => name.endsWith(".yaml"))
+    .sort();
+  let relaunchCount = 0;
+
+  for (const file of flows) {
+    const lines = readFileSync(join(root, "e2e/flows", file), "utf8").split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!/^-\s+launchApp\s*:\s*$/.test(lines[index])) continue;
+      relaunchCount += 1;
+      const block = [];
+      for (const line of lines.slice(index + 1)) {
+        if (/^-\s+/.test(line)) break;
+        block.push(line);
+      }
+      assert.ok(
+        block.some((line) => /^\s+permissions\s*:\s*\{\s*\}\s*$/.test(line)),
+        `${file} direct lifecycle relaunch must declare permissions: {}`,
+      );
+    }
+  }
+
+  assert.ok(relaunchCount > 0, "the suite must exercise at least one direct lifecycle relaunch");
+});
