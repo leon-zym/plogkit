@@ -29,103 +29,97 @@ jobs:
     name: iOS Maestro acceptance suite
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-26
-    timeout-minutes: 60
-    env:
-      E2E_BUILD_WORKERS: "2"
-      MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
-      MAESTRO_CLI_NO_ANALYTICS: "true"
-      MAESTRO_DISABLE_UPDATE_CHECK: "true"
+    timeout-minutes: 165
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.0.0
         with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version-file: .java-version
+      - name: Select pinned Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer
       - run: pnpm install --frozen-lockfile
       - name: Install Maestro CLI
         run: |
-          export MAESTRO_VERSION=2.7.0
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Build iOS development app
-        run: node scripts/e2e/run.mjs ios --phase build
-        env:
-          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
-      - name: Run iOS Maestro flows
-        run: node scripts/e2e/run.mjs ios --phase test
+          MAESTRO_VERSION="$(< .maestro-version)"
+          MAESTRO_ARCHIVE="$RUNNER_TEMP/maestro-$MAESTRO_VERSION"
+          mkdir -p "$MAESTRO_ARCHIVE"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/checksums_sha256.txt" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/checksums_sha256.txt"
+          (cd "$MAESTRO_ARCHIVE" && shasum -a 256 -c checksums_sha256.txt)
+          unzip -q "$MAESTRO_ARCHIVE/maestro.zip" -d "$MAESTRO_ARCHIVE"
+          echo "$MAESTRO_ARCHIVE/maestro/bin" >> "$GITHUB_PATH"
+      - name: Run iOS standalone Release acceptance
+        run: pnpm e2e:ios
+        timeout-minutes: 135
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
           E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ios-maestro-artifacts
-          if-no-files-found: ignore
+          if-no-files-found: warn
           path: ${{ runner.temp }}/plogkit-e2e
 
   android-maestro:
     name: Android Maestro acceptance suite
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'android'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 165
     env:
-      E2E_BUILD_WORKERS: "2"
-      MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true"
-      MAESTRO_CLI_NO_ANALYTICS: "true"
-      MAESTRO_DISABLE_UPDATE_CHECK: "true"
+      E2E_ANDROID_ARCH: x86_64
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.0.0
         with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5.7.0
         with:
           distribution: temurin
-          java-version: 17
+          java-version-file: .java-version
       - run: pnpm install --frozen-lockfile
       - name: Install Maestro CLI
         run: |
-          export MAESTRO_VERSION=2.7.0
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Build Android development app
-        run: node scripts/e2e/run.mjs android --phase build
-        env:
-          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          MAESTRO_VERSION="$(< .maestro-version)"
+          MAESTRO_ARCHIVE="$RUNNER_TEMP/maestro-$MAESTRO_VERSION"
+          mkdir -p "$MAESTRO_ARCHIVE"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/checksums_sha256.txt" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/checksums_sha256.txt"
+          (cd "$MAESTRO_ARCHIVE" && shasum -a 256 -c checksums_sha256.txt)
+          unzip -q "$MAESTRO_ARCHIVE/maestro.zip" -d "$MAESTRO_ARCHIVE"
+          echo "$MAESTRO_ARCHIVE/maestro/bin" >> "$GITHUB_PATH"
+      - name: Install Android E2E emulator and system image
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "cmdline-tools;22.0" \
+            "emulator" \
+            "platform-tools" \
+            "system-images;android-36;default;x86_64"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       - name: Enable KVM group permissions
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run emulator and Maestro flows
-        uses: reactivecircus/android-emulator-runner@v2.38.0
-        with:
-          api-level: 36
-          arch: x86_64
-          profile: pixel_7_pro
-          target: default
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: node scripts/e2e/run.mjs android --phase test --device "$ANDROID_SERIAL"
+      - name: Run Android standalone Release acceptance
+        run: pnpm e2e:android
+        timeout-minutes: 135
         env:
           E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
           E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: android-maestro-artifacts
-          if-no-files-found: ignore
+          if-no-files-found: warn
           path: ${{ runner.temp }}/plogkit-e2e
