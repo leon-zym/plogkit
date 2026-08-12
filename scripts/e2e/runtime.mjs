@@ -644,7 +644,15 @@ export function validateMaestroVersion() {
   }
 }
 
-async function runMaestro({ artifactRoot, cleanup, device, root, target, timeoutMs }) {
+async function runMaestro({
+  artifactRoot,
+  cleanup,
+  device,
+  flowEnvironment = {},
+  root,
+  target,
+  timeoutMs,
+}) {
   const outputDirectory = join(artifactRoot, device.platform, "flows");
   mkdirSync(outputDirectory, { recursive: true });
   log(
@@ -664,6 +672,7 @@ async function runMaestro({ artifactRoot, cleanup, device, root, target, timeout
       "test",
       `--test-output-dir=${outputDirectory}`,
       ...(target.endsWith("/e2e") ? [`--config=${resolve(target, "config.yaml")}`] : []),
+      ...Object.entries(flowEnvironment).flatMap(([name, value]) => ["--env", `${name}=${value}`]),
       target,
     ],
     {
@@ -677,7 +686,7 @@ async function runMaestro({ artifactRoot, cleanup, device, root, target, timeout
 }
 
 export async function runMaestroSuite(options) {
-  const { artifactRoot, cleanup, device, e2eRoot, flow, root } = options;
+  const { artifactRoot, cleanup, device, e2eRoot, flow, flowEnvironment, root } = options;
   if (!e2eRoot) {
     throw new Error("An immutable E2E run snapshot root is required for Maestro execution.");
   }
@@ -686,6 +695,7 @@ export async function runMaestroSuite(options) {
     artifactRoot,
     cleanup,
     device,
+    flowEnvironment,
     root,
     target,
     timeoutMs: flow ? MAESTRO_FLOW_TIMEOUT_MS : MAESTRO_SUITE_TIMEOUT_MS,

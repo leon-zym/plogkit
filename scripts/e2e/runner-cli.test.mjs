@@ -187,6 +187,84 @@ test("photo resource assessment rejects more than the expected new identities", 
   );
 });
 
+test("per-export photo assessment accepts one new identity at each boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+  const afterFirstExport = new Set([...before, "export-1"]);
+  const afterSecondExport = new Set([...afterFirstExport, "export-2"]);
+
+  assert.equal(assess(1, before), null);
+  assert.equal(assess(1, afterFirstExport), afterFirstExport);
+  assert.equal(assess(2, afterSecondExport), afterSecondExport);
+});
+
+test("per-export photo assessment rejects two identities at the first boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+  const afterBothExports = new Set([...before, "export-1", "export-2"]);
+
+  assert.throws(
+    () => assess(1, afterBothExports),
+    /Expected exactly 1 new system photo resources, but observed 2/,
+  );
+});
+
+test("per-export photo assessment rejects an out-of-order boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+
+  assert.throws(
+    () => assess(2, new Set([...before, "export-1", "export-2"])),
+    /Expected photo assertion for export 1, but received export 2/,
+  );
+});
+
+test("the export photo assertion server binds each request to its exact delta", async () => {
+  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const device = { platform: "ios" };
+  const before = new Set(["fixture-1", "fixture-2"]);
+  let resources = new Set([...before, "export-1"]);
+  const server = await startExportPhotoAssertionServer(device, before, {
+    captureResources: () => resources,
+    timeoutMs: 100,
+  });
+
+  try {
+    const first = await fetch(`${server.url}/1`, { method: "POST" });
+    assert.equal(first.status, 204);
+    resources = new Set([...resources, "export-2"]);
+    const second = await fetch(`${server.url}/2`, { method: "POST" });
+    assert.equal(second.status, 204);
+  } finally {
+    await server.close();
+  }
+});
+
+test("the first export assertion rejects a cumulative delta of two", async () => {
+  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const device = { platform: "android" };
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const resources = new Set([...before, "export-1", "export-2"]);
+  const server = await startExportPhotoAssertionServer(device, before, {
+    captureResources: () => resources,
+    timeoutMs: 100,
+  });
+
+  try {
+    const response = await fetch(`${server.url}/1`, { method: "POST" });
+    assert.equal(response.status, 409);
+    assert.match(
+      await response.text(),
+      /Expected exactly 1 new system photo resources, but observed 2/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("sorted platform locks precede locked CoreSimulator validation", async () => {
   const { validateAfterAcquiringPlatformLocks } = await import("./run.mjs");
   assert.equal(typeof validateAfterAcquiringPlatformLocks, "function");

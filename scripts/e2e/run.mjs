@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -187,15 +189,98 @@ export function assessPhotoResourceDelta(before, after, expected) {
   return observed === expected ? after : null;
 }
 
+export function createPerExportPhotoResourceAssessment(before) {
+  let expectedExport = 1;
+  return (exportIndex, after) => {
+    if (exportIndex !== expectedExport) {
+      throw new Error(
+        `Expected photo assertion for export ${expectedExport}, but received export ${exportIndex}.`,
+      );
+    }
+    const result = assessPhotoResourceDelta(before, after, exportIndex);
+    if (result !== null) expectedExport += 1;
+    return result;
+  };
+}
+
+export async function startExportPhotoAssertionServer(
+  device,
+  before,
+  { captureResources = capturePhotoResources, timeoutMs = 10000 } = {},
+) {
+  const assess = createPerExportPhotoResourceAssessment(before);
+  const token = randomUUID();
+  const server = createServer(async (request, response) => {
+    const match = request.url?.match(new RegExp(`^/${token}/(\\d+)$`));
+    if (request.method !== "POST" || !match) {
+      response.writeHead(404).end("Not found.");
+      return;
+    }
+    const exportIndex = Number.parseInt(match[1], 10);
+    try {
+      const after = await waitUntil(
+        () => assess(exportIndex, captureResources(device)),
+        timeoutMs,
+        `${device.platform} export ${exportIndex} to add exactly 1 system photo resource`,
+        500,
+      );
+      log(
+        device.platform,
+        `Export ${exportIndex} added exactly 1 new system photo identity ` +
+          `(${before.size} before, ${after.size} after).`,
+      );
+      response.writeHead(204).end();
+    } catch (error) {
+      response
+        .writeHead(409, { "Content-Type": "text/plain; charset=utf-8" })
+        .end(error instanceof Error ? error.message : String(error));
+    }
+  });
+  await new Promise((resolvePromise, rejectPromise) => {
+    const reject = (error) => rejectPromise(error);
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolvePromise();
+    });
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    server.close();
+    throw new Error("Unable to determine the export photo assertion server address.");
+  }
+  return {
+    close: () =>
+      new Promise((resolvePromise, rejectPromise) => {
+        server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
+      }),
+    url: `http://127.0.0.1:${address.port}/${token}`,
+  };
+}
+
 async function runSuiteWithExportAssertion(options) {
   const { device, flow } = options;
   const assertsExport = flow === null || flow === "f04-export";
   const expectedNewResources = assertsExport ? 2 : 0;
   const before = assertsExport ? capturePhotoResources(device) : null;
 
-  await runMaestroSuite(options);
+  if (before === null) {
+    await runMaestroSuite(options);
+    return;
+  }
 
-  if (before === null) return;
+  const assertionServer = await startExportPhotoAssertionServer(device, before);
+  try {
+    await runMaestroSuite({
+      ...options,
+      flowEnvironment: {
+        ...options.flowEnvironment,
+        PLOGKIT_EXPORT_ASSERTION_URL: assertionServer.url,
+      },
+    });
+  } finally {
+    await assertionServer.close();
+  }
   const after = await waitUntil(
     () => {
       const resources = capturePhotoResources(device);

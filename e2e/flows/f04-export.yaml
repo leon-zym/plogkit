@@ -33,6 +33,10 @@ tags:
       id: export-success
     timeout: 60000
 - assertVisible: Saved to Photos
+- runScript:
+    file: ../scripts/assert-export-photo.js
+    env:
+      EXPORT_INDEX: "1"
 - tapOn:
     id: editor-tool-text
 - tapOn:
@@ -55,3 +59,7 @@ tags:
       id: export-success
     timeout: 60000
 - assertVisible: Saved to Photos
+- runScript:
+    file: ../scripts/assert-export-photo.js
+    env:
+      EXPORT_INDEX: "2"

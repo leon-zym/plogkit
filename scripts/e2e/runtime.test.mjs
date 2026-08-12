@@ -487,6 +487,9 @@ exit 79
       },
       e2eRoot: join(directory, "e2e"),
       flow: null,
+      flowEnvironment: {
+        PLOGKIT_EXPORT_ASSERTION_URL: "http://127.0.0.1:12345/export-token",
+      },
       root: directory,
     });
   } finally {
@@ -496,6 +499,10 @@ exit 79
   const invocations = readFileSync(invocationLog, "utf8").trim().split("\n");
   assert.equal(invocations[0], "version");
   assert.match(invocations[1], /^--device emulator-test test /);
+  assert.match(
+    invocations[1],
+    /--env PLOGKIT_EXPORT_ASSERTION_URL=http:\/\/127\.0\.0\.1:12345\/export-token/,
+  );
   assert.equal(existsSync(shadowSentinel), false);
 });
 

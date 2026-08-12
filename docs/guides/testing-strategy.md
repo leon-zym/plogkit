@@ -47,7 +47,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalon
 - Maestro 的 `launchApp` 默认允许全部权限。每条顶层 flow 的首次启动必须同时使用 `clearState: true` 和 `permissions.all: unset`，重置 App 数据并建立未决定的系统权限边界；同一 flow 内验证生命周期的 relaunch 不清数据，并以 `permissions: {}` 保留当前权限。需要验证首次授权的场景还要断言系统授权界面和授权后的业务结果。
 - 本地与 CI 共用同一编排入口。具体命令行为和环境要求见[开发环境](dev-environment.md)。
 
-当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在 iOS 系统相册或 Android MediaStore 中断言新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
+当可见界面不足以验证实现契约时，可以通过 `simctl` 或 `adb` 读取 App 沙盒内的草稿文档。这类白盒检查不把内部事实转化为 Spec 行为，也不能替代受支持交互上的黑盒验收。导出 E2E 在每次成功反馈后通过共享 runner 在 iOS 系统相册或 Android MediaStore 中断言恰好一个新资源，不依赖 App 沙盒中的最终副本；像素、格式、尺寸与 metadata 由 backend contract 和无头渲染层断言。不应向生产代码添加测试后门；设备状态断言必须纳入共享 runner 或 flow，避免本地与 CI 分叉。
 
 ### 设备 readiness 与 flow 隔离
 

@@ -87,3 +87,25 @@ test("direct lifecycle relaunches declare an empty permission override", () => {
 
   assert.ok(relaunchCount > 0, "the suite must exercise at least one direct lifecycle relaunch");
 });
+
+test("the export flow asserts the system photo delta after each successful export", () => {
+  const source = readFileSync(join(root, "e2e/flows/f04-export.yaml"), "utf8");
+  const successOffsets = [...source.matchAll(/^- assertVisible: Saved to Photos$/gm)].map(
+    (match) => match.index,
+  );
+  const assertionCalls = [
+    ...source.matchAll(
+      /^- runScript:\n {4}file: \.\.\/scripts\/assert-export-photo\.js\n {4}env:\n {6}EXPORT_INDEX: "(\d+)"$/gm,
+    ),
+  ];
+
+  assert.deepEqual(
+    assertionCalls.map((match) => match[1]),
+    ["1", "2"],
+    "the export flow must assert exactly two ordered photo boundaries",
+  );
+  assert.equal(successOffsets.length, 2, "the export flow must expose two success boundaries");
+  assert.ok(successOffsets[0] < assertionCalls[0].index);
+  assert.ok(assertionCalls[0].index < successOffsets[1]);
+  assert.ok(successOffsets[1] < assertionCalls[1].index);
+});
