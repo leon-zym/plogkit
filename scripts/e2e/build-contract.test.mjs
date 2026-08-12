@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import { androidBuildArtifact, androidBuildSidecars, buildAndroid } from "./android.mjs";
 import { buildIos, iosBuildArtifact, iosBuildSidecars } from "./ios.mjs";
 
@@ -17,11 +17,14 @@ function writeExecutable(path, contents) {
   chmodSync(path, 0o755);
 }
 
-function createIosReleaseBuildFixture({
-  coreExports = [compatibleExpoModulesCoreSymbol],
-  mediaImports = [compatibleExpoModulesCoreSymbol],
-} = {}) {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-release-build-"));
+function createIosReleaseBuildFixture(
+  t,
+  {
+    coreExports = [compatibleExpoModulesCoreSymbol],
+    mediaImports = [compatibleExpoModulesCoreSymbol],
+  } = {},
+) {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-release-build-");
   const binaries = join(directory, "bin");
   const commandLog = join(directory, "xcodebuild-args.log");
   const app = join(directory, "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app");
@@ -63,8 +66,8 @@ esac
   return { binaries, commandLog, directory };
 }
 
-test("iOS E2E builds a standalone Release simulator app", async () => {
-  const { binaries, commandLog, directory } = createIosReleaseBuildFixture();
+test("iOS E2E builds a standalone Release simulator app", async (t) => {
+  const { binaries, commandLog, directory } = createIosReleaseBuildFixture(t);
 
   const previousPath = process.env.PATH;
   process.env.PATH = `${binaries}:${previousPath}`;
@@ -90,9 +93,9 @@ test("iOS E2E builds a standalone Release simulator app", async () => {
   ]);
 });
 
-test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async () => {
+test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async (t) => {
   const missingSymbol = `${compatibleExpoModulesCoreSymbol}Missing`;
-  const { binaries, directory } = createIosReleaseBuildFixture({
+  const { binaries, directory } = createIosReleaseBuildFixture(t, {
     mediaImports: [missingSymbol],
   });
   const previousPath = process.env.PATH;
@@ -107,8 +110,8 @@ test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async
   }
 });
 
-test("Android E2E builds a standalone Release APK for the device architecture", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-release-build-"));
+test("Android E2E builds a standalone Release APK for the device architecture", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-release-build-");
   const androidDirectory = join(directory, "android");
   const binaries = join(directory, "bin");
   const commandLog = join(directory, "gradle-args.log");
@@ -175,8 +178,8 @@ printf '%s' native-symbols > "${directory}/android/app/build/outputs/native-debu
   ]);
 });
 
-test("Android Release builds reject configuration in the runner-owned Gradle home", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-gradle-home-"));
+test("Android Release builds reject configuration in the runner-owned Gradle home", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-gradle-home-");
   const androidDirectory = join(directory, "android");
   const gradleHome = join(directory, ".e2e-cache/gradle");
   mkdirSync(androidDirectory, { recursive: true });
@@ -195,8 +198,8 @@ test("Android Release builds reject configuration in the runner-owned Gradle hom
   );
 });
 
-test("Android Release builds reject an empty native debug symbols archive", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-empty-native-symbols-"));
+test("Android Release builds reject an empty native debug symbols archive", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-empty-native-symbols-");
   const androidDirectory = join(directory, "android");
   const binaries = join(directory, "bin");
   mkdirSync(androidDirectory);

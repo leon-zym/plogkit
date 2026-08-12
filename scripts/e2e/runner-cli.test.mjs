@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -35,8 +36,8 @@ function writePinnedRunnerHostBinaries(binaries) {
   );
 }
 
-test("a Maestro version older than the pinned version is rejected", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-version-"));
+test("a Maestro version older than the pinned version is rejected", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-version-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.6.1'\n");
@@ -47,6 +48,9 @@ test("a Maestro version older than the pinned version is rejected", () => {
     env: {
       ...process.env,
       PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
   });
 
@@ -55,8 +59,8 @@ test("a Maestro version older than the pinned version is rejected", () => {
   assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
 });
 
-test("a Maestro version newer than the pinned version is rejected", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-newer-version-"));
+test("a Maestro version newer than the pinned version is rejected", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-newer-version-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.9.0'\n");
@@ -67,6 +71,9 @@ test("a Maestro version newer than the pinned version is rejected", () => {
     env: {
       ...process.env,
       PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
   });
 
@@ -75,8 +82,8 @@ test("a Maestro version newer than the pinned version is rejected", () => {
   assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
 });
 
-test("the pinned Maestro version continues to E2E input validation", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-pinned-version-"));
+test("the pinned Maestro version continues to E2E input validation", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-pinned-version-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeLivePlatformLock(directory, "android");
@@ -100,8 +107,8 @@ test("the pinned Maestro version continues to E2E input validation", () => {
   assert.doesNotMatch(result.stderr, /already owned by runner PID/);
 });
 
-test("Android environment validation stays before its platform lock", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-android-validation-order-"));
+test("Android environment validation stays before its platform lock", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-android-validation-order-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeLivePlatformLock(directory, "android");
@@ -125,14 +132,17 @@ test("Android environment validation stays before its platform lock", () => {
   assert.doesNotMatch(result.stderr, /already owned by runner PID/);
 });
 
-test("iOS reports a missing Maestro before host validation", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-missing-version-"));
+test("iOS reports a missing Maestro before host validation", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-missing-version-");
   const result = runCli(["scripts/e2e/run.mjs", "ios"], {
     cwd: root,
     encoding: "utf8",
     env: {
       ...process.env,
       PATH: directory,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
   });
 
@@ -293,8 +303,8 @@ test("sorted platform locks precede locked CoreSimulator validation", async () =
 test(
   "iOS CLI fails fast on a non-macOS host before native toolchain validation",
   { skip: process.platform === "darwin" },
-  () => {
-    const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-ios-non-macos-"));
+  (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-runner-ios-non-macos-");
     const binaries = join(directory, "bin");
     mkdirSync(binaries);
     writePinnedRunnerHostBinaries(binaries);

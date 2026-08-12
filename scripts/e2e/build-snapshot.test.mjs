@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
 
-function fixtureRepository() {
-  const root = mkdtempSync(join(tmpdir(), "plogkit-e2e-build-snapshot-"));
+function fixtureRepository(t) {
+  const root = createTemporaryTestDirectory(t, "plogkit-e2e-build-snapshot-");
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   writeFileSync(join(root, ".gitignore"), "build/\n.env\n.env*.local\n");
   writeFileSync(join(root, "app.ts"), "export const version = 1;\n");
@@ -29,9 +29,9 @@ function fixtureRepository() {
   return { artifact, nativeSymbols, root, sidecar };
 }
 
-test("a run snapshot atomically owns the exact build and Maestro inputs under artifactRoot", () => {
-  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository();
-  const artifactRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifacts-"));
+test("a run snapshot atomically owns the exact build and Maestro inputs under artifactRoot", (t) => {
+  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository(t);
+  const artifactRoot = createTemporaryTestDirectory(t, "plogkit-e2e-artifacts-");
   const repositorySha256 = captureBuildInputs(root);
 
   const snapshot = createRunSnapshot({
@@ -80,9 +80,9 @@ test("a run snapshot atomically owns the exact build and Maestro inputs under ar
   assert.match(provenance.e2eSha256, /^[a-f0-9]{64}$/);
 });
 
-test("a run snapshot rejects repository drift since the build started", () => {
-  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository();
-  const artifactRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifacts-"));
+test("a run snapshot rejects repository drift since the build started", (t) => {
+  const { artifact, nativeSymbols, root, sidecar } = fixtureRepository(t);
+  const artifactRoot = createTemporaryTestDirectory(t, "plogkit-e2e-artifacts-");
   const repositorySha256 = captureBuildInputs(root);
   writeFileSync(join(root, "app.ts"), "export const version = 2;\n");
 
@@ -98,9 +98,9 @@ test("a run snapshot rejects repository drift since the build started", () => {
   );
 });
 
-test("a run snapshot requires diagnostic sidecars", () => {
-  const { artifact, root } = fixtureRepository();
-  const artifactRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifacts-"));
+test("a run snapshot requires diagnostic sidecars", (t) => {
+  const { artifact, root } = fixtureRepository(t);
+  const artifactRoot = createTemporaryTestDirectory(t, "plogkit-e2e-artifacts-");
   const repositorySha256 = captureBuildInputs(root);
 
   assert.throws(

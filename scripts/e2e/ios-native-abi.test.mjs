@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
 
 const compatibleSymbol =
@@ -14,13 +14,11 @@ function writeExecutable(path, contents) {
   chmodSync(path, 0o755);
 }
 
-function createAppFixture({
-  architectures = "arm64",
-  exportedSymbols,
-  appImports = [],
-  supportImports = null,
-}) {
-  const root = mkdtempSync(join(tmpdir(), "plogkit-ios-abi-"));
+function createAppFixture(
+  t,
+  { architectures = "arm64", exportedSymbols, appImports = [], supportImports = null },
+) {
+  const root = createTemporaryTestDirectory(t, "plogkit-ios-abi-");
   const app = join(root, "PlogKit.app");
   const appBinary = join(app, "PlogKit");
   const frameworks = join(app, "Frameworks");
@@ -80,8 +78,8 @@ esac
   return { app, bin };
 }
 
-test("iOS Release rejects an Expo framework whose ExpoModulesCore symbol is missing", () => {
-  const fixture = createAppFixture({ exportedSymbols: [] });
+test("iOS Release rejects an Expo framework whose ExpoModulesCore symbol is missing", (t) => {
+  const fixture = createAppFixture(t, { exportedSymbols: [] });
   const previousPath = process.env.PATH;
   process.env.PATH = `${fixture.bin}:${previousPath}`;
   try {
@@ -94,9 +92,9 @@ test("iOS Release rejects an Expo framework whose ExpoModulesCore symbol is miss
   }
 });
 
-test("iOS Release rejects a PlogKit executable whose ExpoModulesCore symbol is missing", () => {
+test("iOS Release rejects a PlogKit executable whose ExpoModulesCore symbol is missing", (t) => {
   const missingSymbol = `${compatibleSymbol}MissingFromApp`;
-  const fixture = createAppFixture({
+  const fixture = createAppFixture(t, {
     appImports: [missingSymbol],
     exportedSymbols: [compatibleSymbol],
   });
@@ -112,9 +110,9 @@ test("iOS Release rejects a PlogKit executable whose ExpoModulesCore symbol is m
   }
 });
 
-test("iOS Release rejects a non-Expo framework whose ExpoModulesCore symbol is missing", () => {
+test("iOS Release rejects a non-Expo framework whose ExpoModulesCore symbol is missing", (t) => {
   const missingSymbol = `${compatibleSymbol}MissingFromSupportKit`;
-  const fixture = createAppFixture({
+  const fixture = createAppFixture(t, {
     exportedSymbols: [compatibleSymbol],
     supportImports: [missingSymbol],
   });
@@ -130,8 +128,8 @@ test("iOS Release rejects a non-Expo framework whose ExpoModulesCore symbol is m
   }
 });
 
-test("iOS Release accepts Expo frameworks resolved by the embedded ExpoModulesCore", () => {
-  const fixture = createAppFixture({ exportedSymbols: [compatibleSymbol] });
+test("iOS Release accepts Expo frameworks resolved by the embedded ExpoModulesCore", (t) => {
+  const fixture = createAppFixture(t, { exportedSymbols: [compatibleSymbol] });
   const previousPath = process.env.PATH;
   process.env.PATH = `${fixture.bin}:${previousPath}`;
   try {
@@ -144,8 +142,8 @@ test("iOS Release accepts Expo frameworks resolved by the embedded ExpoModulesCo
   }
 });
 
-test("iOS Release accepts a PlogKit executable resolved by the embedded ExpoModulesCore", () => {
-  const fixture = createAppFixture({
+test("iOS Release accepts a PlogKit executable resolved by the embedded ExpoModulesCore", (t) => {
+  const fixture = createAppFixture(t, {
     appImports: [compatibleSymbol],
     exportedSymbols: [compatibleSymbol],
   });
@@ -161,8 +159,8 @@ test("iOS Release accepts a PlogKit executable resolved by the embedded ExpoModu
   }
 });
 
-test("iOS Release rejects a framework outside the arm64-only simulator contract", () => {
-  const fixture = createAppFixture({
+test("iOS Release rejects a framework outside the arm64-only simulator contract", (t) => {
+  const fixture = createAppFixture(t, {
     architectures: "x86_64 arm64",
     exportedSymbols: [compatibleSymbol],
   });
@@ -178,8 +176,8 @@ test("iOS Release rejects a framework outside the arm64-only simulator contract"
   }
 });
 
-test("iOS Release fails closed when an Expo framework executable cannot be inspected", () => {
-  const fixture = createAppFixture({ exportedSymbols: [compatibleSymbol] });
+test("iOS Release fails closed when an Expo framework executable cannot be inspected", (t) => {
+  const fixture = createAppFixture(t, { exportedSymbols: [compatibleSymbol] });
   mkdirSync(join(fixture.app, "Frameworks", "ExpoBroken.framework"));
   const previousPath = process.env.PATH;
   process.env.PATH = `${fixture.bin}:${previousPath}`;

@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import {
   chmodSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 
 import {
   assertAndroidDeviceReady,
@@ -88,8 +88,8 @@ test("Android reads the SDK package revision without mistaking the adb protocol 
   assert.equal(parseAdbPlatformToolsVersion("Android Debug Bridge version 1.0.41"), null);
 });
 
-test("each Android device invocation owns one ephemeral AVD and child emulator", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-ephemeral-"));
+test("each Android device invocation owns one ephemeral AVD and child emulator", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-ephemeral-");
   const androidHome = join(directory, "sdk");
   const emulatorDirectory = join(androidHome, "emulator");
   const platformTools = join(androidHome, "platform-tools");
@@ -265,8 +265,8 @@ esac
   assert.match(avdContract, /\|unset$/m);
 });
 
-test("Android rejects an emulator outside the declared device toolchain", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-toolchain-"));
+test("Android rejects an emulator outside the declared device toolchain", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-toolchain-");
   const emulatorDirectory = join(directory, "emulator");
   const platformToolsDirectory = join(directory, "platform-tools");
   const commandLineToolsDirectory = join(directory, "cmdline-tools", "22.0");
@@ -319,8 +319,8 @@ test("Android rejects an emulator outside the declared device toolchain", async 
   );
 });
 
-test("a fresh Android device installs and seeds without replacement cleanup", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-fresh-install-"));
+test("a fresh Android device installs and seeds without replacement cleanup", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-fresh-install-");
   const adbPath = join(directory, "adb");
   const commandLog = join(directory, "adb.log");
   writeExecutable(
@@ -348,7 +348,7 @@ esac
 });
 
 test("Android bounds every install and fixture command", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-mutation-timeout-"));
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-mutation-timeout-");
   const adbPath = join(directory, "adb");
   const artifact = join(directory, "app-release.apk");
   const fixture = join(directory, "fixture.jpg");
@@ -388,8 +388,8 @@ esac
   }
 });
 
-function createReadinessFixture(mode) {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-android-readiness-"));
+function createReadinessFixture(t, mode) {
+  const directory = createTemporaryTestDirectory(t, "plogkit-android-readiness-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
   const adbLog = join(directory, "adb.log");
@@ -463,8 +463,8 @@ esac
   return { adbLog, artifactRoot, binaries, hierarchyAttempts, homeAttempts, mode, resolveAttempts };
 }
 
-async function withReadinessFixture(mode, operation) {
-  const fixture = createReadinessFixture(mode);
+async function withReadinessFixture(t, mode, operation) {
+  const fixture = createReadinessFixture(t, mode);
   return withEnvironment(
     {
       FAKE_ADB_LOG: fixture.adbLog,
@@ -478,8 +478,8 @@ async function withReadinessFixture(mode, operation) {
   );
 }
 
-test("Android semantic readiness exercises only the installed UI contract", async () => {
-  await withReadinessFixture("delayed", async (fixture) => {
+test("Android semantic readiness exercises only the installed UI contract", async (t) => {
+  await withReadinessFixture(t, "delayed", async (fixture) => {
     await assertAndroidDeviceReady({
       artifactRoot: fixture.artifactRoot,
       device: {
@@ -510,8 +510,8 @@ test("Android semantic readiness exercises only the installed UI contract", asyn
   });
 });
 
-test("Android semantic readiness shares one deadline across serial adb probes", async () => {
-  await withReadinessFixture("probe-hang", async (fixture) => {
+test("Android semantic readiness shares one deadline across serial adb probes", async (t) => {
+  await withReadinessFixture(t, "probe-hang", async (fixture) => {
     const startedAt = Date.now();
     await assert.rejects(
       assertAndroidDeviceReady({
@@ -529,8 +529,8 @@ test("Android semantic readiness shares one deadline across serial adb probes", 
   });
 });
 
-test("Android semantic readiness never retries a failed HOME launch", async () => {
-  await withReadinessFixture("home-failure", async (fixture) => {
+test("Android semantic readiness never retries a failed HOME launch", async (t) => {
+  await withReadinessFixture(t, "home-failure", async (fixture) => {
     await assert.rejects(
       assertAndroidDeviceReady({
         artifactRoot: fixture.artifactRoot,
@@ -547,8 +547,8 @@ test("Android semantic readiness never retries a failed HOME launch", async () =
   });
 });
 
-test("Android semantic readiness rejects a startup ANR after its dialog disappears", async () => {
-  await withReadinessFixture("event-anr", async (fixture) => {
+test("Android semantic readiness rejects a startup ANR after its dialog disappears", async (t) => {
+  await withReadinessFixture(t, "event-anr", async (fixture) => {
     await assert.rejects(
       assertAndroidDeviceReady({
         artifactRoot: fixture.artifactRoot,
@@ -564,8 +564,8 @@ test("Android semantic readiness rejects a startup ANR after its dialog disappea
   });
 });
 
-test("Android semantic readiness records its failing launcher probe", async () => {
-  await withReadinessFixture("dialog-anr", async (fixture) => {
+test("Android semantic readiness records its failing launcher probe", async (t) => {
+  await withReadinessFixture(t, "dialog-anr", async (fixture) => {
     await assert.rejects(
       assertAndroidDeviceReady({
         artifactRoot: fixture.artifactRoot,
@@ -587,8 +587,8 @@ test("Android semantic readiness records its failing launcher probe", async () =
   });
 });
 
-test("Android semantic readiness preserves bounded raw evidence", async () => {
-  await withReadinessFixture("oversized", async (fixture) => {
+test("Android semantic readiness preserves bounded raw evidence", async (t) => {
+  await withReadinessFixture(t, "oversized", async (fixture) => {
     await assertAndroidDeviceReady({
       artifactRoot: fixture.artifactRoot,
       device: {

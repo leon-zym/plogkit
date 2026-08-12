@@ -6,16 +6,15 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import {
   assessReliabilityRun,
   buildFailureArtifactFiles,
@@ -608,7 +607,7 @@ test("evidence orchestration rejects missing and malformed payloads", () => {
   assert.match(malformed.errors.join("\n"), /malformed RELIABILITY_PAYLOAD/);
 });
 
-test("orchestration fails closed when tests do not run or output is untrusted", () => {
+test("orchestration fails closed when tests do not run or output is untrusted", (t) => {
   const configuration = { profile: "quick", seed: undefined, steps: 125 };
   const missing = assessReliabilityRun({
     configuration,
@@ -644,7 +643,7 @@ test("orchestration fails closed when tests do not run or output is untrusted", 
   assert.equal(mismatch.status, "failure");
   assert.match(mismatch.errors.join("\n"), /8 seeds/);
 
-  const root = mkdtempSync(join(tmpdir(), "plogkit-reliability-failure-"));
+  const root = createTemporaryTestDirectory(t, "plogkit-reliability-failure-");
   const directory = publishArtifactAtomically({
     artifactRoot: root,
     directoryName: "failed",
@@ -669,8 +668,8 @@ test("orchestration fails closed when tests do not run or output is untrusted", 
   assert.equal(saved.stdout, "untrusted output");
 });
 
-test("artifact publication atomically exposes only the completed directory", () => {
-  const root = mkdtempSync(join(tmpdir(), "plogkit-reliability-helper-"));
+test("artifact publication atomically exposes only the completed directory", (t) => {
+  const root = createTemporaryTestDirectory(t, "plogkit-reliability-helper-");
   const directory = publishArtifactAtomically({
     artifactRoot: root,
     directoryName: "result",
@@ -684,7 +683,7 @@ test("artifact publication atomically exposes only the completed directory", () 
   assert.equal(readFileSync(join(directory, "summary.json"), "utf8"), '{"ok":true}\n');
 });
 
-test("run.mjs process fails closed and publishes only failure artifacts for untrusted Jest", () => {
+test("run.mjs process fails closed and publishes only failure artifacts for untrusted Jest", (t) => {
   const runnerDirectory = fileURLToPath(new URL(".", import.meta.url));
   const forgedCounterContract = evidenceContractWithEvents(evidenceEvents, {
     operationCounts: {
@@ -733,7 +732,7 @@ test("run.mjs process fails closed and publishes only failure artifacts for untr
   ];
 
   for (const scenario of scenarios) {
-    const root = mkdtempSync(join(tmpdir(), `plogkit-runner-${scenario.name}-`));
+    const root = createTemporaryTestDirectory(t, `plogkit-runner-${scenario.name}-`);
     const target = join(root, "scripts", "reliability-soak");
     mkdirSync(target, { recursive: true });
     copyFileSync(join(runnerDirectory, "run.mjs"), join(target, "run.mjs"));
@@ -764,6 +763,12 @@ test("run.mjs process fails closed and publishes only failure artifacts for untr
     const result = spawnSync(process.execPath, [join(target, "run.mjs"), scenario.profile], {
       cwd: root,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        TEMP: root,
+        TMP: root,
+        TMPDIR: root,
+      },
     });
     assert.notEqual(result.status, 0, `${scenario.name} unexpectedly succeeded`);
     const artifactFiles = readdirSync(join(root, "artifacts"), { recursive: true }).map(String);
