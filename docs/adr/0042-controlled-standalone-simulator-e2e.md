@@ -3,7 +3,7 @@
 - 状态：部分修订
 - 接受日期：2026-08-11
 - 修订：[ADR 0019](0019-cross-platform-maestro-e2e.md) 中 development build、Metro 与设备生命周期的决策
-- 后继：[ADR 0043](0043-layered-ios-simulator-readiness.md)
+- 后继：[ADR 0043](0043-layered-ios-simulator-readiness.md)、[ADR 0045](0045-sanitized-e2e-diagnostic-evidence.md)
 - 关联：[ADR 0020](0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0039](0039-native-node-orchestration-tests.md)、[ADR 0041](0041-scenario-verification-traceability.md)
 
 ## 背景

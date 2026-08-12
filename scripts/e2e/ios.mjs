@@ -6,9 +6,12 @@ import { join, resolve } from "node:path";
 import {
   capture,
   captureBoundedCommand,
+  hasIosAppCatalogEntry,
   log,
   publicE2eErrorText,
   run,
+  summarizeIosSimulatorDevices,
+  summarizeIosSpringBoardService,
   waitUntil,
 } from "./runtime.mjs";
 import {
@@ -33,7 +36,7 @@ const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
 const iosReadinessTimeoutMs = 120000;
-const iosGuestHealthTimeoutMs = 30000;
+const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
@@ -401,8 +404,9 @@ export async function prepareIosDevice({
   deletionVerificationTimeoutMs = 30000,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
 }) {
+  let device;
   try {
-    const device = createEphemeralIosDevice();
+    device = createEphemeralIosDevice();
 
     cleanup.add(async () => {
       log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
@@ -428,12 +432,19 @@ export async function prepareIosDevice({
         allowFailure: true,
         timeoutMs: iosPrepareEvidenceProbeTimeoutMs,
       });
+      const stateSummary = simulatorState
+        ? summarizeIosSimulatorDevices(simulatorState, device?.udid)
+        : null;
       writeFileSync(
         prepareEvidencePath,
         boundedEvidence(
           `=== prepare failure ===\n${publicE2eErrorText(
             error,
-          )}\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
+          )}\n\n=== simulator state summary ===\n${
+            stateSummary
+              ? JSON.stringify(stateSummary, null, 2)
+              : "(probe failed or returned invalid output)"
+          }\n`,
           iosPrepareEvidenceMaxBytes,
         ),
       );
@@ -492,6 +503,60 @@ export async function assertIosGuestHealthy({
     }
   };
 
+  const captureHealthProbe = async (stage, args) => {
+    const probeStartedAtMs = Date.now();
+    try {
+      const output = await captureBoundedCommand("xcrun", args, {
+        cleanup,
+        includeOutputInError: false,
+        maxBytes: iosGuestHealthMaxBytes,
+        timeoutMs: remainingTimeout(),
+      });
+      preserveEvidence(
+        `${stage}.probe.json`,
+        `${JSON.stringify(
+          {
+            bytes: Buffer.byteLength(output),
+            durationMs: Date.now() - probeStartedAtMs,
+            status: "completed",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return output;
+    } catch (error) {
+      if (error instanceof Error) error.e2eStage = `ios-${stage}-readiness`;
+      preserveEvidence(
+        `${stage}.probe.json`,
+        `${JSON.stringify(
+          {
+            durationMs: Date.now() - probeStartedAtMs,
+            error: {
+              code: error?.code ?? null,
+              name: error instanceof Error ? error.name : "NonErrorFailure",
+            },
+            status: "failed",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      throw error;
+    }
+  };
+
+  const installedApps = await captureHealthProbe("app-service", [
+    "simctl",
+    "listapps",
+    device.deviceId,
+  ]);
+  if (!hasIosAppCatalogEntry(installedApps)) {
+    const error = new Error("iOS app-service readiness returned an empty application catalog.");
+    error.e2eStage = "ios-app-service-readiness";
+    throw error;
+  }
+
   const args = [
     "simctl",
     "spawn",
@@ -500,35 +565,15 @@ export async function assertIosGuestHealthy({
     "print",
     "system/com.apple.SpringBoard",
   ];
-  let output;
-  const probeStartedAtMs = Date.now();
-  try {
-    output = await captureBoundedCommand("xcrun", args, {
-      cleanup,
-      maxBytes: iosGuestHealthMaxBytes,
-      timeoutMs: remainingTimeout(),
-    });
-  } catch (error) {
-    preserveEvidence(
-      "springboard-service.probe.json",
-      `${JSON.stringify(
-        {
-          durationMs: Date.now() - probeStartedAtMs,
-          error: {
-            code: error?.code ?? null,
-            name: error instanceof Error ? error.name : "NonErrorFailure",
-          },
-          status: "failed",
-        },
-        null,
-        2,
-      )}\n`,
+  const output = await captureHealthProbe("springboard-service", args);
+  const springBoard = summarizeIosSpringBoardService(output);
+  preserveEvidence("springboard-service.json", `${JSON.stringify(springBoard, null, 2)}\n`);
+  if (springBoard.state !== "running" || springBoard.pid === null) {
+    const error = new Error(
+      "iOS guest health did not expose a running SpringBoard service with a PID.",
     );
+    error.e2eStage = "ios-springboard-service-readiness";
     throw error;
-  }
-  preserveEvidence("springboard-service.txt", `${output}\n`);
-  if (!/\bstate\s*=\s*running\b/i.test(output) || !/\bpid\s*=\s*[1-9]\d*\b/i.test(output)) {
-    throw new Error("iOS guest health did not expose a running SpringBoard service with a PID.");
   }
   log("ios", `CoreSimulator guest health ready on ${device.deviceId}.`);
 }
@@ -601,22 +646,36 @@ export async function installAndSeedIos({
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
   root,
 }) {
+  const runStage = async (stage, operation) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof Error) error.e2eStage = stage;
+      throw error;
+    }
+  };
   log("ios", "Installing the standalone Release app and seeding photos.");
-  await run("xcrun", ["simctl", "install", device.deviceId, artifact], {
-    cleanup,
-    cwd: root,
-    timeoutMs: lifecycleTimeoutMs,
-  });
-  await run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
-    cleanup,
-    cwd: root,
-    timeoutMs: lifecycleTimeoutMs,
-  });
-  await waitUntil(
-    () => captureIosPhotoResources(device).size >= fixtures.length,
-    10000,
-    `iOS Photos to index ${fixtures.length} seeded resources`,
-    500,
+  await runStage("ios-app-install", () =>
+    run("xcrun", ["simctl", "install", device.deviceId, artifact], {
+      cleanup,
+      cwd: root,
+      timeoutMs: lifecycleTimeoutMs,
+    }),
+  );
+  await runStage("ios-fixture-addmedia", () =>
+    run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
+      cleanup,
+      cwd: root,
+      timeoutMs: lifecycleTimeoutMs,
+    }),
+  );
+  await runStage("ios-photo-index", () =>
+    waitUntil(
+      () => captureIosPhotoResources(device).size >= fixtures.length,
+      10000,
+      `iOS Photos to index ${fixtures.length} seeded resources`,
+      500,
+    ),
   );
 }
 

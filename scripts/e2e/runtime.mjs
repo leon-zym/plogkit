@@ -236,8 +236,13 @@ async function captureDiagnostic(
   });
 }
 
-function boundedCommandError(command, args, result, { maxBytes, timeoutMs }) {
-  const details = result.output.toString("utf8").trim();
+function boundedCommandError(
+  command,
+  args,
+  result,
+  { includeOutputInError, maxBytes, timeoutMs },
+) {
+  const details = includeOutputInError ? result.output.toString("utf8").trim() : "";
   let error;
   if (result.timedOut) {
     error = Object.assign(
@@ -285,7 +290,7 @@ function boundedCommandError(command, args, result, { maxBytes, timeoutMs }) {
 export async function captureBoundedCommand(
   command,
   args,
-  { cleanup, cwd, env = process.env, maxBytes, timeoutMs },
+  { cleanup, cwd, env = process.env, includeOutputInError = true, maxBytes, timeoutMs },
 ) {
   const result = await captureDiagnostic(command, args, {
     captureStdout: true,
@@ -295,8 +300,29 @@ export async function captureBoundedCommand(
     maxBytes,
     timeoutMs,
   });
-  if (!result.ok) throw boundedCommandError(command, args, result, { maxBytes, timeoutMs });
+  if (!result.ok) {
+    throw boundedCommandError(command, args, result, {
+      includeOutputInError,
+      maxBytes,
+      timeoutMs,
+    });
+  }
   return result.stdout.toString("utf8").trim();
+}
+
+export function hasIosAppCatalogEntry(output) {
+  return /(?:^|[{;\r\n])\s*(?:"[^"]+\.[^"]+"|[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+)\s*=\s*\{/.test(
+    output,
+  );
+}
+
+export function summarizeIosSpringBoardService(output) {
+  const pid = output.match(/\bpid\s*=\s*([1-9]\d*)\b/i)?.[1];
+  const state = output.match(/\bstate\s*=\s*([A-Za-z-]+)\b/i)?.[1];
+  return {
+    pid: pid ? Number(pid) : null,
+    state: state?.toLowerCase() ?? null,
+  };
 }
 
 export function run(
@@ -905,11 +931,39 @@ async function captureProbeEvidence({
   metadataPath,
   outputPath,
   state,
+  transformOutput,
 }) {
   const result = await runDiagnostic(command, args, state, maximumBytes, maximumMs);
-  if (result) storeEvidence(outputPath, result.output, state, result.truncated);
+  if (result && outputPath) {
+    const output = transformOutput ? transformOutput(result.output) : result.output;
+    storeEvidence(outputPath, output, state, result.truncated);
+  }
   storeProbeMetadata(metadataPath, command, args, result, state);
   return result;
+}
+
+export function summarizeIosSimulatorDevices(output, deviceId) {
+  try {
+    const parsed = JSON.parse(Buffer.isBuffer(output) ? output.toString("utf8") : String(output));
+    for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
+      const device = Array.isArray(devices)
+        ? devices.find((candidate) => candidate?.udid === deviceId)
+        : null;
+      if (device) {
+        return {
+          device: {
+            isAvailable: device.isAvailable ?? null,
+            state: device.state ?? null,
+            udid: device.udid,
+          },
+          runtime,
+        };
+      }
+    }
+    return { device: null, runtime: null };
+  } catch {
+    return null;
+  }
 }
 
 async function captureIosScreenshot(diagnosticDirectory, device, state) {
@@ -1145,6 +1199,12 @@ async function collectIosDiagnostics(
       maximumBytes: 1024 * 1024,
       metadataPath: join(diagnosticDirectory, "host-simulator-devices.probe.json"),
       outputPath: join(diagnosticDirectory, "host-simulator-devices.json"),
+      summarize: (output) => summarizeIosSimulatorDevices(output, device.deviceId),
+    },
+    {
+      args: ["simctl", "listapps", device.deviceId],
+      maximumBytes: 1024 * 1024,
+      metadataPath: join(diagnosticDirectory, "device-app-service.probe.json"),
     },
     {
       args: [
@@ -1157,15 +1217,24 @@ async function collectIosDiagnostics(
       ],
       maximumBytes: 1024 * 1024,
       metadataPath: join(diagnosticDirectory, "springboard-service.probe.json"),
-      outputPath: join(diagnosticDirectory, "springboard-service.txt"),
+      outputPath: join(diagnosticDirectory, "springboard-service.json"),
+      summarize: (output) => summarizeIosSpringBoardService(output.toString("utf8")),
     },
   ]) {
-    await captureProbeEvidence({
+    const result = await captureProbeEvidence({
       ...probe,
+      outputPath: undefined,
       command: "xcrun",
       maximumMs: IOS_READINESS_PROBE_TIMEOUT_MS,
       state,
     });
+    if (!probe.summarize || !result) continue;
+    const summary = probe.summarize(result.output);
+    if (summary === null) {
+      state.complete = false;
+      continue;
+    }
+    storeEvidence(probe.outputPath, `${JSON.stringify(summary, null, 2)}\n`, state);
   }
   await captureIosScreenshot(diagnosticDirectory, device, state);
   const logArgs = [
@@ -1189,6 +1258,7 @@ async function collectIosDiagnostics(
     metadataPath: join(diagnosticDirectory, "simulator-system.probe.json"),
     outputPath: join(diagnosticDirectory, "simulator-system.log"),
     state,
+    transformOutput: (output) => Buffer.from(publicE2eErrorText(output.toString("utf8"))),
   });
   copyIosReports(
     diagnosticDirectory,
@@ -1222,7 +1292,11 @@ function writeFailureSummary(diagnosticDirectory, error, state) {
 
 export function publicE2eErrorText(error) {
   const source = error instanceof Error ? error.message : String(error);
-  return source
+  const stage =
+    error instanceof Error && /^[a-z0-9-]+$/.test(error.e2eStage ?? "")
+      ? `[${error.e2eStage}] `
+      : "";
+  return `${stage}${source
     .split("\n")
     .map((line) =>
       line.replace(
@@ -1234,7 +1308,7 @@ export function publicE2eErrorText(error) {
     .replace(/https?:\/\/127\.0\.0\.1:\d+(?:\/[^\s"']*)?/g, "<LOOPBACK_ENDPOINT>")
     .replace(/\/Users\/[^\s"']+/g, "<PRIVATE_PATH>")
     .replace(/\/home\/runner\/[^\s"']+/g, "<PRIVATE_PATH>")
-    .replace(/\/var\/folders\/[^\s"']+/g, "<PRIVATE_PATH>");
+    .replace(/\/var\/folders\/[^\s"']+/g, "<PRIVATE_PATH>")}`;
 }
 
 export async function collectFailureDiagnostics({

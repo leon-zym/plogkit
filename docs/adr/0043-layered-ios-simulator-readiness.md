@@ -1,8 +1,9 @@
 # ADR 0043：iOS Simulator 使用分层 readiness
 
-- 状态：已接受
+- 状态：部分修订
 - 接受日期：2026-08-13
 - 修订：[ADR 0042](0042-controlled-standalone-simulator-e2e.md) 中设备 boot 与安装之间的 readiness 决策
+- 后继：[ADR 0044](0044-ios-app-service-readiness.md)
 - 关联：[Issue 99](https://github.com/leon-zym/plogkit/issues/99)
 
 ## 背景

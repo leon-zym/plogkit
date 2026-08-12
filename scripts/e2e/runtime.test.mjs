@@ -58,21 +58,42 @@ test("capture bounds an unresponsive diagnostic command", (t) => {
 });
 
 test("public E2E errors redact command arguments, loopback endpoints, and private paths", () => {
-  const output = publicE2eErrorText(
+  const source = Object.assign(
     new Error(
       "Command failed (1): /Users/runner/work/plogkit/maestro --env PLOGKIT_EXPORT_ASSERTION_URL=http://127.0.0.1:4312/private-token /var/folders/private/output\n" +
         "artifact: /home/runner/work/plogkit/private.log\n" +
         "endpoint: http://127.0.0.1:9876/another-token",
     ),
+    { e2eStage: "ios-app-install" },
   );
+  const output = publicE2eErrorText(source);
 
   assert.equal(
     output,
-    "Command failed (1): maestro <arguments redacted>\n" +
+    "[ios-app-install] Command failed (1): maestro <arguments redacted>\n" +
       "artifact: <PRIVATE_PATH>\n" +
       "endpoint: <LOOPBACK_ENDPOINT>",
   );
   assert.doesNotMatch(output, /Users|127\.0\.0\.1|private-token|var\/folders/);
+});
+
+test("bounded commands can omit sensitive output from their primary error", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-private-command-output-");
+  const command = join(directory, "private-output");
+  writeExecutable(command, "#!/bin/sh\nprintf '%s\\n' '/Users/runner/private-catalog'\nexit 7\n");
+
+  await assert.rejects(
+    captureBoundedCommand(command, [], {
+      includeOutputInError: false,
+      maxBytes: 1024,
+      timeoutMs: 1000,
+    }),
+    (error) => {
+      assert.doesNotMatch(error.message, /Users\/runner|private-catalog/);
+      assert.match(error.message, /Command failed \(7\)/);
+      return true;
+    },
+  );
 });
 
 test(
@@ -791,11 +812,17 @@ test("iOS diagnostics copy only fresh relevant reports through the high-level se
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
-if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+if [ "$1 $2 $3" = "simctl list devices" ]; then
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = {}; }'
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
+  printf '%s\n' 'pid = 4242' 'state = running'
+elif [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
-  exit 0
+else
+  printf '%s\n' 'raw simulator log'
 fi
-printf '%s\n' 'raw simulator log'
 `,
   );
   writeFileSync(join(reports, "PlogKit-fresh.ips"), "app crash");
@@ -855,13 +882,15 @@ test("iOS diagnostics capture bounded device and XCTest readiness probes", async
     `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
 if [ "$1 $2 $3" = "simctl list devices" ]; then
-  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted","dataPath":"/Users/runner/private-device"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = { DataContainer = "file:///Users/runner/Library/private"; }; }'
 elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
-  printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running'
+  printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running' 'SIMULATOR_HOST_HOME = /Users/runner/private-home'
 elif [ "$1 $2 $3 $4" = "simctl io simulator-test screenshot" ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
 elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test log" ]; then
-  printf '%s\n' 'Maestro iOS driver waiting for XCTest bootstrap'
+  printf '%s\n' 'Maestro iOS driver waiting for XCTest bootstrap at /Users/runner/private-log http://127.0.0.1:4312/private-token'
 else
   printf '%s\n' "unexpected xcrun command: $*" >&2
   exit 2
@@ -890,11 +919,29 @@ fi
 
   assert.deepEqual(result, { complete: true });
   assert.match(readFileSync(join(artifacts, "host-simulator-devices.json"), "utf8"), /Booted/);
-  assert.match(readFileSync(join(artifacts, "springboard-service.txt"), "utf8"), /pid = 4242/);
+  const appServiceProbe = JSON.parse(
+    readFileSync(join(artifacts, "device-app-service.probe.json"), "utf8"),
+  );
+  assert.ok(appServiceProbe.bytes > 0);
+  assert.equal(existsSync(join(artifacts, "device-app-service.txt")), false);
+  assert.match(readFileSync(join(artifacts, "springboard-service.json"), "utf8"), /"pid": 4242/);
+  const safeProbeEvidence = [
+    "host-simulator-devices.json",
+    "device-app-service.probe.json",
+    "springboard-service.json",
+    "springboard-service.probe.json",
+  ]
+    .map((name) => readFileSync(join(artifacts, name), "utf8"))
+    .join("\n");
+  assert.doesNotMatch(safeProbeEvidence, /Users\/runner|DataContainer|SIMULATOR_HOST_HOME/);
   assert.equal(readFileSync(join(artifacts, "springboard-screenshot.png"), "utf8"), "PNG-EVIDENCE");
   assert.match(
     readFileSync(join(artifacts, "simulator-system.log"), "utf8"),
     /Maestro iOS driver waiting for XCTest/,
+  );
+  assert.doesNotMatch(
+    readFileSync(join(artifacts, "simulator-system.log"), "utf8"),
+    /Users\/runner|127\.0\.0\.1|private-token/,
   );
 
   const screenshotMetadata = JSON.parse(
@@ -971,7 +1018,13 @@ test("iOS diagnostics preserve fresh relevant reports retired by macOS", async (
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
-if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+if [ "$1 $2 $3" = "simctl list devices" ]; then
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = {}; }'
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
+  printf '%s\n' 'pid = 4242' 'state = running'
+elif [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
 fi
 exit 0
