@@ -160,6 +160,33 @@ test("the runner rejects an incomplete flow selector before validation", () => {
   assert.match(result.stderr, /--flow requires a flow basename/);
 });
 
+test("photo resource assessment waits while fewer than the expected identities are present", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1"]);
+
+  assert.equal(assessPhotoResourceDelta(before, after, 2), null);
+});
+
+test("photo resource assessment accepts exactly the expected new identities", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1", "export-2"]);
+
+  assert.equal(assessPhotoResourceDelta(before, after, 2), after);
+});
+
+test("photo resource assessment rejects more than the expected new identities", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1", "export-2", "unexpected-export"]);
+
+  assert.throws(
+    () => assessPhotoResourceDelta(before, after, 2),
+    /Expected exactly 2 new system photo resources, but observed 3/,
+  );
+});
+
 test("sorted platform locks precede locked CoreSimulator validation", async () => {
   const { validateAfterAcquiringPlatformLocks } = await import("./run.mjs");
   assert.equal(typeof validateAfterAcquiringPlatformLocks, "function");

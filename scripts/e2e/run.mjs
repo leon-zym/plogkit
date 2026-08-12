@@ -173,6 +173,20 @@ function capturePhotoResources(device) {
     : captureAndroidPhotoResources(device);
 }
 
+function countNewPhotoResources(before, after) {
+  return [...after].filter((resource) => !before.has(resource)).length;
+}
+
+export function assessPhotoResourceDelta(before, after, expected) {
+  const observed = countNewPhotoResources(before, after);
+  if (observed > expected) {
+    throw new Error(
+      `Expected exactly ${expected} new system photo resources, but observed ${observed}.`,
+    );
+  }
+  return observed === expected ? after : null;
+}
+
 async function runSuiteWithExportAssertion(options) {
   const { device, flow } = options;
   const assertsExport = flow === null || flow === "f04-export";
@@ -185,16 +199,16 @@ async function runSuiteWithExportAssertion(options) {
   const after = await waitUntil(
     () => {
       const resources = capturePhotoResources(device);
-      const added = [...resources].filter((resource) => !before.has(resource));
-      return added.length >= expectedNewResources ? resources : null;
+      return assessPhotoResourceDelta(before, resources, expectedNewResources);
     },
     10000,
     `${device.platform} system photo library to contain ${expectedNewResources} newly exported resources`,
     500,
   );
+  const observedNewResources = countNewPhotoResources(before, after);
   log(
     device.platform,
-    `System photo resources gained ${expectedNewResources} new identities (${before.size} before, ${after.size} after).`,
+    `System photo resources gained ${observedNewResources} new identities (${before.size} before, ${after.size} after).`,
   );
 }
 
