@@ -35,6 +35,10 @@ const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
+function observeStage(observation, stage, operation) {
+  return observation ? observation.run(stage, operation) : operation();
+}
+
 function boundedEvidence(value, maxBytes) {
   const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
   if (source.length <= maxBytes) return source;
@@ -343,7 +347,7 @@ function configureIosEnglishLocale(deviceId) {
   log("ios", "Simulator locale: en-US.");
 }
 
-export async function buildIos({ cleanup, root, workers }) {
+export async function buildIos({ cleanup, observation, root, workers }) {
   log("ios", "Building the standalone Release app without booting a simulator.");
   const args = [
     "-workspace",
@@ -361,13 +365,15 @@ export async function buildIos({ cleanup, root, workers }) {
   ];
   if (workers) args.push("-jobs", workers);
   args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
-  await run("xcodebuild", args, {
-    cleanup,
-    cwd: root,
-    env: createStandaloneBuildEnvironment(),
-    timeoutMs: buildTimeoutMs,
+  await observeStage(observation, "ios-release-build", async () => {
+    await run("xcodebuild", args, {
+      cleanup,
+      cwd: root,
+      env: createStandaloneBuildEnvironment(),
+      timeoutMs: buildTimeoutMs,
+    });
+    assertIosStandaloneArtifact(root);
   });
-  assertIosStandaloneArtifact(root);
 }
 
 export function assertIosStandaloneArtifact(root) {
@@ -398,24 +404,29 @@ export async function prepareIosDevice({
   cleanup,
   deletionVerificationTimeoutMs = 30000,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  observation,
 }) {
   let device;
   try {
-    device = createEphemeralIosDevice();
+    device = await observeStage(observation, "ios-device-create", () => createEphemeralIosDevice());
 
     cleanup.add(async () => {
-      log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
-      await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
+      await observeStage(observation, "ios-cleanup", async () => {
+        log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
+        await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
+      });
     });
     log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
 
     // SpringBoard and permission prompts read locale at first process startup.
     // Configure the newly-created, still-shutdown device before its only boot.
-    configureIosEnglishLocale(device.udid);
-    await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
-      cleanup,
-      timeoutMs: lifecycleTimeoutMs,
-    });
+    await observeStage(observation, "ios-locale", () => configureIosEnglishLocale(device.udid));
+    await observeStage(observation, "ios-boot", () =>
+      run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
+        cleanup,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    );
     return { platform: "ios", deviceId: device.udid };
   } catch (error) {
     const prepareEvidencePath = artifactRoot ? join(artifactRoot, "ios-prepare.log") : null;
@@ -463,6 +474,7 @@ export async function assertIosGuestHealthy({
   artifactRoot,
   cleanup,
   device,
+  observation,
   timeoutMs = iosGuestHealthTimeoutMs,
 }) {
   const startedAtMs = Date.now();
@@ -541,16 +553,18 @@ export async function assertIosGuestHealthy({
     }
   };
 
-  const installedApps = await captureHealthProbe("app-service", [
-    "simctl",
-    "listapps",
-    device.deviceId,
-  ]);
-  if (!hasIosAppCatalogEntry(installedApps)) {
-    const error = new Error("iOS app-service readiness returned an empty application catalog.");
-    error.e2eStage = "ios-app-service-readiness";
-    throw error;
-  }
+  await observeStage(observation, "ios-app-service-readiness", async () => {
+    const installedApps = await captureHealthProbe("app-service", [
+      "simctl",
+      "listapps",
+      device.deviceId,
+    ]);
+    if (!hasIosAppCatalogEntry(installedApps)) {
+      const error = new Error("iOS app-service readiness returned an empty application catalog.");
+      error.e2eStage = "ios-app-service-readiness";
+      throw error;
+    }
+  });
 
   const args = [
     "simctl",
@@ -560,16 +574,18 @@ export async function assertIosGuestHealthy({
     "print",
     "system/com.apple.SpringBoard",
   ];
-  const output = await captureHealthProbe("springboard-service", args);
-  const springBoard = summarizeIosSpringBoardService(output);
-  preserveEvidence("springboard-service.json", `${JSON.stringify(springBoard, null, 2)}\n`);
-  if (springBoard.state !== "running" || springBoard.pid === null) {
-    const error = new Error(
-      "iOS guest health did not expose a running SpringBoard service with a PID.",
-    );
-    error.e2eStage = "ios-springboard-service-readiness";
-    throw error;
-  }
+  await observeStage(observation, "ios-springboard-service-readiness", async () => {
+    const output = await captureHealthProbe("springboard-service", args);
+    const springBoard = summarizeIosSpringBoardService(output);
+    preserveEvidence("springboard-service.json", `${JSON.stringify(springBoard, null, 2)}\n`);
+    if (springBoard.state !== "running" || springBoard.pid === null) {
+      const error = new Error(
+        "iOS guest health did not expose a running SpringBoard service with a PID.",
+      );
+      error.e2eStage = "ios-springboard-service-readiness";
+      throw error;
+    }
+  });
   log("ios", `CoreSimulator guest health ready on ${device.deviceId}.`);
 }
 
@@ -579,6 +595,7 @@ export async function installAndSeedIos({
   device,
   fixtures,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  observation,
   root,
 }) {
   const runStage = async (stage, operation) => {
@@ -590,26 +607,32 @@ export async function installAndSeedIos({
     }
   };
   log("ios", "Installing the standalone Release app and seeding photos.");
-  await runStage("ios-app-install", () =>
-    run("xcrun", ["simctl", "install", device.deviceId, artifact], {
-      cleanup,
-      cwd: root,
-      timeoutMs: lifecycleTimeoutMs,
-    }),
+  await observeStage(observation, "ios-app-install", () =>
+    runStage("ios-app-install", () =>
+      run("xcrun", ["simctl", "install", device.deviceId, artifact], {
+        cleanup,
+        cwd: root,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    ),
   );
-  await runStage("ios-fixture-addmedia", () =>
-    run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
-      cleanup,
-      cwd: root,
-      timeoutMs: lifecycleTimeoutMs,
-    }),
+  await observeStage(observation, "ios-fixture-addmedia", () =>
+    runStage("ios-fixture-addmedia", () =>
+      run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
+        cleanup,
+        cwd: root,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    ),
   );
-  await runStage("ios-photo-index", () =>
-    waitUntil(
-      () => captureIosPhotoResources(device).size >= fixtures.length,
-      10000,
-      `iOS Photos to index ${fixtures.length} seeded resources`,
-      500,
+  await observeStage(observation, "ios-photo-index", () =>
+    runStage("ios-photo-index", () =>
+      waitUntil(
+        () => captureIosPhotoResources(device).size >= fixtures.length,
+        10000,
+        `iOS Photos to index ${fixtures.length} seeded resources`,
+        500,
+      ),
     ),
   );
 }

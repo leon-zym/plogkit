@@ -56,6 +56,16 @@ function assertSeparateRoots(sourceRoot, publicationRoot) {
   }
 }
 
+export function assertSeparateIosArtifactRoots({ publicationRoot, sourceRoot }) {
+  const configuredPrivateRoot = resolve(sourceRoot);
+  const configuredPublicRoot = resolve(publicationRoot);
+  mkdirSync(configuredPublicRoot, { recursive: true });
+  const privateRoot = realpathSync(configuredPrivateRoot);
+  const publicRoot = realpathSync(configuredPublicRoot);
+  assertSeparateRoots(privateRoot, publicRoot);
+  return { privateRoot, publicRoot };
+}
+
 function listRegularFiles(root, summary) {
   if (!existsSync(root)) return [];
   const files = [];
@@ -279,12 +289,11 @@ function publishCandidate(candidate, stagingRoot, summary, state) {
 }
 
 export function publishIosFailureArtifacts({ publicationRoot, sourceRoot }) {
-  const configuredPrivateRoot = resolve(sourceRoot);
   const configuredPublicRoot = resolve(publicationRoot);
-  mkdirSync(configuredPublicRoot, { recursive: true });
-  const privateRoot = realpathSync(configuredPrivateRoot);
-  const publicRoot = realpathSync(configuredPublicRoot);
-  assertSeparateRoots(privateRoot, publicRoot);
+  const { privateRoot, publicRoot } = assertSeparateIosArtifactRoots({
+    publicationRoot,
+    sourceRoot,
+  });
 
   const destination = join(publicRoot, basename(privateRoot));
   const configuredDestination = join(configuredPublicRoot, basename(privateRoot));

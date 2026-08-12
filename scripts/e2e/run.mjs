@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,7 +27,11 @@ import {
 import { createStandaloneBuildEnvironment, validateHostEnvironment } from "./environment.mjs";
 import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
 import { assessPhotoResourceDelta, startExportAssertionBridge } from "./export-assertion.mjs";
-import { publishIosFailureArtifacts } from "./ios-artifact-publication.mjs";
+import {
+  assertSeparateIosArtifactRoots,
+  publishIosFailureArtifacts,
+} from "./ios-artifact-publication.mjs";
+import { createIosRunObservationRecorder } from "./ios-observation.mjs";
 import {
   aggregateWithPrimary,
   createArtifactRoot,
@@ -51,6 +55,30 @@ const sourceFixtures = [
   resolve(root, "e2e/fixtures/landscape.jpg"),
 ];
 const buildWorkers = "2";
+
+function recorderErrorIdentity(error) {
+  return error instanceof Error
+    ? `${error.name}${error.code ? ` (${error.code})` : ""}`
+    : "NonErrorFailure";
+}
+
+function createIosObservation(options, cleanup) {
+  if (!options.platforms.includes("ios") || !process.env.E2E_PUBLIC_ARTIFACTS_DIR) return null;
+  try {
+    return createIosRunObservationRecorder({
+      artifactRoot: options.artifactRoot,
+      cleanup,
+      directory: resolve(process.env.E2E_PUBLIC_ARTIFACTS_DIR),
+    });
+  } catch (error) {
+    log("ios", `Run observation unavailable: ${recorderErrorIdentity(error)}.`);
+    return null;
+  }
+}
+
+function observeIos(observation, stage, operation) {
+  return observation ? observation.run(stage, operation) : operation();
+}
 
 function parseArguments(argv) {
   const target = argv[0] ?? "all";
@@ -139,10 +167,10 @@ async function prebuild(platforms, cleanup) {
   });
 }
 
-async function build(platforms, cleanup, hostEnvironment) {
+async function build(platforms, cleanup, hostEnvironment, observation) {
   await prebuild(platforms, cleanup);
   for (const platform of platforms) {
-    if (platform === "ios") await buildIos({ cleanup, root, workers: buildWorkers });
+    if (platform === "ios") await buildIos({ cleanup, observation, root, workers: buildWorkers });
     else {
       await buildAndroid({
         cleanup,
@@ -154,14 +182,14 @@ async function build(platforms, cleanup, hostEnvironment) {
   }
 }
 
-async function prepareDevice(platform, { artifactRoot, cleanup }) {
+async function prepareDevice(platform, { artifactRoot, cleanup, observation }) {
   return platform === "ios"
-    ? prepareIosDevice({ artifactRoot, cleanup })
+    ? prepareIosDevice({ artifactRoot, cleanup, observation })
     : prepareAndroidDevice({ artifactRoot, cleanup });
 }
 
-async function installAndSeed({ artifact, cleanup, device, fixtures }) {
-  const options = { artifact, cleanup, device, fixtures, root };
+async function installAndSeed({ artifact, cleanup, device, fixtures, observation }) {
+  const options = { artifact, cleanup, device, fixtures, observation, root };
   if (device.platform === "ios") await installAndSeedIos(options);
   else await installAndSeedAndroid(options);
 }
@@ -185,7 +213,7 @@ async function closeVerificationBridge(close, operationError = null) {
 }
 
 async function runSuiteWithExportAssertion(options) {
-  const { device, flow } = options;
+  const { device, flow, observation } = options;
   const assertsExport = flow === null || flow === "f04-export";
   const expectedNewResources = assertsExport ? 2 : 0;
   const before = assertsExport ? capturePhotoResources(device) : null;
@@ -199,13 +227,15 @@ async function runSuiteWithExportAssertion(options) {
 
   let suiteError = null;
   try {
-    await runMaestroSuite({
-      ...options,
-      flowEnvironment: {
-        ...options.flowEnvironment,
-        ...bridge?.environment,
-      },
-    });
+    await observeIos(observation, "ios-maestro-suite", () =>
+      runMaestroSuite({
+        ...options,
+        flowEnvironment: {
+          ...options.flowEnvironment,
+          ...bridge?.environment,
+        },
+      }),
+    );
   } catch (error) {
     suiteError = error;
   }
@@ -231,7 +261,7 @@ async function runSuiteWithExportAssertion(options) {
   );
 }
 
-async function runAcceptance(platforms, { artifactRoot, cleanup, flow, snapshot }) {
+async function runAcceptance(platforms, { artifactRoot, cleanup, flow, observation, snapshot }) {
   for (const platform of platforms) {
     const platformCleanup = createCleanupManager();
     let platformFinalized = false;
@@ -242,20 +272,31 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, snapshot 
     const startedAtMs = Date.now();
     try {
       log("setup", `Preparing the ${platform} test device.`);
-      const device = await prepareDevice(platform, { artifactRoot, cleanup: platformCleanup });
+      const platformObservation = platform === "ios" ? observation : null;
+      const device = await prepareDevice(platform, {
+        artifactRoot,
+        cleanup: platformCleanup,
+        observation: platformObservation,
+      });
       await withFailureDiagnostics({
         diagnosticDirectory: join(artifactRoot, platform, "acceptance-failure"),
         device,
         sinceMs: startedAtMs,
         operation: async () => {
           if (platform === "ios") {
-            await assertIosGuestHealthy({ artifactRoot, cleanup: platformCleanup, device });
+            await assertIosGuestHealthy({
+              artifactRoot,
+              cleanup: platformCleanup,
+              device,
+              observation: platformObservation,
+            });
           }
           await installAndSeed({
             artifact: snapshot.artifacts[device.platform],
             cleanup: platformCleanup,
             device,
             fixtures: snapshot.fixtures,
+            observation: platformObservation,
           });
           if (platform === "android")
             await assertAndroidDeviceReady({
@@ -270,6 +311,7 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, snapshot 
             device,
             e2eRoot: snapshot.e2eRoot,
             flow,
+            observation: platformObservation,
             root,
           });
         },
@@ -287,15 +329,17 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, snapshot 
   log("result", `All ${platforms.join(" + ")} E2E suites passed.`);
 }
 
-async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment) {
+async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation) {
   const repositorySha256 = captureBuildInputs(root);
-  await build(options.platforms, cleanup, hostEnvironment);
-  const snapshot = createRunSnapshot({
-    artifactRoot,
-    builds: options.platforms.map((platform) => ({ platform, ...buildPaths(platform) })),
-    repositorySha256,
-    root,
-  });
+  await build(options.platforms, cleanup, hostEnvironment, observation);
+  const snapshot = await observeIos(observation, "ios-input-snapshot", () =>
+    createRunSnapshot({
+      artifactRoot,
+      builds: options.platforms.map((platform) => ({ platform, ...buildPaths(platform) })),
+      repositorySha256,
+      root,
+    }),
+  );
   log(
     "setup",
     process.env.CI
@@ -306,6 +350,7 @@ async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment) {
     artifactRoot,
     cleanup,
     flow: options.flow,
+    observation,
     snapshot,
   });
 }
@@ -314,9 +359,10 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   const cleanup = createCleanupManager();
   let artifactRoot = null;
+  let observation = null;
   let publicationPromise = null;
   let publicationCompleted = false;
-  const publishFailureArtifacts = () => {
+  const publishFailureArtifacts = async () => {
     if (
       artifactRoot === null ||
       !options.platforms.includes("ios") ||
@@ -334,20 +380,38 @@ async function main() {
     });
     return publicationPromise;
   };
-  const signalState = installSignalHandlers(cleanup, { publishFailureArtifacts });
+  const signalState = installSignalHandlers(cleanup, {
+    publishFailureArtifacts,
+    recordInterruption: () => observation?.finish("interrupted"),
+  });
   let operationError = null;
   try {
     validateMaestroVersion();
     const hostEnvironment = validateBeforePlatformLock(options);
     artifactRoot = createArtifactRoot();
-    await validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup });
+    try {
+      if (options.platforms.includes("ios") && process.env.E2E_PUBLIC_ARTIFACTS_DIR) {
+        assertSeparateIosArtifactRoots({
+          publicationRoot: process.env.E2E_PUBLIC_ARTIFACTS_DIR,
+          sourceRoot: artifactRoot,
+        });
+      }
+    } catch (error) {
+      rmSync(artifactRoot, { force: true, recursive: true });
+      artifactRoot = null;
+      throw error;
+    }
+    observation = createIosObservation({ ...options, artifactRoot }, cleanup);
+    await observeIos(observation, "ios-simulator-environment", () =>
+      validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup }),
+    );
     log(
       "setup",
       process.env.CI
         ? `Running ${options.target} Release E2E.`
         : `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`,
     );
-    await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
+    await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation);
   } catch (error) {
     operationError = error;
   }
@@ -369,8 +433,10 @@ async function main() {
             : `Removed temporary artifacts after successful E2E: ${artifactRoot}`,
         );
       }
+      await observation?.finish("passed");
     }
   } catch (error) {
+    await observation?.finish("failed", error);
     console.error(`[e2e:error] ${publicE2eErrorText(error)}`);
     if (error instanceof AggregateError) {
       for (const secondaryError of error.errors.slice(1)) {

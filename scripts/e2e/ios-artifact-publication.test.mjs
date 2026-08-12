@@ -11,7 +11,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
-import { publishIosFailureArtifacts } from "./ios-artifact-publication.mjs";
+import {
+  assertSeparateIosArtifactRoots,
+  publishIosFailureArtifacts,
+} from "./ios-artifact-publication.mjs";
 
 const PNG_SIGNATURE_FOR_TEST = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -119,6 +122,25 @@ test("iOS failure publication rejects a symlinked public root inside private evi
 
   assert.throws(
     () => publishIosFailureArtifacts({ publicationRoot: publicAlias, sourceRoot }),
+    /must not overlap/,
+  );
+});
+
+test("iOS observation roots fail closed before publication when either root overlaps", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-observation-roots-");
+  const sourceRoot = join(directory, "private", "run-id");
+  mkdirSync(sourceRoot, { recursive: true });
+
+  assert.throws(
+    () => assertSeparateIosArtifactRoots({ publicationRoot: sourceRoot, sourceRoot }),
+    /must not overlap/,
+  );
+  assert.throws(
+    () =>
+      assertSeparateIosArtifactRoots({
+        publicationRoot: join(sourceRoot, "public"),
+        sourceRoot,
+      }),
     /must not overlap/,
   );
 });

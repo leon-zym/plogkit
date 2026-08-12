@@ -1,6 +1,6 @@
 # 测试策略
 
-测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md)、[ADR 0041](../adr/0041-scenario-verification-traceability.md)、[ADR 0042](../adr/0042-controlled-standalone-simulator-e2e.md)、[ADR 0043](../adr/0043-layered-ios-simulator-readiness.md)、[ADR 0044](../adr/0044-ios-app-service-readiness.md) 和 [ADR 0046](../adr/0046-single-ios-maestro-driver-lifecycle.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
+测试层级与执行节奏的决策依据见 [ADR 0011](../adr/0011-testing-strategy.md)、[ADR 0012](../adr/0012-e2e-tooling-maestro.md)、[ADR 0019](../adr/0019-cross-platform-maestro-e2e.md)、[ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)、[ADR 0026](../adr/0026-test-runners-by-runtime.md)、[ADR 0039](../adr/0039-native-node-orchestration-tests.md)、[ADR 0041](../adr/0041-scenario-verification-traceability.md)、[ADR 0042](../adr/0042-controlled-standalone-simulator-e2e.md)、[ADR 0043](../adr/0043-layered-ios-simulator-readiness.md)、[ADR 0044](../adr/0044-ios-app-service-readiness.md)、[ADR 0046](../adr/0046-single-ios-maestro-driver-lifecycle.md) 和 [ADR 0048](../adr/0048-bounded-ios-e2e-run-observations.md)；导出验收的产物边界见 [ADR 0023](../adr/0023-export-preset-catalog-and-pipeline.md)，手动性能测量协议见[导出与缩略图性能基线](render-performance-baseline.md)。本文记录当前可执行的测试层级、命令和贡献要求。
 
 ## 设计原则
 
@@ -104,7 +104,7 @@ Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端�
 
 Draft Library、Current Editing Session、recoverable persistence 或相关 adapter 变更必须运行 quick。高风险持久化/并发改动合并前及 release candidate 验收时运行 evidence，并将 ignored artifact 附到对应 Issue 或 CI run。
 
-E2E 失败但原因不明时，先检查该次运行保存的日志、hierarchy、截图和系统诊断，在最小受影响 seam 上提出可证伪假设；不要以重跑完整套件代替诊断。不得用 retry、sleep、关闭错误界面或盲目延长 timeout 掩盖失败。修复后先做定向红绿验证，再按风险扩大到单平台或双端完整套件。一次性诊断 harness 和样本证据留在 Issue/PR，不固化为常驻 E2E 接口。
+E2E 失败但原因不明时，先检查该次运行保存的日志、hierarchy、截图和系统诊断，在最小受影响 seam 上提出可证伪假设；不要以重跑完整套件代替诊断。不得用 retry、sleep、关闭错误界面或盲目延长 timeout 掩盖失败。修复后先做定向红绿验证，再按风险扩大到单平台或双端完整套件。临时命令、raw harness 和一次性样本留在 Issue/PR；只有经 ADR 接受、类型化且有界的治理观测可成为常驻 E2E 接口。
 
 ## 验证时机
 

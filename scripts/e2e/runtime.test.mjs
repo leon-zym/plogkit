@@ -112,6 +112,7 @@ import { createCleanupManager, installSignalHandlers } from ${JSON.stringify(run
 const cleanup = createCleanupManager();
 cleanup.add(() => appendFileSync(${JSON.stringify(eventLog)}, "cleanup\\n"));
 installSignalHandlers(cleanup, {
+  recordInterruption: () => appendFileSync(${JSON.stringify(eventLog)}, "interrupted\\n"),
   publishFailureArtifacts: () => appendFileSync(${JSON.stringify(eventLog)}, "publish\\n"),
 });
 process.stdout.write("ready\\n");
@@ -137,7 +138,7 @@ setInterval(() => {}, 1000);
 
   assert.equal(exitCode, 143);
   assert.equal(signal, null);
-  assert.equal(readFileSync(eventLog, "utf8"), "cleanup\npublish\n");
+  assert.equal(readFileSync(eventLog, "utf8"), "interrupted\ncleanup\npublish\n");
 });
 
 test("bounded commands can omit sensitive output from their primary error", async (t) => {

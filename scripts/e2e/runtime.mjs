@@ -686,13 +686,21 @@ export function acquireE2ePlatformLock(
   throw new Error(`Unable to acquire the ${platform} E2E device lock after stale-owner recovery.`);
 }
 
-export function installSignalHandlers(cleanup, { publishFailureArtifacts = () => {} } = {}) {
+export function installSignalHandlers(
+  cleanup,
+  { publishFailureArtifacts = () => {}, recordInterruption = () => {} } = {},
+) {
   let handlingSignal = false;
   let successCommitted = false;
   const handle = (exitCode) => {
     if (handlingSignal || successCommitted) return;
     handlingSignal = true;
     void (async () => {
+      try {
+        await recordInterruption();
+      } catch (error) {
+        console.error(`[e2e:observation] ${publicE2eErrorText(error)}`);
+      }
       try {
         await cleanup.run();
       } catch (error) {

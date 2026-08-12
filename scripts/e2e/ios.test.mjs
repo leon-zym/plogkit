@@ -46,6 +46,7 @@ test("iOS guest health proves app-service and SpringBoard readiness before Maest
   const artifactRoot = join(directory, "artifacts");
   const commandLog = join(directory, "xcrun.log");
   const deviceId = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC";
+  const observedStages = [];
   mkdirSync(binaries);
   writeExecutable(
     join(binaries, "xcrun"),
@@ -67,6 +68,12 @@ esac
         artifactRoot,
         cleanup: { add() {} },
         device: { deviceId, platform: "ios" },
+        observation: {
+          run: async (stage, operation) => {
+            observedStages.push(stage);
+            return operation();
+          },
+        },
       }),
   );
 
@@ -83,6 +90,10 @@ esac
     readFileSync(join(artifactRoot, "ios", "guest-health", "springboard-service.json"), "utf8"),
     /"state": "running"/,
   );
+  assert.deepEqual(observedStages, [
+    "ios-app-service-readiness",
+    "ios-springboard-service-readiness",
+  ]);
 });
 
 test("iOS guest health fails closed when SpringBoard is not running", async (t) => {
@@ -327,6 +338,7 @@ test("iOS teardown proves its owned simulator is absent and records each stage",
   const commandLog = join(directory, "xcrun.log");
   const deletedMarker = join(directory, "deleted");
   const deviceId = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
+  const observedStages = [];
   mkdirSync(binaries);
   mkdirSync(artifactRoot);
   writeExecutable(
@@ -356,7 +368,16 @@ esac
       PATH: `${binaries}:${process.env.PATH}`,
     },
     async () => {
-      await prepareIosDevice({ artifactRoot, cleanup });
+      await prepareIosDevice({
+        artifactRoot,
+        cleanup,
+        observation: {
+          run: async (stage, operation) => {
+            observedStages.push(stage);
+            return operation();
+          },
+        },
+      });
       await cleanup.run();
     },
   );
@@ -376,6 +397,7 @@ esac
   const absentProbeIndex = commands.lastIndexOf("simctl list devices -j");
   assert.ok(shutdownIndex < deleteIndex);
   assert.ok(deleteIndex < absentProbeIndex);
+  assert.deepEqual(observedStages, ["ios-device-create", "ios-locale", "ios-boot", "ios-cleanup"]);
 });
 
 test("iOS teardown fails closed when delete returns but the owned simulator remains", async (t) => {
@@ -486,6 +508,7 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 2; fi
   await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
     for (const [command, stage] of commands) {
       await withEnvironment({ FAKE_HANG_COMMAND: command }, async () => {
+        const observedStages = [];
         let failure;
         try {
           await installAndSeedIos({
@@ -494,6 +517,12 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 2; fi
             device: { platform: "ios", deviceId },
             fixtures: [],
             lifecycleTimeoutMs: 500,
+            observation: {
+              run: async (observedStage, operation) => {
+                observedStages.push(observedStage);
+                return operation();
+              },
+            },
             root: directory,
           });
         } catch (error) {
@@ -502,6 +531,7 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 2; fi
         assert.ok(failure instanceof Error, `${command} must time out`);
         assert.equal(failure.code, "E2E_COMMAND_TIMEOUT");
         assert.equal(failure.e2eStage, stage);
+        assert.equal(observedStages.at(-1), stage);
       });
     }
   });

@@ -1,8 +1,9 @@
 # ADR 0047：iOS E2E 只发布脱敏证据集
 
-- 状态：已接受
+- 状态：部分修订
 - 接受日期：2026-08-13
 - 修订：[ADR 0042](0042-controlled-standalone-simulator-e2e.md) 与 [ADR 0045](0045-sanitized-e2e-diagnostic-evidence.md) 中 iOS 失败证据的上传边界
+- 后继：[ADR 0048](0048-bounded-ios-e2e-run-observations.md)
 - 关联：[Issue 99](https://github.com/leon-zym/plogkit/issues/99)
 
 ## 背景
