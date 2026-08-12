@@ -44,7 +44,7 @@ Start with the canonical [`docs/README.md`](docs/README.md) navigation and owner
 
 ## Development
 
-PlogKit's development baseline is macOS, Node.js 22, pnpm 11, and the native toolchain for the target platform.
+PlogKit's development baseline is macOS, the repository-pinned Node.js and pnpm toolchain, and the native toolchain for the target platform.
 
 ```bash
 pnpm install

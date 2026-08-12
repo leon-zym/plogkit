@@ -30,6 +30,7 @@ describe("Expo Photos destination", () => {
       status: "published",
       assetId: "photos-1",
     });
+    expect(requestPermission).toHaveBeenCalledWith(true, ["photo"]);
     expect(createAsset).toHaveBeenCalledWith(prepared.uri);
   });
 
@@ -68,9 +69,9 @@ describe("Expo Photos destination", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(
-      new ExpoPhotosDestination().publish(prepared, controller.signal),
-    ).resolves.toEqual({ status: "cancelled", phase: "permission" });
+    await expect(new ExpoPhotosDestination().publish(prepared, controller.signal)).resolves.toEqual(
+      { status: "cancelled", phase: "permission" },
+    );
     expect(requestPermission).not.toHaveBeenCalled();
   });
 });

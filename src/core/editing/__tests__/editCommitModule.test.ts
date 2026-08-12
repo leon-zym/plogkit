@@ -86,23 +86,32 @@ describe("edit commit module", () => {
     expect(autosaved).not.toHaveBeenCalled();
   });
 
-  it("[F03-S03] projects a preview without creating an edit commit", () => {
+  it("[F03-S03] previews increased vertical spacing and undo restores the committed spacing", () => {
     const autosaved = jest.fn();
     const editing = createEditCommitModule({
-      initialDocument: createEmptyDocument(),
+      initialDocument: createDocument(images),
       onEditCommit: autosaved,
     });
+    expect(editing.read().document.stitch).toMatchObject({ mode: "vertical", spacing: 0 });
 
-    const result = editing.dispatch({
+    const previewed = editing.dispatch({
       type: "preview",
       intent: editIntents.stitch.changeSpacing(18),
     });
 
-    expect(result).toEqual({ status: "previewed" });
+    expect(previewed).toEqual({ status: "previewed" });
     expect(editing.read().document.stitch.spacing).toBe(0);
     expect(editing.read().previewDocument.stitch.spacing).toBe(18);
     expect(editing.read()).toMatchObject({ canUndo: false, revision: 0 });
     expect(autosaved).not.toHaveBeenCalled();
+
+    editing.dispatch({ type: "commit", intent: editIntents.stitch.changeSpacing(18) });
+    expect(editing.read().document.stitch.spacing).toBe(18);
+    expect(editing.read()).toMatchObject({ canUndo: true, revision: 1 });
+
+    editing.dispatch({ type: "undo" });
+    expect(editing.read().document.stitch.spacing).toBe(0);
+    expect(editing.read().previewDocument.stitch.spacing).toBe(0);
   });
 
   it("replaces the active preview instead of composing previews", () => {
@@ -195,7 +204,7 @@ describe("edit commit module", () => {
     expect(autosaved).toHaveBeenCalledTimes(3);
   });
 
-  it("[F02-S02] changes the canvas ratio through a semantic intent", () => {
+  it("changes the canvas ratio through a semantic intent", () => {
     const editing = createEditCommitModule({ initialDocument: createEmptyDocument() });
 
     editing.dispatch({ type: "commit", intent: editIntents.canvas.changeRatio("4:5") });
@@ -211,18 +220,26 @@ describe("edit commit module", () => {
     expect(editing.read().document.stitch.mode).toBe("grid");
   });
 
-  it("[F03-S04] reorders every source image atomically", () => {
-    const editing = createEditCommitModule({ initialDocument: createDocument(images) });
+  it("moves the third source image to the first position atomically", () => {
+    const thirdImage: SourceImage = {
+      id: importedAssetId("image-3"),
+      width: 1600,
+      height: 900,
+    };
+    const editing = createEditCommitModule({
+      initialDocument: createDocument([...images, thirdImage]),
+    });
 
     editing.dispatch({
       type: "commit",
       intent: editIntents.stitch.reorderImages([
-        importedAssetId("image-2"),
+        importedAssetId("image-3"),
         importedAssetId("image-1"),
+        importedAssetId("image-2"),
       ]),
     });
 
-    expect(editing.read().document.stitch.order).toEqual(["image-2", "image-1"]);
+    expect(editing.read().document.stitch.order).toEqual(["image-3", "image-1", "image-2"]);
   });
 
   it("[F04-S09] switches preset and normalizes format and metadata as one edit commit", () => {
@@ -368,12 +385,13 @@ describe("edit commit module", () => {
     });
   });
 
-  it("moves text through a semantic intent", () => {
+  it("[F01-S12] moves text through a semantic intent and undo restores its previous position", () => {
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),
       createTextId: () => "text-1",
     });
     editing.dispatch({ type: "commit", intent: editIntents.text.add(textDraft) });
+    expect(editing.read().document.textElements[0]?.position).toEqual({ x: 80, y: 80 });
 
     editing.dispatch({
       type: "commit",
@@ -381,9 +399,13 @@ describe("edit commit module", () => {
     });
 
     expect(editing.read().document.textElements[0]?.position).toEqual({ x: 160, y: 240 });
+
+    editing.dispatch({ type: "undo" });
+
+    expect(editing.read().document.textElements[0]?.position).toEqual({ x: 80, y: 80 });
   });
 
-  it("keeps overlapping text layer order when the upper text moves", () => {
+  it("[F01-S15] keeps overlapping text layer order when the upper text moves", () => {
     const textIds = ["text-lower", "text-upper"];
     const editing = createEditCommitModule({
       initialDocument: createDocument(images),

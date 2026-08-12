@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -13,96 +14,315 @@ function writeExecutable(path, contents) {
   chmodSync(path, 0o755);
 }
 
-test("a Maestro version older than the minimum warns and the run continues past the version check", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-version-"));
+function runCli(arguments_, options) {
+  return spawnSync(process.execPath, arguments_, { timeout: 15000, ...options });
+}
+
+function writeLivePlatformLock(directory, platform) {
+  const lockDirectory = join(directory, "plogkit-e2e-device-locks", platform);
+  mkdirSync(lockDirectory, { recursive: true });
+  writeFileSync(
+    join(lockDirectory, "owner.json"),
+    `${JSON.stringify({ ownerPid: process.pid, startedAt: new Date().toISOString(), token: "owner" })}\n`,
+  );
+}
+
+function writePinnedRunnerHostBinaries(binaries) {
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.8.0'\n");
+  writeExecutable(join(binaries, "pnpm"), "#!/bin/sh\nprintf '%s\\n' '11.21.0'\n");
+  writeExecutable(
+    join(binaries, "java"),
+    "#!/bin/sh\nprintf '%s\\n' '    java.home = /tmp/temurin' '    java.runtime.version = 17.0.20+8' '    java.vendor = Eclipse Adoptium' >&2\n",
+  );
+}
+
+test("a Maestro version older than the pinned version is rejected", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-version-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.6.1'\n");
 
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "android", "--phase", "test", "--flow", "runner-version-probe"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${binaries}:${process.env.PATH}`,
-      },
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
-  );
+  });
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /Maestro 2\.6\.1 is older than the minimum supported version 2\.7\.0/);
-  assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required, but 2\.6\.1 is installed/);
+  assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
 });
 
-test("a Maestro version at or above the minimum passes without a version notice", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-newer-version-"));
+test("a Maestro version newer than the pinned version is rejected", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-newer-version-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
-  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.8.1'\n");
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.9.0'\n");
 
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "android", "--phase", "test", "--flow", "runner-version-probe"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${binaries}:${process.env.PATH}`,
-      },
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
-  );
+  });
 
   assert.equal(result.status, 1);
-  assert.doesNotMatch(result.stdout, /Maestro \d+\.\d+\.\d+/);
-  assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required, but 2\.9\.0 is installed/);
+  assert.doesNotMatch(result.stderr, /Unknown E2E flow/);
 });
 
-test("iOS test phase reports a missing Maestro before host validation", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-missing-version-"));
-  const result = spawnSync(process.execPath, ["scripts/e2e/run.mjs", "ios", "--phase", "test"], {
+test("the pinned Maestro version continues to E2E input validation", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-pinned-version-");
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries);
+  writeLivePlatformLock(directory, "android");
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nprintf '%s\\n' '2.8.0'\n");
+
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow", "runner-version-probe"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stderr, /Maestro .* is required/);
+  assert.match(result.stderr, /Unknown E2E flow: runner-version-probe/);
+  assert.doesNotMatch(result.stderr, /already owned by runner PID/);
+});
+
+test("Android environment validation stays before its platform lock", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-android-validation-order-");
+  const binaries = join(directory, "bin");
+  mkdirSync(binaries);
+  writeLivePlatformLock(directory, "android");
+  writePinnedRunnerHostBinaries(binaries);
+
+  const result = runCli(["scripts/e2e/run.mjs", "android"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ANDROID_HOME: join(directory, "missing-android-sdk"),
+      PATH: `${binaries}:${process.env.PATH}`,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Android Emulator is missing/);
+  assert.doesNotMatch(result.stderr, /already owned by runner PID/);
+});
+
+test("iOS reports a missing Maestro before host validation", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-runner-missing-version-");
+  const result = runCli(["scripts/e2e/run.mjs", "ios"], {
     cwd: root,
     encoding: "utf8",
     env: {
       ...process.env,
       PATH: directory,
+      TEMP: directory,
+      TMP: directory,
+      TMPDIR: directory,
     },
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Maestro 2\.7\.0 or newer is required but was not found on PATH/);
+  assert.match(result.stderr, /Maestro 2\.8\.0 is required but was not found on PATH/);
 });
 
-test("iOS rejects an external device before invoking simulator tooling", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-runner-ios-device-"));
-  const binaries = join(directory, "bin");
-  const xcrunLog = join(directory, "xcrun-commands.log");
-  mkdirSync(binaries);
-  writeExecutable(
-    join(binaries, "xcrun"),
-    `#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
-`,
-  );
+test("the runner rejects the removed cross-process phase interface", () => {
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--phase", "test"], {
+    cwd: root,
+    encoding: "utf8",
+  });
 
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/e2e/run.mjs", "ios", "--phase", "test", "--device", "daily-simulator"],
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unknown argument: --phase/);
+});
+
+test("the runner rejects an incomplete flow selector before validation", () => {
+  const result = runCli(["scripts/e2e/run.mjs", "android", "--flow"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--flow requires a flow basename/);
+});
+
+test("photo resource assessment waits while fewer than the expected identities are present", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1"]);
+
+  assert.equal(assessPhotoResourceDelta(before, after, 2), null);
+});
+
+test("photo resource assessment accepts exactly the expected new identities", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1", "export-2"]);
+
+  assert.equal(assessPhotoResourceDelta(before, after, 2), after);
+});
+
+test("photo resource assessment rejects more than the expected new identities", async () => {
+  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const after = new Set([...before, "export-1", "export-2", "unexpected-export"]);
+
+  assert.throws(
+    () => assessPhotoResourceDelta(before, after, 2),
+    /Expected exactly 2 new system photo resources, but observed 3/,
+  );
+});
+
+test("per-export photo assessment accepts one new identity at each boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+  const afterFirstExport = new Set([...before, "export-1"]);
+  const afterSecondExport = new Set([...afterFirstExport, "export-2"]);
+
+  assert.equal(assess(1, before), null);
+  assert.equal(assess(1, afterFirstExport), afterFirstExport);
+  assert.equal(assess(2, afterSecondExport), afterSecondExport);
+});
+
+test("per-export photo assessment rejects two identities at the first boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+  const afterBothExports = new Set([...before, "export-1", "export-2"]);
+
+  assert.throws(
+    () => assess(1, afterBothExports),
+    /Expected exactly 1 new system photo resources, but observed 2/,
+  );
+});
+
+test("per-export photo assessment rejects an out-of-order boundary", async () => {
+  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const assess = createPerExportPhotoResourceAssessment(before);
+
+  assert.throws(
+    () => assess(2, new Set([...before, "export-1", "export-2"])),
+    /Expected photo assertion for export 1, but received export 2/,
+  );
+});
+
+test("the export photo assertion server binds each request to its exact delta", async () => {
+  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const device = { platform: "ios" };
+  const before = new Set(["fixture-1", "fixture-2"]);
+  let resources = new Set([...before, "export-1"]);
+  const server = await startExportPhotoAssertionServer(device, before, {
+    captureResources: () => resources,
+    timeoutMs: 100,
+  });
+
+  try {
+    const first = await fetch(`${server.url}/1`, { method: "POST" });
+    assert.equal(first.status, 204);
+    resources = new Set([...resources, "export-2"]);
+    const second = await fetch(`${server.url}/2`, { method: "POST" });
+    assert.equal(second.status, 204);
+  } finally {
+    await server.close();
+  }
+});
+
+test("the first export assertion rejects a cumulative delta of two", async () => {
+  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const device = { platform: "android" };
+  const before = new Set(["fixture-1", "fixture-2"]);
+  const resources = new Set([...before, "export-1", "export-2"]);
+  const server = await startExportPhotoAssertionServer(device, before, {
+    captureResources: () => resources,
+    timeoutMs: 100,
+  });
+
+  try {
+    const response = await fetch(`${server.url}/1`, { method: "POST" });
+    assert.equal(response.status, 409);
+    assert.match(
+      await response.text(),
+      /Expected exactly 1 new system photo resources, but observed 2/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("sorted platform locks precede locked CoreSimulator validation", async () => {
+  const { validateAfterAcquiringPlatformLocks } = await import("./run.mjs");
+  assert.equal(typeof validateAfterAcquiringPlatformLocks, "function");
+
+  const events = [];
+  const cleanup = { add() {} };
+  await validateAfterAcquiringPlatformLocks(
+    ["ios", "android"],
+    { artifactRoot: "/tmp/artifacts", cleanup },
     {
-      cwd: root,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        FAKE_XCRUN_LOG: xcrunLog,
-        PATH: `${binaries}:${process.env.PATH}`,
+      acquirePlatformLock(platform, receivedCleanup) {
+        assert.equal(receivedCleanup, cleanup);
+        events.push(`lock:${platform}`);
+      },
+      async validateLockedEnvironment(platforms, options) {
+        assert.equal(options.artifactRoot, "/tmp/artifacts");
+        assert.equal(options.cleanup, cleanup);
+        events.push(`validate:${platforms.join("+")}`);
       },
     },
   );
 
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /--device is supported only for Android/);
-  assert.equal(existsSync(xcrunLog), false);
+  assert.deepEqual(events, ["lock:android", "lock:ios", "validate:ios+android"]);
 });
+
+test(
+  "iOS CLI fails fast on a non-macOS host before native toolchain validation",
+  { skip: process.platform === "darwin" },
+  (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-runner-ios-non-macos-");
+    const binaries = join(directory, "bin");
+    mkdirSync(binaries);
+    writePinnedRunnerHostBinaries(binaries);
+
+    const result = runCli(["scripts/e2e/run.mjs", "ios"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binaries}:${process.env.PATH}`,
+        TEMP: directory,
+        TMP: directory,
+        TMPDIR: directory,
+      },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /iOS E2E requires macOS/);
+    assert.doesNotMatch(result.stderr, /Xcode|CocoaPods|already owned by runner PID/);
+  },
+);

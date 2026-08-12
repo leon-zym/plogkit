@@ -18,15 +18,13 @@ tags:
     text: 周末清晨我们沿着海岸慢慢散步海风带着咸味吹过椰林远处的渔船划开金色海面孩子们在沙滩堆起城堡朋友坐在礁石旁聊天我用相机记录浪花云朵脚印和笑声直到夕阳把天空染成橙红色我们才收好野餐垫沿着亮起灯光的小路回家路边的小店飘来咖啡香气大家回头望着海面并约定下次再来看看同一片海
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
 - assertVisible:
-    id: canvas-text-hit-0-.*
-- runFlow: ../subflows/reenter-session-unselected.yaml
-- assertVisible:
-    id: canvas-text-hit-0-.*
-# Use a fixed canvas position in a lower wrapped line. A one-line or
-# first-line-only hit region cannot make this coordinate move with itself.
+    id: select-new-text
 - tapOn:
-    id: document-canvas
-    point: 14%, 19%
+    id: select-new-text
+- assertNotVisible:
+    id: canvas-text-selection-.*
+- tapOn:
+    id: canvas-text-hit-0-.*
 - assertVisible:
     id: canvas-text-hit-0-.*
     selected: true

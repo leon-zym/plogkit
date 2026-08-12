@@ -1,4 +1,9 @@
-import { importedAssetId, type ImportedAssetId, type SourceImage, type StitchSettings } from "../document";
+import {
+  importedAssetId,
+  type ImportedAssetId,
+  type SourceImage,
+  type StitchSettings,
+} from "../document";
 import { containRect, layoutStitch } from "../layout";
 
 const images: readonly SourceImage[] = [
@@ -31,7 +36,7 @@ const stitch = (
 ): StitchSettings => ({ mode, order, spacing });
 
 describe("contain geometry", () => {
-  it("[F02-S02] centers a wide source inside a square frame", () => {
+  it("centers a wide source inside a square frame", () => {
     expect(
       containRect({ width: 400, height: 200 }, { x: 0, y: 0, width: 100, height: 100 }),
     ).toEqual({ x: 0, y: 25, width: 100, height: 50 });
@@ -47,14 +52,18 @@ describe("contain geometry", () => {
 describe("stitch layout", () => {
   it("[F03-S01] lays out vertical images at a common width in document order", () => {
     const result = layoutStitch(
-      images.slice(0, 2),
-      stitch("vertical", [importedAssetId("square"), importedAssetId("wide")]),
+      images.slice(0, 3),
+      stitch("vertical", [
+        importedAssetId("square"),
+        importedAssetId("wide"),
+        importedAssetId("tall"),
+      ]),
       200,
     );
 
     expect(result).toEqual({
       width: 200,
-      height: 310,
+      height: 720,
       items: [
         {
           imageId: "square",
@@ -66,11 +75,16 @@ describe("stitch layout", () => {
           frame: { x: 0, y: 210, width: 200, height: 100 },
           content: { x: 0, y: 210, width: 200, height: 100 },
         },
+        {
+          imageId: "tall",
+          frame: { x: 0, y: 320, width: 200, height: 400 },
+          content: { x: 0, y: 320, width: 200, height: 400 },
+        },
       ],
     });
   });
 
-  it("[F03-S02] uses equal square cells for a two-column adaptive grid", () => {
+  it("lays out four photos as equal cells in a two-column grid", () => {
     const result = layoutStitch(
       images,
       stitch(
@@ -91,7 +105,7 @@ describe("stitch layout", () => {
     expect(result.items[0]?.content).toEqual({ x: 0, y: 25, width: 100, height: 50 });
   });
 
-  it("[F03-S02] leaves an odd final grid item in the leading column", () => {
+  it("leaves an odd final grid photo in one equal leading cell", () => {
     const three = images.slice(0, 3);
     const result = layoutStitch(
       three,

@@ -72,7 +72,7 @@ describe("TextGestureOverlay", () => {
     mockPanGestures.length = 0;
   });
 
-  it("renders touch bounds separately from the selection box and puts later text on top", async () => {
+  it("[F01-S14] renders touch bounds separately from the selection box and puts later text on top", async () => {
     const view = await render(
       <TextGestureOverlay
         accessibilityLabel={(index) => `Edit text ${index + 1}`}

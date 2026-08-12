@@ -1,19 +1,8 @@
 appId: com.leonzym.plogkit
 ---
-- swipe:
-    start: 50%, 90%
-    end: 50%, 50%
-    duration: 500
-- waitForAnimationToEnd
-- swipe:
-    start: 50%, 90%
-    end: 50%, 50%
-    duration: 500
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: commit-text
-    direction: DOWN
-    visibilityPercentage: 60
+- runFlow:
+    file: scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: commit-text
 - tapOn:
     id: commit-text

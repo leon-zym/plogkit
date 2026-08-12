@@ -4,6 +4,7 @@ tags:
   - F04-S02
   - F04-S08
   - F04-S13
+  - F04-S16
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -13,22 +14,29 @@ tags:
     id: export-preset-social
 - tapOn:
     id: export-retain-basic
-- scrollUntilVisible:
-    element:
-      id: export-document
-    direction: DOWN
+- runFlow:
+    file: ../subflows/scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: export-document
 - tapOn:
     id: export-document
 - runFlow:
     when:
-      visible: Allow
+      platform: iOS
     commands:
-      - tapOn: Allow
+      - extendedWaitUntil:
+          visible: ^Allow$
+          timeout: 10000
+      - tapOn: ^Allow$
 - extendedWaitUntil:
     visible:
       id: export-success
     timeout: 60000
 - assertVisible: Saved to Photos
+- runScript:
+    file: ../scripts/assert-export-photo.js
+    env:
+      EXPORT_INDEX: "1"
 - tapOn:
     id: editor-tool-text
 - tapOn:
@@ -40,10 +48,10 @@ tags:
 - assertVisible: "导出后更新 ✨"
 - tapOn:
     id: editor-open-export
-- scrollUntilVisible:
-    element:
-      id: export-document
-    direction: DOWN
+- runFlow:
+    file: ../subflows/scroll-editor-panel-until-visible.yaml
+    env:
+      TARGET_ID: export-document
 - tapOn:
     id: export-document
 - extendedWaitUntil:
@@ -51,3 +59,7 @@ tags:
       id: export-success
     timeout: 60000
 - assertVisible: Saved to Photos
+- runScript:
+    file: ../scripts/assert-export-photo.js
+    env:
+      EXPORT_INDEX: "2"

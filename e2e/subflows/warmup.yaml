@@ -1,7 +1,0 @@
-appId: com.leonzym.plogkit
----
-- runFlow: start-app.yaml
-- extendedWaitUntil:
-    visible:
-      id: home-screen
-    timeout: 120000

@@ -63,7 +63,7 @@ describe("document render scene", () => {
     expect(scene.images[0]?.destination.y).toBeCloseTo((height - 750) / 2);
   });
 
-  it("[F03-S01][F03-S03][F03-S05] reuses core vertical layout and preserves image order and spacing", () => {
+  it("[F03-S03][F03-S05] renders vertical order and exposes background through the increased gap", () => {
     const document = updateDocument({
       stitch: {
         mode: "vertical",
@@ -74,9 +74,8 @@ describe("document render scene", () => {
     const scene = documentToRenderScene(document);
 
     expect(scene.height).toBe(2770);
-    expect(
-      scene.images.map(({ imageId, destination }) => ({ imageId, destination })),
-    ).toEqual([
+    expect(scene.backgroundColor).toBe("#FFFFFF");
+    expect(scene.images.map(({ imageId, destination }) => ({ imageId, destination }))).toEqual([
       {
         imageId: "tall",
         destination: { x: 0, y: 0, width: 1000, height: 2000 },
@@ -103,6 +102,25 @@ describe("document render scene", () => {
       { x: 0, y: 61.25, width: 490, height: 367.5 },
       { x: 632.5, y: 0, width: 245, height: 490 },
     ]);
+  });
+
+  it("renders the third photo first after the committed order changes", () => {
+    const third: SourceImage = {
+      id: importedAssetId("square"),
+      width: 1600,
+      height: 1600,
+    };
+    const document = createDocument([...images, third]);
+    const scene = documentToRenderScene({
+      ...document,
+      stitch: {
+        mode: "vertical",
+        spacing: 0,
+        order: [third.id, images[0]!.id, images[1]!.id],
+      },
+    });
+
+    expect(scene.images.map(({ imageId }) => imageId)).toEqual(["square", "wide", "tall"]);
   });
 
   it("[F03-S05] keeps text in logical coordinates for scaled Paragraph rendering", () => {

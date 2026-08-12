@@ -44,7 +44,7 @@ React Native（Expo，New Architecture）+ Skia + TypeScript。编辑器为文�
 
 ## 开发
 
-PlogKit 当前的开发基线为 macOS、Node.js 22、pnpm 11 及目标平台的原生工具链。
+PlogKit 当前的开发基线为 macOS、仓库锁定的 Node.js 与 pnpm 工具链，以及目标平台的原生工具链。
 
 ```bash
 pnpm install

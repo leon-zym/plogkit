@@ -27,6 +27,7 @@ expo-env.d.ts
 # testing
 coverage/
 /artifacts/
+/.e2e-cache/
 
 # logs
 *.log

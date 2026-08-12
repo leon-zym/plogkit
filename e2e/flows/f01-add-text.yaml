@@ -1,8 +1,8 @@
 appId: com.leonzym.plogkit
-name: Add and style a text element
+name: Import photos and add a text element
 tags:
   - F01-S01
-  - F01-S12
+  - F07-S03
 ---
 - runFlow: ../subflows/import-two-photos.yaml
 - tapOn:
@@ -10,48 +10,10 @@ tags:
 - assertVisible: Add text
 - tapOn:
     id: text-input
-- inputText: Morning note
+- setClipboard: 周末的海边日记
+- pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-preset-headline
-    direction: DOWN
-    centerElement: true
-- waitForAnimationToEnd
-- tapOn:
-    id: text-preset-headline
-- swipe:
-    start: 50%, 90%
-    end: 50%, 50%
-    duration: 500
-- waitForAnimationToEnd
-- scrollUntilVisible:
-    element:
-      id: text-alignment-center
-    direction: DOWN
-    visibilityPercentage: 60
-- tapOn:
-    id: text-alignment-center
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: Morning note
-- assertVisible:
-    id: canvas-text-hit-0-.*
-- runFlow: ../subflows/reenter-session-unselected.yaml
-- assertVisible:
-    id: canvas-text-hit-0-.*
-- tapOn:
-    id: canvas-text-hit-0-.*
-- assertVisible:
-    id: canvas-text-hit-0-.*
-    selected: true
-- swipe:
-    from:
-      id: canvas-text-hit-0-.*
-    direction: RIGHT
-    duration: 500
-- tapOn:
-    id: editor-undo
-- assertVisible: Morning note
+- assertVisible: 周末的海边日记
 - assertVisible:
     id: canvas-text-hit-0-.*

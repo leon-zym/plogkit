@@ -1,15 +1,15 @@
-import {
-  createDocument,
-  importedAssetId,
-  type ImportedAssetId,
-} from "@/core/document";
+import { createDocument, importedAssetId, type ImportedAssetId } from "@/core/document";
 import { editIntents } from "@/core/editing";
 import {
+  createDraftLibrary,
   draftId,
   type AssetCatalogSnapshot,
   type CreateDraftResult,
   type DraftLibrary,
+  type DraftLibraryFileAdapter,
+  type DraftLibraryPreviewAdapter,
   type DraftLibraryState,
+  type DraftThumbnailAdapter,
   type ImportCandidate,
 } from "@/services/drafts/draftLibrary";
 import { createCurrentEditingSession } from "@/services/session/currentEditingSession";
@@ -28,11 +28,7 @@ const versionFacts = {
   contentRevision: 1,
 } as const;
 
-function snapshot(
-  uri: string,
-  id = firstId,
-  imageId = firstImageId,
-): AssetCatalogSnapshot {
+function snapshot(uri: string, id = firstId, imageId = firstImageId): AssetCatalogSnapshot {
   return Object.freeze({
     entries: Object.freeze([imageId]),
     resolve: (candidate: ImportedAssetId, usage: "preview" | "original" | "metadata") =>
@@ -50,6 +46,142 @@ const pickerCandidate: ImportCandidate = {
   height: 1200,
   kind: "image",
 };
+
+class RuntimeMemoryDraftFiles implements DraftLibraryFileAdapter {
+  readonly files = new Map<string, string | Uint8Array>();
+  readonly directories = new Set<string>();
+
+  async fileExists(uri: string): Promise<boolean> {
+    return this.files.has(uri);
+  }
+
+  async directoryExists(uri: string): Promise<boolean> {
+    return this.directories.has(uri);
+  }
+
+  async ensureDirectory(uri: string): Promise<void> {
+    this.directories.add(uri);
+  }
+
+  async readText(uri: string): Promise<string> {
+    const value = this.files.get(uri);
+    if (typeof value !== "string") throw new Error(`missing text ${uri}`);
+    return value;
+  }
+
+  async writeText(uri: string, content: string): Promise<void> {
+    this.files.set(uri, content);
+  }
+
+  async copy(sourceUri: string, destinationUri: string): Promise<void> {
+    const value = this.files.get(sourceUri);
+    if (value === undefined) throw new Error(`missing source ${sourceUri}`);
+    this.files.set(destinationUri, value);
+  }
+
+  async moveFile(sourceUri: string, destinationUri: string): Promise<void> {
+    const value = this.files.get(sourceUri);
+    if (value === undefined) throw new Error(`missing source ${sourceUri}`);
+    if (this.files.has(destinationUri)) throw new Error(`destination exists ${destinationUri}`);
+    this.files.delete(sourceUri);
+    this.files.set(destinationUri, value);
+  }
+
+  async moveDirectory(sourceUri: string, destinationUri: string): Promise<void> {
+    if (!this.directories.has(sourceUri)) throw new Error(`missing directory ${sourceUri}`);
+    this.directories.delete(sourceUri);
+    this.directories.add(destinationUri);
+    for (const uri of [...this.directories]) {
+      if (!uri.startsWith(`${sourceUri}/`)) continue;
+      this.directories.delete(uri);
+      this.directories.add(`${destinationUri}${uri.slice(sourceUri.length)}`);
+    }
+    for (const [uri, value] of [...this.files]) {
+      if (!uri.startsWith(`${sourceUri}/`)) continue;
+      this.files.delete(uri);
+      this.files.set(`${destinationUri}${uri.slice(sourceUri.length)}`, value);
+    }
+  }
+
+  async removeFile(uri: string): Promise<void> {
+    this.files.delete(uri);
+  }
+
+  async removeDirectory(uri: string): Promise<void> {
+    this.directories.delete(uri);
+    for (const path of [...this.files.keys()]) {
+      if (path.startsWith(`${uri}/`)) this.files.delete(path);
+    }
+    for (const path of [...this.directories]) {
+      if (path.startsWith(`${uri}/`)) this.directories.delete(path);
+    }
+  }
+
+  async listDirectories(uri: string): Promise<readonly string[]> {
+    const prefix = `${uri.replace(/\/$/, "")}/`;
+    const children = new Set<string>();
+    for (const path of this.directories) {
+      if (!path.startsWith(prefix)) continue;
+      const child = path.slice(prefix.length).split("/", 1)[0];
+      if (child !== undefined && child.length > 0) children.add(`${prefix}${child}`);
+    }
+    return [...children];
+  }
+
+  async listFiles(uri: string): Promise<readonly string[]> {
+    const prefix = `${uri.replace(/\/$/, "")}/`;
+    return [...this.files.keys()].filter((path) => {
+      if (!path.startsWith(prefix)) return false;
+      const relative = path.slice(prefix.length);
+      return relative.length > 0 && !relative.includes("/");
+    });
+  }
+}
+
+function createRealMemoryLibrary(candidates: readonly ImportCandidate[]): DraftLibrary {
+  const files = new RuntimeMemoryDraftFiles();
+  for (const candidate of candidates) {
+    files.files.set(candidate.uri, new Uint8Array([1, 2, 3]));
+  }
+  const previews: DraftLibraryPreviewAdapter = {
+    generate: async (sourceUri, destinationUri) => {
+      if (!(files.files.get(sourceUri) instanceof Uint8Array)) {
+        throw new Error(`preview source unavailable ${sourceUri}`);
+      }
+      files.files.set(destinationUri, new Uint8Array([4, 5, 6]));
+      return { width: 720, height: 480 };
+    },
+    isValid: async (uri) => files.files.get(uri) instanceof Uint8Array,
+  };
+  const thumbnailSizes = new Map<string, { readonly width: number; readonly height: number }>();
+  const thumbnails: DraftThumbnailAdapter = {
+    generate: async ({ contentRevision, originalUri, squareUri }) => {
+      files.files.set(squareUri, new Uint8Array([7, contentRevision]));
+      files.files.set(originalUri, new Uint8Array([8, contentRevision]));
+      const square = { width: 360, height: 360 } as const;
+      const original = { width: 720, height: 540 } as const;
+      thumbnailSizes.set(squareUri, square);
+      thumbnailSizes.set(originalUri, original);
+      return { square, original };
+    },
+    inspect: async (uri) => (files.files.has(uri) ? (thumbnailSizes.get(uri) ?? null) : null),
+  };
+  let storageSequence = 0;
+  let operationSequence = 0;
+  let thumbnailSequence = 0;
+  return createDraftLibrary({
+    files,
+    previews,
+    thumbnails,
+    rootUri: "memory://runtime",
+    createDraftId: () => secondId,
+    createAssetId: (_candidate, index) => importedAssetId(`image:runtime-import-${index + 1}`),
+    createStorageKey: () => `asset-${++storageSequence}`,
+    createOperationId: () => `operation-${++operationSequence}`,
+    createThumbnailGenerationId: () => `thumbnail-${++thumbnailSequence}`,
+    now: () => "2026-07-22T08:00:00.000Z",
+  });
+}
 
 function createLibrary(overrides: Partial<DraftLibrary> = {}): DraftLibrary {
   let state: DraftLibraryState = { status: "ready", entries: [] };
@@ -244,6 +376,43 @@ describe("editor Draft integration", () => {
 
     expect(events).toEqual(["open-first", "save-current", "create", "open-second"]);
     await expect(runtime.prepareEditor()).resolves.toMatchObject({ status: "prepared" });
+  });
+
+  it("[F07-S01] creates a Draft from three selected photos and exposes all three in the Editor", async () => {
+    const imageIds = [
+      importedAssetId("image:runtime-import-1"),
+      importedAssetId("image:runtime-import-2"),
+      importedAssetId("image:runtime-import-3"),
+    ] as const;
+    const candidates: readonly ImportCandidate[] = [
+      { ...pickerCandidate, uri: "picker://selected-1.jpg", width: 1200, height: 900 },
+      { ...pickerCandidate, uri: "picker://selected-2.jpg", width: 900, height: 1200 },
+      { ...pickerCandidate, uri: "picker://selected-3.jpg", width: 1000, height: 1000 },
+    ];
+    const library = createRealMemoryLibrary(candidates);
+    const runtime = createRuntime(library, candidates);
+
+    const created = await runtime.choosePhotos();
+    expect(created).toMatchObject({ status: "created", errors: [] });
+    if (created.status !== "created") throw new Error("expected created Draft");
+    expect(created.document.sourceImages).toEqual([
+      { id: imageIds[0], width: 1200, height: 900 },
+      { id: imageIds[1], width: 900, height: 1200 },
+      { id: imageIds[2], width: 1000, height: 1000 },
+    ]);
+    expect(created.assets.entries).toEqual(imageIds);
+
+    const prepared = await runtime.prepareEditor();
+    if (prepared.status !== "prepared") throw new Error("expected prepared editor");
+    expect(prepared.editing.read().document).toEqual(created.document);
+    expect(prepared.assets.entries).toEqual(imageIds);
+    for (const imageId of imageIds) {
+      expect(prepared.assets.resolve(imageId, "preview")).toMatchObject({
+        draftId: created.draftId,
+        assetId: imageId,
+        usage: "preview",
+      });
+    }
   });
 
   it("[F04-S07] keeps a Draft photo-information override separate from the global default for new Drafts", async () => {

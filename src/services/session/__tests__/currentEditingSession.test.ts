@@ -39,7 +39,13 @@ function createAssets(id: DraftId, imageIds: readonly string[]): AssetCatalogSna
     entries,
     resolve: (assetId: ImportedAssetId, usage: AssetUsage) =>
       entries.includes(assetId)
-        ? Object.freeze({ id, draftId: id, assetId, usage, uri: `memory://${id}/${assetId}/${usage}` })
+        ? Object.freeze({
+            id,
+            draftId: id,
+            assetId,
+            usage,
+            uri: `memory://${id}/${assetId}/${usage}`,
+          })
         : null,
   });
 }
@@ -66,12 +72,11 @@ class MemoryDraftLibrary implements DraftLibrary {
   readonly readGates = new Map<DraftId, Promise<void>>();
   saveResult: SaveDraftResult | null = null;
   previewResult: ReadPreviewResult | null = null;
-  saveImplementation:
-    | ((id: DraftId, document: PlogDocument) => Promise<SaveDraftResult>)
-    | null = null;
+  saveImplementation: ((id: DraftId, document: PlogDocument) => Promise<SaveDraftResult>) | null =
+    null;
   ingestImplementation:
-    | ((id: DraftId, candidates: readonly ImportCandidate[]) => Promise<IngestAssetsResult>)
-    | null = null;
+    ((id: DraftId, candidates: readonly ImportCandidate[]) => Promise<IngestAssetsResult>) | null =
+    null;
   deleteResult: DeleteDraftResult = { status: "deleted" };
 
   async load() {
@@ -123,10 +128,7 @@ class MemoryDraftLibrary implements DraftLibrary {
     return { status: "saved", ...draftVersionFacts, document };
   }
 
-  async ingest(
-    id: DraftId,
-    candidates: readonly ImportCandidate[],
-  ): Promise<IngestAssetsResult> {
+  async ingest(id: DraftId, candidates: readonly ImportCandidate[]): Promise<IngestAssetsResult> {
     if (this.ingestImplementation !== null) {
       return this.ingestImplementation(id, candidates);
     }
@@ -418,9 +420,12 @@ describe("current editing session", () => {
     const { library, session } = setup();
     await session.open(firstDraftId);
     let releaseRead: (() => void) | undefined;
-    library.readGates.set(secondDraftId, new Promise<void>((resolve) => {
-      releaseRead = resolve;
-    }));
+    library.readGates.set(
+      secondDraftId,
+      new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      }),
+    );
 
     const switching = session.open(secondDraftId);
 
@@ -488,9 +493,12 @@ describe("current editing session", () => {
   it("shares one in-flight open for the same Draft and rejects a competing target", async () => {
     const { library, session } = setup();
     let releaseRead: (() => void) | undefined;
-    library.readGates.set(firstDraftId, new Promise<void>((resolve) => {
-      releaseRead = resolve;
-    }));
+    library.readGates.set(
+      firstDraftId,
+      new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      }),
+    );
 
     const first = session.open(firstDraftId);
     const duplicate = session.open(firstDraftId);
@@ -554,10 +562,12 @@ describe("current editing session", () => {
     if (first.status !== "opened" || second.status !== "opened") return;
 
     const before = first.handle.editing.read();
-    expect(first.handle.editing.dispatch({
-      type: "commit",
-      intent: editIntents.canvas.changeBackground("#112233"),
-    })).toEqual({ status: "unavailable", reason: "session-inactive" });
+    expect(
+      first.handle.editing.dispatch({
+        type: "commit",
+        intent: editIntents.canvas.changeBackground("#112233"),
+      }),
+    ).toEqual({ status: "unavailable", reason: "session-inactive" });
     await session.flush();
 
     expect(library.saveCalls).toEqual([]);
@@ -730,9 +740,12 @@ describe("current editing session", () => {
       intent: editIntents.canvas.changeBackground("#111111"),
     });
     let releaseTargetRead: (() => void) | undefined;
-    library.readGates.set(secondDraftId, new Promise<void>((resolve) => {
-      releaseTargetRead = resolve;
-    }));
+    library.readGates.set(
+      secondDraftId,
+      new Promise<void>((resolve) => {
+        releaseTargetRead = resolve;
+      }),
+    );
 
     const switching = session.open(secondDraftId);
     for (let step = 0; step < 5 && !library.readCalls.includes(secondDraftId); step += 1) {
@@ -746,9 +759,7 @@ describe("current editing session", () => {
 
     expect((await switching).status).toBe("opened");
     expect(library.saveCalls).toHaveLength(2);
-    expect(library.aggregates.get(firstDraftId)?.document.canvas.backgroundColor).toBe(
-      "#222222",
-    );
+    expect(library.aggregates.get(firstDraftId)?.document.canvas.backgroundColor).toBe("#222222");
   });
 
   it("blocks asset publication while a target Draft is being validated", async () => {
@@ -756,9 +767,12 @@ describe("current editing session", () => {
     const first = await session.open(firstDraftId);
     if (first.status !== "opened") return;
     let releaseTargetRead: (() => void) | undefined;
-    library.readGates.set(secondDraftId, new Promise<void>((resolve) => {
-      releaseTargetRead = resolve;
-    }));
+    library.readGates.set(
+      secondDraftId,
+      new Promise<void>((resolve) => {
+        releaseTargetRead = resolve;
+      }),
+    );
     const ingest = jest.spyOn(library, "ingest");
 
     const switching = session.open(secondDraftId);
@@ -815,9 +829,7 @@ describe("current editing session", () => {
 
     expect(prepared).toEqual({ status: "prepared" });
     expect(opened.handle.assets).toBe(stableAssets);
-    expect(stableAssets.resolve(firstImageId, "preview")?.uri).toBe(
-      "memory://rebuilt/preview",
-    );
+    expect(stableAssets.resolve(firstImageId, "preview")?.uri).toBe("memory://rebuilt/preview");
   });
 
   it("reports preview failure without invalidating the open session", async () => {
@@ -841,7 +853,7 @@ describe("current editing session", () => {
     expect(reopened.handle).toBe(opened.handle);
   });
 
-  it("[F07-S01] publishes a successful add batch before one Edit Commit and undoes it in one step", async () => {
+  it("publishes a successful add batch before one Edit Commit and undoes it in one step", async () => {
     const { library, session } = setup(10_000);
     const opened = await session.open(firstDraftId);
     if (opened.status !== "opened") return;
@@ -855,9 +867,7 @@ describe("current editing session", () => {
           sourceKind: "image",
         },
       ],
-      errors: [
-        { index: 1, sourceUri: "picker://broken.jpg", message: "decode failed" },
-      ],
+      errors: [{ index: 1, sourceUri: "picker://broken.jpg", message: "decode failed" }],
       assets: publishedAssets,
     });
     let resolvedAtCommit = false;
@@ -989,14 +999,9 @@ describe("current editing session", () => {
       ingestedCandidates.push([...candidates]);
       return {
         status: "ingested",
-        imported: [
-          { image: { id: finalImageId, width: 800, height: 600 }, sourceKind: "image" },
-        ],
+        imported: [{ image: { id: finalImageId, width: 800, height: 600 }, sourceKind: "image" }],
         errors: [],
-        assets: createAssets(firstDraftId, [
-          ...existingImages.map(({ id }) => id),
-          finalImageId,
-        ]),
+        assets: createAssets(firstDraftId, [...existingImages.map(({ id }) => id), finalImageId]),
       };
     };
     const opened = await session.open(firstDraftId);
@@ -1156,9 +1161,7 @@ describe("current editing session", () => {
     if (first.status !== "opened" || second.status !== "opened") return;
     const ingest = jest.spyOn(library, "ingest");
 
-    await expect(
-      first.handle.addImages([candidate("picker://stale.jpg")]),
-    ).resolves.toEqual({
+    await expect(first.handle.addImages([candidate("picker://stale.jpg")])).resolves.toEqual({
       status: "session-inactive",
       imported: [],
       errors: [],
@@ -1215,10 +1218,7 @@ describe("current editing session", () => {
       assets: createAssets(firstDraftId, [firstImageId]),
     });
 
-    const result = await opened.handle.replaceImage(
-      firstImageId,
-      candidate("picker://broken.jpg"),
-    );
+    const result = await opened.handle.replaceImage(firstImageId, candidate("picker://broken.jpg"));
 
     expect(result).toMatchObject({ status: "completed", imported: [], commit: null });
     expect(opened.handle.editing.read()).toMatchObject({ revision: 0, canUndo: false });

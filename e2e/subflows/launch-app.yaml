@@ -1,6 +1,9 @@
 appId: com.leonzym.plogkit
 ---
-- runFlow: start-app.yaml
+- launchApp:
+    clearState: true
+    permissions:
+      all: unset
 - extendedWaitUntil:
     visible:
       id: home-screen

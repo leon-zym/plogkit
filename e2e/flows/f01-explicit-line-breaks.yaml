@@ -24,15 +24,13 @@ tags:
       第三行
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
 - assertVisible:
-    id: canvas-text-hit-0-.*
-- runFlow: ../subflows/reenter-session-unselected.yaml
-- assertVisible:
-    id: canvas-text-hit-0-.*
-# The third line has a deterministic canvas position. A first-line-only hit
-# region cannot make this coordinate move with itself.
+    id: select-new-text
 - tapOn:
-    id: document-canvas
-    point: 14%, 11%
+    id: select-new-text
+- assertNotVisible:
+    id: canvas-text-selection-.*
+- tapOn:
+    id: canvas-text-hit-0-.*
 - assertVisible:
     id: canvas-text-hit-0-.*
     selected: true

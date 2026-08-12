@@ -1,0 +1,16 @@
+flows:
+  - flows/*.yaml
+executionOrder:
+  continueOnFailure: false
+  flowsOrder:
+    - Import photos and add a text element
+    - Long Chinese text wraps and remains draggable
+    - Explicit Chinese line breaks remain selectable and draggable
+    - Overlapping text selects the visually upper element
+    - Right-aligned small text uses an extended touch target
+    - Chinese emoji and fallback glyphs remain selectable and draggable
+    - Reopen a persisted Draft from the Library after relaunch
+    - Browse, switch, and delete local Drafts
+    - App settings remain durable and independent
+    # Export mutates the shared system photo library, so it runs last.
+    - Export from the document with a one-time metadata override

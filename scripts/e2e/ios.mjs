@@ -1,13 +1,48 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
-import { capture, log, run, waitUntil } from "./runtime.mjs";
+import { capture, captureBoundedCommand, log, run, waitUntil } from "./runtime.mjs";
+import {
+  createMaestroEnvironment,
+  createStandaloneBuildEnvironment,
+  isHermesBytecode,
+} from "./environment.mjs";
+import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
 
-const deviceName = "PlogKit E2E";
+const deviceNamePrefix = "PlogKit E2E";
+const requiredXcodeVersion = "26.6";
+const requiredXcodeBuild = "17F113";
+const requiredCocoaPodsVersion = "1.17.0";
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-26-5";
 const deviceTypeName = "iPhone 17 Pro";
-const appPath = "ios/build/Build/Products/Debug-iphonesimulator/PlogKit.app";
+const deviceTypeIdentifier = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
+const appPath = "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app";
+const buildTimeoutMs = 45 * 60 * 1000;
+const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
+const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
+const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
+const iosPrepareEvidenceMaxBytes = 1024 * 1024;
+const iosPrepareEvidenceProbeTimeoutMs = 5000;
+const iosReadinessTimeoutMs = 120000;
+const iosCleanupStageErrorMaxBytes = 64 * 1024;
+
+function boundedEvidence(value, maxBytes) {
+  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  if (source.length <= maxBytes) return source;
+  const marker = Buffer.from(
+    `\n--- diagnostic bytes omitted from ${source.length}-byte output ---\n`,
+  );
+  const contentBytes = maxBytes - marker.length;
+  const headBytes = Math.floor(contentBytes / 2);
+  const tailBytes = contentBytes - headBytes;
+  return Buffer.concat([
+    source.subarray(0, headBytes),
+    marker,
+    source.subarray(source.length - tailBytes),
+  ]);
+}
 
 export function validateIosHost() {
   if (platform() !== "darwin") {
@@ -15,22 +50,51 @@ export function validateIosHost() {
   }
 }
 
-export function validateIosEnvironment() {
-  // Record Xcode version and path.
-  const xcodePath = capture("xcode-select", ["-p"], { allowFailure: true });
-  const xcodeVersion = capture("xcodebuild", ["-version"], { allowFailure: true });
+export function validateIosToolchain() {
+  const xcodePath = capture("xcode-select", ["-p"], {
+    allowFailure: true,
+    timeoutMs: 15000,
+  });
+  const xcodeVersion = capture("xcodebuild", ["-version"], {
+    allowFailure: true,
+    timeoutMs: 15000,
+  });
   log("ios", `Xcode: ${xcodePath ?? "unknown"}`);
   if (xcodeVersion) {
     for (const line of xcodeVersion.split("\n")) log("ios", `  ${line}`);
   }
+  const cocoaPodsVersion = capture("pod", ["--version"], {
+    allowFailure: true,
+    timeoutMs: 15000,
+  });
+  log("ios", `CocoaPods: ${cocoaPodsVersion ?? "unknown"}`);
+  const selectedXcodeVersion = xcodeVersion?.match(/^Xcode\s+(.+)$/m)?.[1] ?? "unknown";
+  const selectedXcodeBuild = xcodeVersion?.match(/^Build version\s+(.+)$/m)?.[1] ?? "unknown";
+  if (selectedXcodeVersion !== requiredXcodeVersion || selectedXcodeBuild !== requiredXcodeBuild) {
+    throw new Error(
+      `Xcode ${requiredXcodeVersion} (${requiredXcodeBuild}) is required, but ` +
+        `Xcode ${selectedXcodeVersion} (${selectedXcodeBuild}) is selected.`,
+    );
+  }
+  if (cocoaPodsVersion !== requiredCocoaPodsVersion) {
+    throw new Error(
+      `CocoaPods ${requiredCocoaPodsVersion} is required, but ${cocoaPodsVersion ?? "unknown"} is installed.`,
+    );
+  }
+  log("ios", "iOS toolchain validation passed.");
+}
 
-  // Record Maestro version.
-  const maestroVersion = capture("maestro", ["--version"], { allowFailure: true });
-  if (maestroVersion) log("ios", `Maestro: ${maestroVersion}`);
-  else log("ios", "Maestro: not found — install it before running iOS E2E.");
-
-  // Verify required runtime is available.
-  const runtime = requiredRuntime();
+export async function validateIosSimulatorEnvironment({
+  artifactRoot,
+  cleanup,
+  hostLifecycleTimeoutMs = hostLifecycleProbeTimeoutMs,
+  probeTimeoutMs = 15000,
+} = {}) {
+  const runtime = await requiredRuntime({
+    artifactRoot,
+    cleanup,
+    timeoutMs: hostLifecycleTimeoutMs,
+  });
   if (!runtime) {
     throw new Error(
       `iOS Simulator runtime ${runtimeIdentifier} is not available. ` +
@@ -39,8 +103,7 @@ export function validateIosEnvironment() {
   }
   log("ios", `Simulator runtime: ${runtime.name} (${runtime.version})`);
 
-  // Verify required device type exists.
-  const deviceType = requiredDeviceType();
+  const deviceType = requiredDeviceType(probeTimeoutMs);
   if (!deviceType) {
     throw new Error(
       `Device type "${deviceTypeName}" is not available. ` +
@@ -48,68 +111,238 @@ export function validateIosEnvironment() {
     );
   }
 
-  // Warn on Xcode beta: React Native build compatibility is not fully verified
-  // with prerelease toolchains (see issue #11 and #23 investigations).
-  if (xcodeVersion && /\bbeta\b/i.test(xcodeVersion)) {
+  log("ios", "iOS Simulator environment validation passed.");
+}
+
+function throwIosHostLifecycleFailure(artifactRoot, command, error) {
+  if (!artifactRoot) throw error;
+  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const evidencePath = join(artifactRoot, "ios-host-lifecycle.log");
+  try {
+    writeFileSync(
+      evidencePath,
+      boundedEvidence(
+        `=== iOS host lifecycle probe failure ===\ncommand: ${command}\n${details}\n`,
+        iosHostLifecycleEvidenceMaxBytes,
+      ),
+    );
+  } catch (evidenceError) {
+    const aggregate = new AggregateError(
+      [error, evidenceError],
+      `${error instanceof Error ? error.message : String(error)}\n` +
+        `Unable to preserve bounded iOS host lifecycle evidence at ${evidencePath}.`,
+      { cause: error },
+    );
+    if (error?.code) aggregate.code = error.code;
+    throw aggregate;
+  }
+  throw error;
+}
+
+async function requiredRuntime({ artifactRoot, cleanup, timeoutMs }) {
+  const command = "xcrun simctl list runtimes -j";
+  try {
+    const output = await captureBoundedCommand("xcrun", ["simctl", "list", "runtimes", "-j"], {
+      cleanup,
+      maxBytes: iosHostLifecycleEvidenceMaxBytes,
+      timeoutMs,
+    });
+    let runtimes;
+    try {
+      runtimes = JSON.parse(output);
+    } catch (error) {
+      const parseError = new SyntaxError(
+        `Unable to parse output from ${command}: ${error.message}\n${output}`,
+        { cause: error },
+      );
+      parseError.code = "E2E_COMMAND_OUTPUT_INVALID";
+      throw parseError;
+    }
+    return runtimes.runtimes.find(
+      (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
+    );
+  } catch (error) {
+    throwIosHostLifecycleFailure(artifactRoot, command, error);
+  }
+}
+
+function requiredDeviceType(timeoutMs) {
+  const result = JSON.parse(
+    capture("xcrun", ["simctl", "list", "devicetypes", "-j"], { timeoutMs }),
+  );
+  return result.devicetypes.find((device) => device.identifier === deviceTypeIdentifier);
+}
+
+function simulatorState(deviceId) {
+  const result = JSON.parse(
+    capture("xcrun", ["simctl", "list", "devices", "-j"], { timeoutMs: 15000 }),
+  );
+  for (const devices of Object.values(result.devices)) {
+    const device = devices.find((candidate) => candidate.udid === deviceId);
+    if (device) return device.state;
+  }
+  return null;
+}
+
+export async function shutdownIosDevice(deviceId) {
+  capture("xcrun", ["simctl", "shutdown", deviceId], {
+    allowFailure: true,
+    timeoutMs: 30000,
+  });
+  await waitUntil(
+    () => simulatorState(deviceId) === "Shutdown",
+    30000,
+    `iOS Simulator ${deviceId} to shut down`,
+    500,
+  );
+}
+
+function createEphemeralIosDevice() {
+  const name = `${deviceNamePrefix} ${process.pid} ${randomUUID()}`;
+  const udid = capture(
+    "xcrun",
+    ["simctl", "create", name, deviceTypeIdentifier, runtimeIdentifier],
+    { timeoutMs: 30000 },
+  );
+  if (!udid) throw new Error("simctl did not return an identifier for the new iOS Simulator.");
+  return { name, udid };
+}
+
+function cleanupErrorText(error) {
+  return boundedEvidence(
+    error instanceof Error ? error.message : String(error),
+    iosCleanupStageErrorMaxBytes,
+  ).toString("utf8");
+}
+
+function cleanupStage(error) {
+  return error
+    ? {
+        error: cleanupErrorText(error),
+        status: "failed",
+      }
+    : { status: "succeeded" };
+}
+
+async function deleteOwnedIosDevice(deviceId, artifactRoot, verificationTimeoutMs = 30000) {
+  let shutdownError = null;
+  let deleteError = null;
+  let verificationError = null;
+  try {
+    await shutdownIosDevice(deviceId);
+    log("ios", `Cleanup shutdown completed for owned simulator ${deviceId}.`);
+  } catch (error) {
+    shutdownError = error;
     log(
       "ios",
-      "WARNING: Xcode beta toolchain detected. React Native build compatibility " +
-        "with beta Xcode is not fully verified. If you encounter unexpected build " +
-        "failures or XCTest instability, retry with a stable Xcode release " +
-        "(see docs/guides/dev-environment.md).",
+      `Cleanup shutdown did not complete for owned simulator ${deviceId}: ${cleanupErrorText(error)}`,
+    );
+  }
+  try {
+    capture("xcrun", ["simctl", "delete", deviceId], { timeoutMs: 30000 });
+    log("ios", `Cleanup delete completed for owned simulator ${deviceId}.`);
+  } catch (error) {
+    deleteError = error;
+    log("ios", `Cleanup delete failed for owned simulator ${deviceId}: ${cleanupErrorText(error)}`);
+  }
+
+  try {
+    await waitUntil(
+      () => simulatorState(deviceId) === null,
+      verificationTimeoutMs,
+      `owned iOS Simulator ${deviceId} to disappear after deletion`,
+      500,
+    );
+    log("ios", `Cleanup verified owned simulator ${deviceId} is absent.`);
+  } catch (error) {
+    verificationError = error;
+    log(
+      "ios",
+      `Cleanup could not verify owned simulator ${deviceId} is absent: ${cleanupErrorText(error)}`,
     );
   }
 
-  log("ios", "iOS environment validation passed.");
-}
-
-function requiredRuntime() {
-  const runtimes = JSON.parse(capture("xcrun", ["simctl", "list", "runtimes", "-j"]));
-  return runtimes.runtimes.find(
-    (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
-  );
-}
-
-function requiredDeviceType() {
-  const result = JSON.parse(capture("xcrun", ["simctl", "list", "devicetypes", "-j"]));
-  return result.devicetypes.find((device) => device.name === deviceTypeName);
-}
-
-function findDevice(deviceTypeIdentifier) {
-  const result = JSON.parse(capture("xcrun", ["simctl", "list", "devices", "available", "-j"]));
-  return result.devices[runtimeIdentifier]?.find(
-    (device) => device.name === deviceName && device.deviceTypeIdentifier === deviceTypeIdentifier,
-  );
-}
-
-function ensureDedicatedDevice() {
-  const runtime = requiredRuntime();
-  const deviceType = requiredDeviceType();
-  if (!runtime || !deviceType) {
-    throw new Error("iOS 26.5 and the iPhone 17 Pro device type are required for iOS E2E.");
+  let summaryError = null;
+  if (artifactRoot) {
+    const summaryPath = join(artifactRoot, "ios", "device-cleanup.json");
+    try {
+      mkdirSync(join(artifactRoot, "ios"), { recursive: true });
+      writeFileSync(
+        summaryPath,
+        `${JSON.stringify(
+          {
+            deletion: cleanupStage(deleteError),
+            deviceId,
+            shutdown: cleanupStage(shutdownError),
+            verification: verificationError
+              ? { ...cleanupStage(verificationError), udidAbsent: false }
+              : { status: "succeeded", udidAbsent: true },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      log("ios", `Cleanup summary: ${summaryPath}`);
+    } catch (error) {
+      summaryError = error;
+      log("ios", `Unable to preserve iOS cleanup summary: ${cleanupErrorText(error)}`);
+    }
   }
-  const existing = findDevice(deviceType.identifier);
-  if (existing) return existing;
-  const udid = capture("xcrun", [
-    "simctl",
-    "create",
-    deviceName,
-    deviceType.identifier,
-    runtime.identifier,
-  ]);
-  log("ios", `Created dedicated simulator ${udid}.`);
-  return { name: deviceName, state: "Shutdown", udid };
+
+  const fatalErrors = [deleteError, verificationError, summaryError].filter(Boolean);
+  if (fatalErrors.length === 0) return;
+  const primaryError = fatalErrors[0];
+  const errors = [primaryError, ...(shutdownError ? [shutdownError] : []), ...fatalErrors.slice(1)];
+  if (errors.length === 1) throw errors[0];
+  throw new AggregateError(
+    errors,
+    `Unable to completely delete and verify owned iOS Simulator ${deviceId}.`,
+    { cause: primaryError },
+  );
+}
+
+export function isIosEnglishLocale({ languages, locale }) {
+  return (
+    /(?:^|[\s("'])en-US(?:$|[\s)"'])/.test(languages ?? "") && /^en_US(?:$|@)/.test(locale ?? "")
+  );
+}
+
+function configureIosEnglishLocale(deviceId) {
+  const spawnPrefix = ["simctl", "spawn", "--standalone", deviceId];
+  for (const args of [
+    ["defaults", "write", "NSGlobalDomain", "AppleLanguages", "-array", "en-US"],
+    ["defaults", "write", "NSGlobalDomain", "AppleLocale", "-string", "en_US"],
+  ]) {
+    capture("xcrun", [...spawnPrefix, ...args], { timeoutMs: 15000 });
+  }
+
+  const languages = capture(
+    "xcrun",
+    [...spawnPrefix, "defaults", "read", "NSGlobalDomain", "AppleLanguages"],
+    { timeoutMs: 15000 },
+  );
+  const locale = capture(
+    "xcrun",
+    [...spawnPrefix, "defaults", "read", "NSGlobalDomain", "AppleLocale"],
+    { timeoutMs: 15000 },
+  );
+  if (!isIosEnglishLocale({ languages, locale })) {
+    throw new Error(
+      `iOS E2E simulator locale must be en-US, but AppleLanguages=${languages} and AppleLocale=${locale}.`,
+    );
+  }
+  log("ios", "Simulator locale: en-US.");
 }
 
 export async function buildIos({ cleanup, root, workers }) {
-  log("ios", "Building the development build without booting a simulator.");
+  log("ios", "Building the standalone Release app without booting a simulator.");
   const args = [
     "-workspace",
     "ios/PlogKit.xcworkspace",
     "-scheme",
     "PlogKit",
     "-configuration",
-    "Debug",
+    "Release",
     "-sdk",
     "iphonesimulator",
     "-destination",
@@ -118,34 +351,174 @@ export async function buildIos({ cleanup, root, workers }) {
     "ios/build",
   ];
   if (workers) args.push("-jobs", workers);
-  args.push("-quiet", "CODE_SIGNING_ALLOWED=NO", "build");
-  await run("xcodebuild", args, { cleanup, cwd: root });
-}
-
-export async function prepareIosDevice({ cleanup }) {
-  const device = ensureDedicatedDevice();
-
-  if (device.state === "Booted") {
-    capture("xcrun", ["simctl", "shutdown", device.udid], { allowFailure: true });
-  }
-  capture("xcrun", ["simctl", "erase", device.udid]);
-  capture("xcrun", ["simctl", "boot", device.udid]);
-
-  cleanup.add(async () => {
-    log("ios", "Shutting down the dedicated simulator.");
-    capture("xcrun", ["simctl", "shutdown", device.udid], { allowFailure: true });
+  args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
+  await run("xcodebuild", args, {
+    cleanup,
+    cwd: root,
+    env: createStandaloneBuildEnvironment(),
+    timeoutMs: buildTimeoutMs,
   });
-  await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], { cleanup });
-  return { platform: "ios", deviceId: device.udid };
+  assertIosStandaloneArtifact(root);
 }
 
-export async function installAndSeedIos({ cleanup, device, fixtures, root }) {
-  const binary = resolve(root, appPath);
-  log("ios", "Installing the development build and seeding photos.");
-  await run("xcrun", ["simctl", "install", device.deviceId, binary], { cleanup, cwd: root });
+export function assertIosStandaloneArtifact(root) {
+  const artifact = iosBuildArtifact(root);
+  const bundle = join(artifact, "main.jsbundle");
+  if (!existsSync(artifact) || !existsSync(bundle) || !statSync(bundle).isFile()) {
+    throw new Error(`iOS Release artifact is missing its embedded main.jsbundle: ${bundle}`);
+  }
+  if (statSync(bundle).size === 0) {
+    throw new Error(`iOS Release embedded main.jsbundle is empty: ${bundle}`);
+  }
+  if (!isHermesBytecode(readFileSync(bundle))) {
+    throw new Error(`iOS Release embedded main.jsbundle is not Hermes bytecode: ${bundle}`);
+  }
+  const [symbols] = iosBuildSidecars(root);
+  const dwarf = join(symbols, "Contents", "Resources", "DWARF", "PlogKit");
+  if (!existsSync(symbols) || !existsSync(dwarf) || !statSync(dwarf).isFile()) {
+    throw new Error(`iOS Release dSYM is missing its PlogKit DWARF binary: ${dwarf}`);
+  }
+  if (statSync(dwarf).size === 0) {
+    throw new Error(`iOS Release dSYM DWARF binary is empty: ${dwarf}`);
+  }
+  assertIosExpoModulesCoreAbi(artifact);
+}
+
+export async function prepareIosDevice({
+  artifactRoot,
+  cleanup,
+  deletionVerificationTimeoutMs = 30000,
+  lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+}) {
+  try {
+    const device = createEphemeralIosDevice();
+
+    cleanup.add(async () => {
+      log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
+      await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
+    });
+    log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
+
+    // SpringBoard and permission prompts read locale at first process startup.
+    // Configure the newly-created, still-shutdown device before its only boot.
+    configureIosEnglishLocale(device.udid);
+    await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
+      cleanup,
+      timeoutMs: lifecycleTimeoutMs,
+    });
+    return { platform: "ios", deviceId: device.udid };
+  } catch (error) {
+    const prepareEvidencePath = artifactRoot ? join(artifactRoot, "ios-prepare.log") : null;
+    try {
+      if (!prepareEvidencePath) {
+        throw new Error("iOS prepare evidence requires artifactRoot.");
+      }
+      const simulatorState = capture("xcrun", ["simctl", "list", "devices", "-j"], {
+        allowFailure: true,
+        timeoutMs: iosPrepareEvidenceProbeTimeoutMs,
+      });
+      writeFileSync(
+        prepareEvidencePath,
+        boundedEvidence(
+          `=== prepare failure ===\n${
+            error instanceof Error ? (error.stack ?? error.message) : String(error)
+          }\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
+          iosPrepareEvidenceMaxBytes,
+        ),
+      );
+    } catch (evidenceError) {
+      const aggregate = new AggregateError(
+        [error, evidenceError],
+        `${error instanceof Error ? error.message : String(error)}\n` +
+          `Unable to preserve bounded iOS prepare evidence${
+            prepareEvidencePath ? ` at ${prepareEvidencePath}` : ""
+          }.`,
+        { cause: error },
+      );
+      if (error?.code) aggregate.code = error.code;
+      throw aggregate;
+    }
+    throw error;
+  }
+}
+
+const IOS_SYSTEM_UI_FAULT_PATTERN =
+  /(?:SpringBoard|backboardd|CoreSimulator|Simulator)[^\n]{0,200}(?:quit unexpectedly|crash(?:ed)?|not responding|unavailable|failed)/i;
+
+export function assertIosLauncherHierarchy(hierarchy) {
+  if (IOS_SYSTEM_UI_FAULT_PATTERN.test(hierarchy)) {
+    throw new Error(`iOS readiness hierarchy contains a system UI fault:\n${hierarchy}`);
+  }
+  if (!/"resource-id"\s*:\s*"Home screen icons"/.test(hierarchy)) {
+    throw new Error(`iOS readiness did not expose the SpringBoard Home screen launcher hierarchy.`);
+  }
+}
+
+export async function assertIosDeviceReady({
+  artifactRoot,
+  cleanup,
+  device,
+  readinessTimeoutMs = iosReadinessTimeoutMs,
+  stage = "readiness",
+}) {
+  const diagnosticDirectory = join(artifactRoot, "ios", `readiness-${stage}`);
+  mkdirSync(diagnosticDirectory, { recursive: true });
+  const hierarchyPath = join(diagnosticDirectory, "springboard-hierarchy.json");
+  const hierarchyArgs = ["--device", device.deviceId, "hierarchy", "--no-ansi"];
+  try {
+    await run("maestro", hierarchyArgs, {
+      cleanup,
+      env: createMaestroEnvironment(),
+      outputPath: hierarchyPath,
+      stdio: "ignore",
+      timeoutMs: readinessTimeoutMs,
+    });
+  } catch (error) {
+    try {
+      const metadata = error?.commandMetadata ?? {
+        bytes: existsSync(hierarchyPath) ? statSync(hierarchyPath).size : 0,
+        command: ["maestro", ...hierarchyArgs],
+        exitCode: null,
+        signal: null,
+        timedOut: error?.code === "E2E_COMMAND_TIMEOUT",
+      };
+      writeFileSync(
+        join(diagnosticDirectory, "springboard-hierarchy-probe.json"),
+        `${JSON.stringify(metadata, null, 2)}\n`,
+      );
+    } catch (diagnosticError) {
+      log(
+        "ios",
+        `Unable to preserve hierarchy probe metadata: ${
+          diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)
+        }`,
+      );
+    }
+    throw error;
+  }
+  const hierarchy = readFileSync(hierarchyPath, "utf8");
+  assertIosLauncherHierarchy(hierarchy);
+  log("ios", `SpringBoard launcher hierarchy ready on ${device.deviceId}.`);
+}
+
+export async function installAndSeedIos({
+  artifact,
+  cleanup,
+  device,
+  fixtures,
+  lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  root,
+}) {
+  log("ios", "Installing the standalone Release app and seeding photos.");
+  await run("xcrun", ["simctl", "install", device.deviceId, artifact], {
+    cleanup,
+    cwd: root,
+    timeoutMs: lifecycleTimeoutMs,
+  });
   await run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
     cleanup,
     cwd: root,
+    timeoutMs: lifecycleTimeoutMs,
   });
   await waitUntil(
     () => captureIosPhotoResources(device).size >= fixtures.length,
@@ -195,4 +568,8 @@ export function captureIosPhotoResources(device) {
 
 export function iosBuildArtifact(root) {
   return resolve(root, appPath);
+}
+
+export function iosBuildSidecars(root) {
+  return [resolve(root, `${appPath}.dSYM`)];
 }

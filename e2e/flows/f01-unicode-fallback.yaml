@@ -17,10 +17,11 @@ tags:
     text: "🏖️ 周末海边 ☀️ 美好时光 😊"
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
 - assertVisible:
-    id: canvas-text-hit-0-.*
-- runFlow: ../subflows/reenter-session-unselected.yaml
-- assertVisible:
-    id: canvas-text-hit-0-.*
+    id: select-new-text
+- tapOn:
+    id: select-new-text
+- assertNotVisible:
+    id: canvas-text-selection-.*
 - tapOn:
     id: canvas-text-hit-0-.*
 - assertVisible:

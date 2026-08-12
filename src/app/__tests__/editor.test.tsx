@@ -271,6 +271,63 @@ describe("Editor behavior scenarios", () => {
     });
   });
 
+  it("[F02-S01] previews a white background around the photo and undo restores the previous color", async () => {
+    const base = createDocument([
+      { id: importedAssetId("image:background-test"), width: 1200, height: 900 },
+    ]);
+    const initialDocument: PlogDocument = {
+      ...base,
+      canvas: { ratio: "1:1", backgroundColor: "#242321" },
+    };
+    const prepared = createPreparedEditor({ initialDocument });
+    const { view } = await renderPreparedEditor(prepared);
+
+    await press(view, "background-color-ffffff");
+
+    expect(documentToRenderScene(prepared.editing.read().document)).toMatchObject({
+      width: 1000,
+      height: 1000,
+      backgroundColor: "#FFFFFF",
+      images: [{ destination: { x: 0, y: 125, width: 1000, height: 750 } }],
+    });
+    expect(view.getByTestId("background-color-ffffff")).toHaveProp("accessibilityState", {
+      checked: true,
+    });
+
+    await press(view, "editor-undo");
+
+    expect(prepared.editing.read().document.canvas.backgroundColor).toBe("#242321");
+    expect(documentToRenderScene(prepared.editing.read().document).backgroundColor).toBe("#242321");
+  });
+
+  it.each([
+    ["1:1", 1000],
+    ["3:4", 4000 / 3],
+    ["4:5", 1250],
+    ["9:16", 16000 / 9],
+  ] as const)(
+    "[F02-S02] switches a 4:3 photo to the %s canvas without cropping or moving it off-center",
+    async (ratio, expectedHeight) => {
+      const prepared = createPreparedEditor({ sourceImages: [{ width: 1200, height: 900 }] });
+      const { view } = await renderPreparedEditor(prepared);
+
+      await press(view, `canvas-ratio-${ratio}`);
+
+      const scene = documentToRenderScene(prepared.editing.read().document);
+      expect(scene.height).toBeCloseTo(expectedHeight);
+      expect(scene.backgroundColor).toBe("#FFFFFF");
+      expect(scene.images[0]?.destination).toMatchObject({
+        x: 0,
+        width: 1000,
+        height: 750,
+      });
+      expect(scene.images[0]?.destination.y).toBeCloseTo((expectedHeight - 750) / 2);
+      expect(view.getByTestId(`canvas-ratio-${ratio}`)).toHaveProp("accessibilityState", {
+        checked: true,
+      });
+    },
+  );
+
   it("[F02-S03] restores the source image aspect ratio after switching away from 3:4", async () => {
     const prepared = createPreparedEditor({ sourceImages: [{ width: 1200, height: 900 }] });
     const { view } = await renderPreparedEditor(prepared);
@@ -295,6 +352,80 @@ describe("Editor behavior scenarios", () => {
     expect(view.getByTestId("canvas-ratio-original")).toHaveProp("accessibilityState", {
       checked: true,
     });
+  });
+
+  it("[F03-S02] switches photos to equal two-column cells through the Stitch panel", async () => {
+    const prepared = createPreparedEditor({
+      sourceImages: [
+        { width: 1000, height: 1000 },
+        { width: 1000, height: 1000 },
+        { width: 1000, height: 1000 },
+        { width: 1000, height: 1000 },
+      ],
+    });
+    const { view } = await renderPreparedEditor(prepared);
+
+    await press(view, "editor-tool-stitch");
+    await press(view, "stitch-mode-grid");
+
+    expect(prepared.editing.read().document.stitch.mode).toBe("grid");
+    expect(
+      documentToRenderScene(prepared.editing.read().previewDocument).images.map(
+        ({ destination }) => destination,
+      ),
+    ).toEqual([
+      { x: 0, y: 0, width: 500, height: 500 },
+      { x: 500, y: 0, width: 500, height: 500 },
+      { x: 0, y: 500, width: 500, height: 500 },
+      { x: 500, y: 500, width: 500, height: 500 },
+    ]);
+
+    await view.unmount();
+    const oddPrepared = createPreparedEditor({
+      sourceImages: [
+        { width: 1000, height: 1000 },
+        { width: 1000, height: 1000 },
+        { width: 1000, height: 1000 },
+      ],
+    });
+    const { view: oddView } = await renderPreparedEditor(oddPrepared);
+
+    await press(oddView, "editor-tool-stitch");
+    await press(oddView, "stitch-mode-grid");
+
+    expect(oddPrepared.editing.read().document.stitch.mode).toBe("grid");
+    expect(
+      documentToRenderScene(oddPrepared.editing.read().previewDocument).images[2]?.destination,
+    ).toEqual({ x: 0, y: 500, width: 500, height: 500 });
+  });
+
+  it("[F03-S04] moves the third photo first through the Stitch panel and updates the preview", async () => {
+    const prepared = createPreparedEditor({
+      sourceImages: [
+        { width: 1200, height: 900 },
+        { width: 900, height: 1200 },
+        { width: 1000, height: 1000 },
+      ],
+    });
+    const imageIds = prepared.editing.read().document.sourceImages.map(({ id }) => id);
+    const thirdImageId = imageIds[2];
+    if (thirdImageId === undefined) throw new Error("expected three imported photos");
+    const { view } = await renderPreparedEditor(prepared);
+
+    await press(view, "editor-tool-stitch");
+    await press(view, `image-order-earlier-${thirdImageId}`);
+    await press(view, `image-order-earlier-${thirdImageId}`);
+
+    expect(prepared.editing.read().document.stitch.order).toEqual([
+      thirdImageId,
+      imageIds[0],
+      imageIds[1],
+    ]);
+    expect(
+      documentToRenderScene(prepared.editing.read().previewDocument).images.map(
+        ({ imageId }) => imageId,
+      ),
+    ).toEqual([thirdImageId, imageIds[0], imageIds[1]]);
   });
 
   it("[F05-S03] treats continuous spacing previews as one undoable edit commit", async () => {
