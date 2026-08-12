@@ -20,6 +20,7 @@ import {
   captureBoundedCommand,
   acquireE2ePlatformLock,
   collectFailureDiagnostics,
+  publicE2eErrorText,
   createCleanupManager,
   createArtifactRoot,
   finalizeCleanup,
@@ -54,6 +55,24 @@ test("capture bounds an unresponsive diagnostic command", (t) => {
 
   assert.equal(result, null);
   assert.ok(Date.now() - startedAt < 500);
+});
+
+test("public E2E errors redact command arguments, loopback endpoints, and private paths", () => {
+  const output = publicE2eErrorText(
+    new Error(
+      "Command failed (1): /Users/runner/work/plogkit/maestro --env PLOGKIT_EXPORT_ASSERTION_URL=http://127.0.0.1:4312/private-token /var/folders/private/output\n" +
+        "artifact: /home/runner/work/plogkit/private.log\n" +
+        "endpoint: http://127.0.0.1:9876/another-token",
+    ),
+  );
+
+  assert.equal(
+    output,
+    "Command failed (1): maestro <arguments redacted>\n" +
+      "artifact: <PRIVATE_PATH>\n" +
+      "endpoint: <LOOPBACK_ENDPOINT>",
+  );
+  assert.doesNotMatch(output, /Users|127\.0\.0\.1|private-token|var\/folders/);
 });
 
 test(
@@ -436,7 +455,7 @@ esac
       join(directory, "artifacts", "android", "acceptance-failure", "failure-summary.txt"),
       "utf8",
     ),
-    /original error: Command failed \(1\): .*\/adb /,
+    /original error: Command failed \(1\): adb <arguments redacted>/,
   );
 });
 
@@ -781,6 +800,10 @@ printf '%s\n' 'raw simulator log'
   );
   writeFileSync(join(reports, "PlogKit-fresh.ips"), "app crash");
   writeFileSync(join(reports, "MaestroDriver-fresh.crash"), "driver crash");
+  writeFileSync(join(reports, "PUPicker-fresh.ips"), "picker crash");
+  writeFileSync(join(reports, "PhotosUIService-fresh.crash"), "photos ui crash");
+  writeFileSync(join(reports, "photolibraryd-fresh.diag"), "photo library crash");
+  writeFileSync(join(reports, "assetsd-fresh.ips"), "photo assets crash");
   writeFileSync(join(reports, "Unrelated-fresh.diag"), "unrelated");
   writeFileSync(join(reports, "PlogKit-old.ips"), "old app crash");
   utimesSync(join(reports, "PlogKit-old.ips"), new Date(0), new Date(0));
@@ -804,6 +827,16 @@ printf '%s\n' 'raw simulator log'
   assert.deepEqual(result, { complete: true });
   assert.equal(readFileSync(join(artifacts, "PlogKit-fresh.ips"), "utf8"), "app crash");
   assert.equal(readFileSync(join(artifacts, "MaestroDriver-fresh.crash"), "utf8"), "driver crash");
+  assert.equal(readFileSync(join(artifacts, "PUPicker-fresh.ips"), "utf8"), "picker crash");
+  assert.equal(
+    readFileSync(join(artifacts, "PhotosUIService-fresh.crash"), "utf8"),
+    "photos ui crash",
+  );
+  assert.equal(
+    readFileSync(join(artifacts, "photolibraryd-fresh.diag"), "utf8"),
+    "photo library crash",
+  );
+  assert.equal(readFileSync(join(artifacts, "assetsd-fresh.ips"), "utf8"), "photo assets crash");
   assert.equal(existsSync(join(artifacts, "Unrelated-fresh.diag")), false);
   assert.equal(existsSync(join(artifacts, "PlogKit-old.ips")), false);
   assert.match(readFileSync(join(artifacts, "simulator-system.log"), "utf8"), /raw simulator/);
@@ -823,8 +856,6 @@ test("iOS diagnostics capture bounded device and XCTest readiness probes", async
 printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
 if [ "$1 $2 $3" = "simctl list devices" ]; then
   printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
-elif [ "$1 $2 $3" = "simctl spawn simulator-test" ] && [ "$4" = "/usr/bin/true" ]; then
-  exit 0
 elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
   printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running'
 elif [ "$1 $2 $3 $4" = "simctl io simulator-test screenshot" ]; then
@@ -859,7 +890,6 @@ fi
 
   assert.deepEqual(result, { complete: true });
   assert.match(readFileSync(join(artifacts, "host-simulator-devices.json"), "utf8"), /Booted/);
-  assert.equal(statSync(join(artifacts, "device-spawn.txt")).size, 0);
   assert.match(readFileSync(join(artifacts, "springboard-service.txt"), "utf8"), /pid = 4242/);
   assert.equal(readFileSync(join(artifacts, "springboard-screenshot.png"), "utf8"), "PNG-EVIDENCE");
   assert.match(
@@ -867,19 +897,6 @@ fi
     /Maestro iOS driver waiting for XCTest/,
   );
 
-  const spawnMetadata = JSON.parse(
-    readFileSync(join(artifacts, "device-spawn.probe.json"), "utf8"),
-  );
-  assert.deepEqual(spawnMetadata, {
-    bytes: 0,
-    command: ["xcrun", "simctl", "spawn", "simulator-test", "/usr/bin/true"],
-    error: null,
-    exitCode: 0,
-    signal: null,
-    terminationError: null,
-    timedOut: false,
-    truncated: false,
-  });
   const screenshotMetadata = JSON.parse(
     readFileSync(join(artifacts, "springboard-screenshot.probe.json"), "utf8"),
   );
@@ -893,6 +910,8 @@ fi
   assert.match(commands, /^simctl list devices -j$/m);
   assert.match(commands, /launchctl print system\/com\.apple\.SpringBoard/);
   assert.match(commands, /log show .*process CONTAINS\[c\] "maestro"/);
+  assert.match(commands, /log show .*process == "PhotosUIService"/);
+  assert.match(commands, /log show .*subsystem CONTAINS\[c\] "PhotoKit"/);
 });
 
 test("iOS readiness probe failures never replace the primary acceptance error", async (t) => {

@@ -3,7 +3,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
-import { capture, captureBoundedCommand, log, run, waitUntil } from "./runtime.mjs";
+import {
+  capture,
+  captureBoundedCommand,
+  log,
+  publicE2eErrorText,
+  run,
+  waitUntil,
+} from "./runtime.mjs";
 import {
   createMaestroEnvironment,
   createStandaloneBuildEnvironment,
@@ -26,6 +33,8 @@ const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
 const iosReadinessTimeoutMs = 120000;
+const iosGuestHealthTimeoutMs = 30000;
+const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
 function boundedEvidence(value, maxBytes) {
@@ -114,15 +123,15 @@ export async function validateIosSimulatorEnvironment({
   log("ios", "iOS Simulator environment validation passed.");
 }
 
-function throwIosHostLifecycleFailure(artifactRoot, command, error) {
+function throwIosHostLifecycleFailure(artifactRoot, probe, error) {
   if (!artifactRoot) throw error;
-  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const details = publicE2eErrorText(error);
   const evidencePath = join(artifactRoot, "ios-host-lifecycle.log");
   try {
     writeFileSync(
       evidencePath,
       boundedEvidence(
-        `=== iOS host lifecycle probe failure ===\ncommand: ${command}\n${details}\n`,
+        `=== iOS host lifecycle probe failure ===\nprobe: ${probe}\n${details}\n`,
         iosHostLifecycleEvidenceMaxBytes,
       ),
     );
@@ -162,7 +171,7 @@ async function requiredRuntime({ artifactRoot, cleanup, timeoutMs }) {
       (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
     );
   } catch (error) {
-    throwIosHostLifecycleFailure(artifactRoot, command, error);
+    throwIosHostLifecycleFailure(artifactRoot, "runtime-discovery", error);
   }
 }
 
@@ -209,10 +218,7 @@ function createEphemeralIosDevice() {
 }
 
 function cleanupErrorText(error) {
-  return boundedEvidence(
-    error instanceof Error ? error.message : String(error),
-    iosCleanupStageErrorMaxBytes,
-  ).toString("utf8");
+  return boundedEvidence(publicE2eErrorText(error), iosCleanupStageErrorMaxBytes).toString("utf8");
 }
 
 function cleanupStage(error) {
@@ -282,7 +288,12 @@ async function deleteOwnedIosDevice(deviceId, artifactRoot, verificationTimeoutM
           2,
         )}\n`,
       );
-      log("ios", `Cleanup summary: ${summaryPath}`);
+      log(
+        "ios",
+        process.env.CI
+          ? "Cleanup summary retained for workflow upload."
+          : `Cleanup summary: ${summaryPath}`,
+      );
     } catch (error) {
       summaryError = error;
       log("ios", `Unable to preserve iOS cleanup summary: ${cleanupErrorText(error)}`);
@@ -420,9 +431,9 @@ export async function prepareIosDevice({
       writeFileSync(
         prepareEvidencePath,
         boundedEvidence(
-          `=== prepare failure ===\n${
-            error instanceof Error ? (error.stack ?? error.message) : String(error)
-          }\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
+          `=== prepare failure ===\n${publicE2eErrorText(
+            error,
+          )}\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
           iosPrepareEvidenceMaxBytes,
         ),
       );
@@ -440,6 +451,86 @@ export async function prepareIosDevice({
     }
     throw error;
   }
+}
+
+export async function assertIosGuestHealthy({
+  artifactRoot,
+  cleanup,
+  device,
+  timeoutMs = iosGuestHealthTimeoutMs,
+}) {
+  const startedAtMs = Date.now();
+  const remainingTimeout = () => Math.max(1, timeoutMs - (Date.now() - startedAtMs));
+  const diagnosticDirectory = join(artifactRoot, "ios", "guest-health");
+  let evidenceAvailable = true;
+  try {
+    mkdirSync(diagnosticDirectory, { recursive: true });
+  } catch (error) {
+    evidenceAvailable = false;
+    log(
+      "ios",
+      `Guest-health evidence unavailable: ${
+        error instanceof Error
+          ? `${error.name}${error.code ? ` (${error.code})` : ""}`
+          : "NonErrorFailure"
+      }`,
+    );
+  }
+  const preserveEvidence = (name, contents) => {
+    if (!evidenceAvailable) return;
+    try {
+      writeFileSync(join(diagnosticDirectory, name), contents);
+    } catch (error) {
+      log(
+        "ios",
+        `Guest-health evidence write failed: ${
+          error instanceof Error
+            ? `${error.name}${error.code ? ` (${error.code})` : ""}`
+            : "NonErrorFailure"
+        }`,
+      );
+    }
+  };
+
+  const args = [
+    "simctl",
+    "spawn",
+    device.deviceId,
+    "launchctl",
+    "print",
+    "system/com.apple.SpringBoard",
+  ];
+  let output;
+  const probeStartedAtMs = Date.now();
+  try {
+    output = await captureBoundedCommand("xcrun", args, {
+      cleanup,
+      maxBytes: iosGuestHealthMaxBytes,
+      timeoutMs: remainingTimeout(),
+    });
+  } catch (error) {
+    preserveEvidence(
+      "springboard-service.probe.json",
+      `${JSON.stringify(
+        {
+          durationMs: Date.now() - probeStartedAtMs,
+          error: {
+            code: error?.code ?? null,
+            name: error instanceof Error ? error.name : "NonErrorFailure",
+          },
+          status: "failed",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    throw error;
+  }
+  preserveEvidence("springboard-service.txt", `${output}\n`);
+  if (!/\bstate\s*=\s*running\b/i.test(output) || !/\bpid\s*=\s*[1-9]\d*\b/i.test(output)) {
+    throw new Error("iOS guest health did not expose a running SpringBoard service with a PID.");
+  }
+  log("ios", `CoreSimulator guest health ready on ${device.deviceId}.`);
 }
 
 const IOS_SYSTEM_UI_FAULT_PATTERN =
@@ -476,8 +567,9 @@ export async function assertIosDeviceReady({
   } catch (error) {
     try {
       const metadata = error?.commandMetadata ?? {
+        argumentCount: hierarchyArgs.length,
         bytes: existsSync(hierarchyPath) ? statSync(hierarchyPath).size : 0,
-        command: ["maestro", ...hierarchyArgs],
+        executable: "maestro",
         exitCode: null,
         signal: null,
         timedOut: error?.code === "E2E_COMMAND_TIMEOUT",

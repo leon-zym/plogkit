@@ -109,3 +109,16 @@ test("the export flow asserts the system photo delta after each successful expor
   assert.ok(assertionCalls[0].index < successOffsets[1]);
   assert.ok(successOffsets[1] < assertionCalls[1].index);
 });
+
+test("the iOS picker waits for two interactive photos before selecting them", () => {
+  const source = readFileSync(join(root, "e2e/subflows/select-two-photos-ios.yaml"), "utf8");
+  const gridWait = source.indexOf("visible:\n      id: PXGGridLayout-Info");
+  const firstTap = source.indexOf("id: PXGGridLayout-Info\n    index: 0");
+
+  assert.ok(gridWait >= 0, "the picker must wait for the second fixture cell");
+  assert.ok(gridWait < firstTap, "the loaded grid must precede photo selection");
+  assert.match(source, /visible:\n {6}id: PXGGridLayout-Info\n {6}index: 1\n {4}timeout: 90000/);
+  assert.match(source, /- assertVisible: \^Done\$\n- tapOn: \^Done\$$/m);
+  assert.doesNotMatch(source, /extendedWaitUntil:\n\s+visible: Done/);
+  assert.doesNotMatch(source, /\bsleep\b|point:\s|\d+%,\s*\d+%/);
+});

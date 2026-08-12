@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
@@ -315,8 +315,9 @@ export function run(
 ) {
   return new Promise((resolvePromise, reject) => {
     const commandMetadata = {
+      argumentCount: args.length,
       bytes: 0,
-      command: [command, ...args],
+      executable: basename(command),
       exitCode: null,
       signal: null,
       timedOut: false,
@@ -509,7 +510,7 @@ export function createCleanupManager() {
           try {
             await task();
           } catch (error) {
-            console.error(`[e2e:cleanup] ${String(error)}`);
+            console.error(`[e2e:cleanup] ${publicE2eErrorText(error)}`);
             errors.push(error);
           }
         }
@@ -640,7 +641,7 @@ export function installSignalHandlers(cleanup) {
     handlingSignal = true;
     void cleanup
       .run()
-      .catch((error) => console.error(`[e2e:cleanup] ${String(error)}`))
+      .catch((error) => console.error(`[e2e:cleanup] ${publicE2eErrorText(error)}`))
       .finally(() => process.exit(exitCode));
   };
   process.once("SIGINT", () => handle(130));
@@ -703,7 +704,9 @@ async function runMaestro({
   mkdirSync(outputDirectory, { recursive: true });
   log(
     device.platform,
-    `Running Maestro flows on ${device.deviceId}; artifacts: ${outputDirectory}`,
+    process.env.CI
+      ? `Running Maestro flows on ${device.deviceId}; failure output is retained for workflow upload.`
+      : `Running Maestro flows on ${device.deviceId}; artifacts: ${outputDirectory}`,
   );
   if (device.platform === "android") {
     capture(device.adbPath, ["-s", device.deviceId, "logcat", "-b", "all", "-c"], {
@@ -760,7 +763,7 @@ const IOS_READINESS_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const IOS_READINESS_PROBE_TIMEOUT_MS = 2500;
 const IOS_REPORT_EXTENSION = /\.(ips|crash|diag)$/i;
 const IOS_RELEVANT_REPORT =
-  /(PlogKit|Maestro|XCTest|XCTRunner|SpringBoard|backboardd|CoreSimulator)/i;
+  /(PlogKit|Maestro|XCTest|XCTRunner|SpringBoard|backboardd|CoreSimulator|PUPicker|PhotosUIService|photolibraryd|assetsd)/i;
 const ANDROID_REPORT_DIRECTORIES = [
   { artifactName: "tombstones", remotePath: "/data/tombstones" },
   { artifactName: "anr", remotePath: "/data/anr" },
@@ -870,17 +873,18 @@ async function captureEvidence(path, command, args, state, maximumBytes, maximum
 
 function commandProbeMetadata(command, args, result, details = {}) {
   return {
+    argumentCount: args.length,
     bytes: result?.sourceBytes ?? 0,
-    command: [command, ...args],
+    executable: basename(command),
     error:
       result?.error instanceof Error
-        ? { code: result.error.code ?? null, message: result.error.message }
+        ? { code: result.error.code ?? null, name: result.error.name }
         : null,
     exitCode: result?.exitCode ?? null,
     signal: result?.exitSignal ?? null,
     terminationError:
       result?.terminationError instanceof Error
-        ? { code: result.terminationError.code ?? null, message: result.terminationError.message }
+        ? { code: result.terminationError.code ?? null, name: result.terminationError.name }
         : null,
     timedOut: result?.timedOut ?? false,
     truncated: result?.truncated ?? false,
@@ -948,7 +952,6 @@ async function captureIosScreenshot(diagnosticDirectory, device, state) {
   }
   storeProbeMetadata(metadataPath, "xcrun", args, result, state, {
     bytes,
-    command: ["xcrun", "simctl", "io", device.deviceId, "screenshot", "springboard-screenshot.png"],
     commandOutputBytes: result?.sourceBytes ?? 0,
     retained,
   });
@@ -1144,12 +1147,6 @@ async function collectIosDiagnostics(
       outputPath: join(diagnosticDirectory, "host-simulator-devices.json"),
     },
     {
-      args: ["simctl", "spawn", device.deviceId, "/usr/bin/true"],
-      maximumBytes: 64 * 1024,
-      metadataPath: join(diagnosticDirectory, "device-spawn.probe.json"),
-      outputPath: join(diagnosticDirectory, "device-spawn.txt"),
-    },
-    {
       args: [
         "simctl",
         "spawn",
@@ -1182,7 +1179,7 @@ async function collectIosDiagnostics(
     "--last",
     `${lookbackSeconds}s`,
     "--predicate",
-    'process == "PlogKit" OR process == "SpringBoard" OR process == "backboardd" OR process == "XCTRunner" OR process CONTAINS[c] "maestro" OR subsystem CONTAINS[c] "XCTest" OR eventMessage CONTAINS[c] "crash" OR eventMessage CONTAINS[c] "jetsam"',
+    'process == "PlogKit" OR process == "SpringBoard" OR process == "backboardd" OR process == "XCTRunner" OR process == "PUPicker" OR process == "PhotosUIService" OR process == "photolibraryd" OR process == "assetsd" OR process CONTAINS[c] "maestro" OR subsystem CONTAINS[c] "XCTest" OR subsystem CONTAINS[c] "PhotoKit" OR subsystem CONTAINS[c] "PhotosUI" OR eventMessage CONTAINS[c] "crash" OR eventMessage CONTAINS[c] "jetsam"',
   ];
   await captureProbeEvidence({
     args: logArgs,
@@ -1202,7 +1199,7 @@ async function collectIosDiagnostics(
 }
 
 function writeFailureSummary(diagnosticDirectory, error, state) {
-  const originalError = error instanceof Error ? error.message : String(error);
+  const originalError = publicE2eErrorText(error);
   const prefix = `diagnostics: ${state.complete ? "complete" : "incomplete"}\noriginal error: `;
   const availableErrorBytes = DIAGNOSTIC_SUMMARY_BYTES - Buffer.byteLength(prefix) - 1;
   const errorBuffer = createBoundedCapture(availableErrorBytes);
@@ -1221,6 +1218,23 @@ function writeFailureSummary(diagnosticDirectory, error, state) {
     state.complete = false;
     return false;
   }
+}
+
+export function publicE2eErrorText(error) {
+  const source = error instanceof Error ? error.message : String(error);
+  return source
+    .split("\n")
+    .map((line) =>
+      line.replace(
+        /^(Command (?:failed \([^)]*\)|timed out after \d+ms|could not be executed \([^)]*\)|output exceeded \d+ bytes):)\s*(\S+).*$/,
+        (_match, prefix, command) => `${prefix} ${basename(command)} <arguments redacted>`,
+      ),
+    )
+    .join("\n")
+    .replace(/https?:\/\/127\.0\.0\.1:\d+(?:\/[^\s"']*)?/g, "<LOOPBACK_ENDPOINT>")
+    .replace(/\/Users\/[^\s"']+/g, "<PRIVATE_PATH>")
+    .replace(/\/home\/runner\/[^\s"']+/g, "<PRIVATE_PATH>")
+    .replace(/\/var\/folders\/[^\s"']+/g, "<PRIVATE_PATH>");
 }
 
 export async function collectFailureDiagnostics({

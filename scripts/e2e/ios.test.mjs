@@ -6,6 +6,7 @@ import test from "node:test";
 import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import {
   assertIosDeviceReady,
+  assertIosGuestHealthy,
   assertIosLauncherHierarchy,
   installAndSeedIos,
   isIosEnglishLocale,
@@ -106,12 +107,103 @@ test("iOS readiness records a zero-byte hierarchy timeout as command metadata", 
     readFileSync(join(diagnostics, "springboard-hierarchy-probe.json"), "utf8"),
   );
   assert.deepEqual(metadata, {
+    argumentCount: 4,
     bytes: 0,
-    command: ["maestro", "--device", "simulator-timeout", "hierarchy", "--no-ansi"],
+    executable: "maestro",
     exitCode: null,
     signal: "SIGTERM",
     timedOut: true,
   });
+});
+
+test("iOS guest health proves guest execution and running SpringBoard before Maestro", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-guest-health-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  const commandLog = join(directory, "xcrun.log");
+  const deviceId = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC";
+  mkdirSync(binaries);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
+case "$*" in
+  "simctl spawn ${deviceId} launchctl print system/com.apple.SpringBoard")
+    printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running' ;;
+  *) exit 2 ;;
+esac
+`,
+  );
+
+  await withEnvironment(
+    { FAKE_XCRUN_LOG: commandLog, PATH: `${binaries}:${process.env.PATH}` },
+    () =>
+      assertIosGuestHealthy({
+        artifactRoot,
+        cleanup: { add() {} },
+        device: { deviceId, platform: "ios" },
+      }),
+  );
+
+  assert.equal(
+    readFileSync(commandLog, "utf8").trim(),
+    `simctl spawn ${deviceId} launchctl print system/com.apple.SpringBoard`,
+  );
+  assert.match(
+    readFileSync(join(artifactRoot, "ios", "guest-health", "springboard-service.txt"), "utf8"),
+    /state = running/,
+  );
+});
+
+test("iOS guest health fails closed when SpringBoard is not running", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-guest-unhealthy-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  mkdirSync(binaries);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    "#!/bin/sh\nprintf '%s\\n' 'state = waiting'\n",
+  );
+
+  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, () =>
+    assert.rejects(
+      assertIosGuestHealthy({
+        artifactRoot,
+        cleanup: { add() {} },
+        device: {
+          deviceId: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD",
+          platform: "ios",
+        },
+      }),
+      /running SpringBoard service with a PID/,
+    ),
+  );
+  assert.match(
+    readFileSync(join(artifactRoot, "ios", "guest-health", "springboard-service.txt"), "utf8"),
+    /state = waiting/,
+  );
+});
+
+test("guest-health evidence failures never change a healthy readiness result", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-guest-evidence-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifact-root-is-a-file");
+  mkdirSync(binaries);
+  writeFileSync(artifactRoot, "not a directory");
+  writeExecutable(
+    join(binaries, "xcrun"),
+    "#!/bin/sh\ncase \"$*\" in *\" launchctl \"*) printf '%s\\n' 'pid = 4242' 'state = running' ;; esac\n",
+  );
+
+  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, () =>
+    assert.doesNotReject(
+      assertIosGuestHealthy({
+        artifactRoot,
+        cleanup: { add() {} },
+        device: { deviceId: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE", platform: "ios" },
+      }),
+    ),
+  );
 });
 
 test("each iOS invocation creates, gates, and deletes only its own simulator", async (t) => {
@@ -335,7 +427,11 @@ esac
     },
     async () => {
       await assert.rejects(
-        prepareIosDevice({ artifactRoot, cleanup: { add() {} }, lifecycleTimeoutMs: 25 }),
+        prepareIosDevice({
+          artifactRoot,
+          cleanup: { add() {} },
+          lifecycleTimeoutMs: 25,
+        }),
         (error) => error.code === "E2E_COMMAND_TIMEOUT",
       );
     },
@@ -575,7 +671,7 @@ test("iOS preserves a host parse error when writing its evidence also fails", as
   );
 });
 
-test("iOS bounds a hung host lifecycle probe with command and raw evidence", async (t) => {
+test("iOS bounds a hung host lifecycle probe without publishing its arguments", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-hang-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
@@ -611,7 +707,9 @@ test("iOS bounds a hung host lifecycle probe with command and raw evidence", asy
   assert.equal(existsSync(evidencePath), true);
   assert.ok(statSync(evidencePath).size <= 1024 * 1024);
   const evidence = readFileSync(evidencePath, "utf8");
-  assert.match(evidence, /xcrun simctl list runtimes -j/);
+  assert.match(evidence, /probe: runtime-discovery/);
+  assert.match(evidence, /xcrun <arguments redacted>/);
+  assert.doesNotMatch(evidence, /simctl list runtimes -j/);
   assert.match(evidence, /core-simulator-cold-init-started/);
 });
 

@@ -75,7 +75,7 @@ test("each mobile job has one complete E2E step and diagnostic-upload headroom",
   assert.equal((workflow.match(/^\s+timeout-minutes: 135$/gm) ?? []).length, 2);
   assert.equal((workflow.match(/run: pnpm e2e:ios/g) ?? []).length, 1);
   assert.equal((workflow.match(/run: pnpm e2e:android/g) ?? []).length, 1);
-  assert.equal((workflow.match(/path: \$\{\{ runner\.temp \}\}\/plogkit-e2e/g) ?? []).length, 2);
+  assert.equal((workflow.match(/path: \$\{\{ runner\.temp \}\}\/plogkit-e2e$/gm) ?? []).length, 2);
   assert.doesNotMatch(
     workflow,
     /PlogKit\.app\.dSYM|app-release\.apk|native-debug-symbols|generated\/sourcemaps/,
@@ -86,5 +86,6 @@ test("manual dispatch selects only a platform and optional business flow", () =>
   const workflow = readFileSync(workflowPath, "utf8");
   assert.match(workflow, /platform:[\s\S]*options:[\s\S]*- all[\s\S]*- ios[\s\S]*- android/);
   assert.match(workflow, /flow:[\s\S]*required: false[\s\S]*type: string/);
+  assert.doesNotMatch(workflow, /ios_runner|macos-26-xlarge/);
   assert.doesNotMatch(workflow, /soak|iterations|--phase/);
 });

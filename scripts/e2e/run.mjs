@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +13,7 @@ import {
   validateAndroidEnvironment,
 } from "./android.mjs";
 import {
+  assertIosGuestHealthy,
   assertIosDeviceReady,
   buildIos,
   captureIosPhotoResources,
@@ -29,6 +28,10 @@ import {
 import { createStandaloneBuildEnvironment, validateHostEnvironment } from "./environment.mjs";
 import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
 import {
+  assessPhotoResourceDelta,
+  startExportAssertionBridge,
+} from "./export-assertion.mjs";
+import {
   createArtifactRoot,
   createCleanupManager,
   acquireE2ePlatformLock,
@@ -36,6 +39,7 @@ import {
   finalizeE2eRun,
   installSignalHandlers,
   log,
+  publicE2eErrorText,
   run,
   runMaestroSuite,
   validateMaestroVersion,
@@ -176,87 +180,22 @@ function capturePhotoResources(device) {
     : captureAndroidPhotoResources(device);
 }
 
-function countNewPhotoResources(before, after) {
-  return [...after].filter((resource) => !before.has(resource)).length;
-}
-
-export function assessPhotoResourceDelta(before, after, expected) {
-  const observed = countNewPhotoResources(before, after);
-  if (observed > expected) {
-    throw new Error(
-      `Expected exactly ${expected} new system photo resources, but observed ${observed}.`,
-    );
+export async function closeVerificationBridge(close, operationError = null) {
+  try {
+    await close();
+  } catch (closeError) {
+    if (operationError) {
+      const aggregate = new AggregateError(
+        [operationError, closeError],
+        operationError instanceof Error ? operationError.message : String(operationError),
+        { cause: operationError },
+      );
+      if (operationError?.code) aggregate.code = operationError.code;
+      throw aggregate;
+    }
+    throw closeError;
   }
-  return observed === expected ? after : null;
-}
-
-export function createPerExportPhotoResourceAssessment(before) {
-  let expectedExport = 1;
-  return (exportIndex, after) => {
-    if (exportIndex !== expectedExport) {
-      throw new Error(
-        `Expected photo assertion for export ${expectedExport}, but received export ${exportIndex}.`,
-      );
-    }
-    const result = assessPhotoResourceDelta(before, after, exportIndex);
-    if (result !== null) expectedExport += 1;
-    return result;
-  };
-}
-
-export async function startExportPhotoAssertionServer(
-  device,
-  before,
-  { captureResources = capturePhotoResources, timeoutMs = 10000 } = {},
-) {
-  const assess = createPerExportPhotoResourceAssessment(before);
-  const token = randomUUID();
-  const server = createServer(async (request, response) => {
-    const match = request.url?.match(new RegExp(`^/${token}/(\\d+)$`));
-    if (request.method !== "POST" || !match) {
-      response.writeHead(404).end("Not found.");
-      return;
-    }
-    const exportIndex = Number.parseInt(match[1], 10);
-    try {
-      const after = await waitUntil(
-        () => assess(exportIndex, captureResources(device)),
-        timeoutMs,
-        `${device.platform} export ${exportIndex} to add exactly 1 system photo resource`,
-        500,
-      );
-      log(
-        device.platform,
-        `Export ${exportIndex} added exactly 1 new system photo identity ` +
-          `(${before.size} before, ${after.size} after).`,
-      );
-      response.writeHead(204).end();
-    } catch (error) {
-      response
-        .writeHead(409, { "Content-Type": "text/plain; charset=utf-8" })
-        .end(error instanceof Error ? error.message : String(error));
-    }
-  });
-  await new Promise((resolvePromise, rejectPromise) => {
-    const reject = (error) => rejectPromise(error);
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolvePromise();
-    });
-  });
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    server.close();
-    throw new Error("Unable to determine the export photo assertion server address.");
-  }
-  return {
-    close: () =>
-      new Promise((resolvePromise, rejectPromise) => {
-        server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
-      }),
-    url: `http://127.0.0.1:${address.port}/${token}`,
-  };
+  if (operationError) throw operationError;
 }
 
 async function runSuiteWithExportAssertion(options) {
@@ -264,24 +203,33 @@ async function runSuiteWithExportAssertion(options) {
   const assertsExport = flow === null || flow === "f04-export";
   const expectedNewResources = assertsExport ? 2 : 0;
   const before = assertsExport ? capturePhotoResources(device) : null;
+  const bridge = assertsExport
+    ? await startExportAssertionBridge({
+        beforePhotoResources: before,
+        capturePhotoResources,
+        device,
+      })
+    : null;
 
-  if (before === null) {
-    await runMaestroSuite(options);
-    return;
-  }
-
-  const assertionServer = await startExportPhotoAssertionServer(device, before);
+  let suiteError = null;
   try {
     await runMaestroSuite({
       ...options,
       flowEnvironment: {
         ...options.flowEnvironment,
-        PLOGKIT_EXPORT_ASSERTION_URL: assertionServer.url,
+        ...bridge?.environment,
       },
     });
-  } finally {
-    await assertionServer.close();
+  } catch (error) {
+    suiteError = error;
   }
+  if (bridge) {
+    await closeVerificationBridge(bridge.close, suiteError);
+  } else {
+    if (suiteError) throw suiteError;
+  }
+  if (!assertsExport) return;
+
   const after = await waitUntil(
     () => {
       const resources = capturePhotoResources(device);
@@ -291,10 +239,9 @@ async function runSuiteWithExportAssertion(options) {
     `${device.platform} system photo library to contain ${expectedNewResources} newly exported resources`,
     500,
   );
-  const observedNewResources = countNewPhotoResources(before, after);
   log(
     device.platform,
-    `System photo resources gained ${observedNewResources} new identities (${before.size} before, ${after.size} after).`,
+    `System photo resources gained ${expectedNewResources} new identities (${before.size} before, ${after.size} after).`,
   );
 }
 
@@ -312,6 +259,9 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, snapshot 
         device,
         sinceMs: startedAtMs,
         operation: async () => {
+          if (platform === "ios") {
+            await assertIosGuestHealthy({ artifactRoot, cleanup: platformCleanup, device });
+          }
           await installAndSeed({
             artifact: snapshot.artifacts[device.platform],
             cleanup: platformCleanup,
@@ -352,7 +302,12 @@ async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment) {
     repositorySha256,
     root,
   });
-  log("setup", `Captured immutable Release run inputs: ${snapshot.provenance}`);
+  log(
+    "setup",
+    process.env.CI
+      ? "Captured immutable Release run inputs."
+      : `Captured immutable Release run inputs: ${snapshot.provenance}`,
+  );
   await runAcceptance(options.platforms, {
     artifactRoot,
     cleanup,
@@ -365,7 +320,6 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   const cleanup = createCleanupManager();
   const signalState = installSignalHandlers(cleanup);
-
   let artifactRoot = null;
   let operationError = null;
   try {
@@ -373,7 +327,12 @@ async function main() {
     const hostEnvironment = validateBeforePlatformLock(options);
     artifactRoot = createArtifactRoot();
     await validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup });
-    log("setup", `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`);
+    log(
+      "setup",
+      process.env.CI
+        ? `Running ${options.target} Release E2E.`
+        : `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`,
+    );
     await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
   } catch (error) {
     operationError = error;
@@ -388,13 +347,22 @@ async function main() {
         operationError,
       });
       if (artifactsRemoved) {
-        log("cleanup", `Removed temporary artifacts after successful E2E: ${artifactRoot}`);
+        log(
+          "cleanup",
+          process.env.CI
+            ? "Removed temporary artifacts after successful E2E."
+            : `Removed temporary artifacts after successful E2E: ${artifactRoot}`,
+        );
       }
     }
   } catch (error) {
-    console.error(`[e2e:error] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[e2e:error] ${publicE2eErrorText(error)}`);
     if (artifactRoot !== null && existsSync(artifactRoot)) {
-      console.error(`[e2e:error] Artifacts retained at ${artifactRoot}`);
+      console.error(
+        process.env.CI
+          ? "[e2e:error] Failure artifacts retained for workflow upload."
+          : `[e2e:error] Artifacts retained at ${artifactRoot}`,
+      );
     }
     process.exitCode = 1;
   }

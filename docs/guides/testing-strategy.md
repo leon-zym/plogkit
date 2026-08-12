@@ -51,7 +51,7 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalon
 
 ### 设备 readiness 与 flow 隔离
 
-项目 runner 必须拥有唯一临时模拟设备从创建到删除的完整生命周期；CI Action 不得先启动设备或绕过项目 readiness。安装 App 和注入 fixture 后，runner 证明真实 Home launcher、前台窗口和 UI hierarchy 可响应且不存在系统故障；boot flag 或固定等待不能单独视为 ready。失败立即终止，不通过重启、重复输入或关闭错误界面恢复。
+项目 runner 必须拥有唯一临时模拟设备从创建到删除的完整生命周期；CI Action 不得先启动设备或绕过项目 readiness。最小 boot 边界之后只允许执行有界、无恢复的系统健康门禁；安装 App 和注入 fixture 后，runner 仍须证明真实 Home launcher、前台窗口和 UI hierarchy 可响应且不存在系统故障。boot flag、健康门禁或固定等待都不能单独替代 UI readiness。失败立即终止，不通过重启、重复输入或关闭错误界面恢复。
 
 每个平台只构建并冻结一份 Release 产物，随后在一个临时设备和一个 Maestro workspace 中串行执行 `e2e/config.yaml` 配置的顶层 flows。每条 flow 按 Maestro 的平台语义清空 App 数据，但不重新构建或更换受测产物；同一 flow 内可以保留数据验证生命周期。系统相册等设备级状态跨 flow 保留，因此 fixture 只注入一次，会改变系统状态的 Export 固定最后执行。任一 flow 失败都立即终止；timeout 只负责有界结束失控进程，不承担失败恢复。
 
