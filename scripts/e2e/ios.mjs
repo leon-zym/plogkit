@@ -25,6 +25,8 @@ const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
 const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
+const iosReadinessTimeoutMs = 120000;
+const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
 function boundedEvidence(value, maxBytes) {
   const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -206,27 +208,97 @@ function createEphemeralIosDevice() {
   return { name, udid };
 }
 
-async function deleteOwnedIosDevice(deviceId) {
+function cleanupErrorText(error) {
+  return boundedEvidence(
+    error instanceof Error ? error.message : String(error),
+    iosCleanupStageErrorMaxBytes,
+  ).toString("utf8");
+}
+
+function cleanupStage(error) {
+  return error
+    ? {
+        error: cleanupErrorText(error),
+        status: "failed",
+      }
+    : { status: "succeeded" };
+}
+
+async function deleteOwnedIosDevice(deviceId, artifactRoot, verificationTimeoutMs = 30000) {
   let shutdownError = null;
   let deleteError = null;
+  let verificationError = null;
   try {
     await shutdownIosDevice(deviceId);
+    log("ios", `Cleanup shutdown completed for owned simulator ${deviceId}.`);
   } catch (error) {
     shutdownError = error;
+    log(
+      "ios",
+      `Cleanup shutdown did not complete for owned simulator ${deviceId}: ${cleanupErrorText(error)}`,
+    );
   }
   try {
     capture("xcrun", ["simctl", "delete", deviceId], { timeoutMs: 30000 });
+    log("ios", `Cleanup delete completed for owned simulator ${deviceId}.`);
   } catch (error) {
     deleteError = error;
+    log("ios", `Cleanup delete failed for owned simulator ${deviceId}: ${cleanupErrorText(error)}`);
   }
-  if (!deleteError) return;
-  if (shutdownError && deleteError) {
-    throw new AggregateError(
-      [shutdownError, deleteError],
-      `Unable to shut down or delete owned iOS Simulator ${deviceId}.`,
+
+  try {
+    await waitUntil(
+      () => simulatorState(deviceId) === null,
+      verificationTimeoutMs,
+      `owned iOS Simulator ${deviceId} to disappear after deletion`,
+      500,
+    );
+    log("ios", `Cleanup verified owned simulator ${deviceId} is absent.`);
+  } catch (error) {
+    verificationError = error;
+    log(
+      "ios",
+      `Cleanup could not verify owned simulator ${deviceId} is absent: ${cleanupErrorText(error)}`,
     );
   }
-  throw deleteError;
+
+  let summaryError = null;
+  if (artifactRoot) {
+    const summaryPath = join(artifactRoot, "ios", "device-cleanup.json");
+    try {
+      mkdirSync(join(artifactRoot, "ios"), { recursive: true });
+      writeFileSync(
+        summaryPath,
+        `${JSON.stringify(
+          {
+            deletion: cleanupStage(deleteError),
+            deviceId,
+            shutdown: cleanupStage(shutdownError),
+            verification: verificationError
+              ? { ...cleanupStage(verificationError), udidAbsent: false }
+              : { status: "succeeded", udidAbsent: true },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      log("ios", `Cleanup summary: ${summaryPath}`);
+    } catch (error) {
+      summaryError = error;
+      log("ios", `Unable to preserve iOS cleanup summary: ${cleanupErrorText(error)}`);
+    }
+  }
+
+  const fatalErrors = [deleteError, verificationError, summaryError].filter(Boolean);
+  if (fatalErrors.length === 0) return;
+  const primaryError = fatalErrors[0];
+  const errors = [primaryError, ...(shutdownError ? [shutdownError] : []), ...fatalErrors.slice(1)];
+  if (errors.length === 1) throw errors[0];
+  throw new AggregateError(
+    errors,
+    `Unable to completely delete and verify owned iOS Simulator ${deviceId}.`,
+    { cause: primaryError },
+  );
 }
 
 export function isIosEnglishLocale({ languages, locale }) {
@@ -315,6 +387,7 @@ export function assertIosStandaloneArtifact(root) {
 export async function prepareIosDevice({
   artifactRoot,
   cleanup,
+  deletionVerificationTimeoutMs = 30000,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
 }) {
   try {
@@ -322,7 +395,7 @@ export async function prepareIosDevice({
 
     cleanup.add(async () => {
       log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
-      await deleteOwnedIosDevice(device.udid);
+      await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
     });
     log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
 
@@ -381,17 +454,48 @@ export function assertIosLauncherHierarchy(hierarchy) {
   }
 }
 
-export async function assertIosDeviceReady({ artifactRoot, cleanup, device, stage = "readiness" }) {
+export async function assertIosDeviceReady({
+  artifactRoot,
+  cleanup,
+  device,
+  readinessTimeoutMs = iosReadinessTimeoutMs,
+  stage = "readiness",
+}) {
   const diagnosticDirectory = join(artifactRoot, "ios", `readiness-${stage}`);
   mkdirSync(diagnosticDirectory, { recursive: true });
   const hierarchyPath = join(diagnosticDirectory, "springboard-hierarchy.json");
-  await run("maestro", ["--device", device.deviceId, "hierarchy", "--no-ansi"], {
-    cleanup,
-    env: createMaestroEnvironment(),
-    outputPath: hierarchyPath,
-    stdio: "ignore",
-    timeoutMs: 120000,
-  });
+  const hierarchyArgs = ["--device", device.deviceId, "hierarchy", "--no-ansi"];
+  try {
+    await run("maestro", hierarchyArgs, {
+      cleanup,
+      env: createMaestroEnvironment(),
+      outputPath: hierarchyPath,
+      stdio: "ignore",
+      timeoutMs: readinessTimeoutMs,
+    });
+  } catch (error) {
+    try {
+      const metadata = error?.commandMetadata ?? {
+        bytes: existsSync(hierarchyPath) ? statSync(hierarchyPath).size : 0,
+        command: ["maestro", ...hierarchyArgs],
+        exitCode: null,
+        signal: null,
+        timedOut: error?.code === "E2E_COMMAND_TIMEOUT",
+      };
+      writeFileSync(
+        join(diagnosticDirectory, "springboard-hierarchy-probe.json"),
+        `${JSON.stringify(metadata, null, 2)}\n`,
+      );
+    } catch (diagnosticError) {
+      log(
+        "ios",
+        `Unable to preserve hierarchy probe metadata: ${
+          diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)
+        }`,
+      );
+    }
+    throw error;
+  }
   const hierarchy = readFileSync(hierarchyPath, "utf8");
   assertIosLauncherHierarchy(hierarchy);
   log("ios", `SpringBoard launcher hierarchy ready on ${device.deviceId}.`);

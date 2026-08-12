@@ -1,17 +1,9 @@
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import {
   assertIosDeviceReady,
   assertIosLauncherHierarchy,
@@ -58,8 +50,8 @@ test("iOS locale and launcher gates reject ambiguous system state", () => {
   );
 });
 
-test("iOS readiness preserves the failing hierarchy command output", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-readiness-"));
+test("iOS readiness preserves the failing hierarchy command output", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-readiness-");
   const binaries = join(directory, "bin");
   const artifacts = join(directory, "artifacts");
   mkdirSync(binaries);
@@ -87,11 +79,48 @@ test("iOS readiness preserves the failing hierarchy command output", async () =>
   );
 });
 
-test("each iOS invocation creates, gates, and deletes only its own simulator", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-ephemeral-"));
+test("iOS readiness records a zero-byte hierarchy timeout as command metadata", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-readiness-timeout-");
+  const binaries = join(directory, "bin");
+  const artifacts = join(directory, "artifacts");
+  mkdirSync(binaries);
+  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nsleep 10\n");
+
+  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
+    await assert.rejects(
+      assertIosDeviceReady({
+        artifactRoot: artifacts,
+        cleanup: { add() {} },
+        device: { platform: "ios", deviceId: "simulator-timeout" },
+        readinessTimeoutMs: 25,
+        stage: "post-install",
+      }),
+      (error) => error.code === "E2E_COMMAND_TIMEOUT",
+    );
+  });
+
+  const diagnostics = join(artifacts, "ios", "readiness-post-install");
+  const hierarchyPath = join(diagnostics, "springboard-hierarchy.json");
+  assert.equal(statSync(hierarchyPath).size, 0);
+  const metadata = JSON.parse(
+    readFileSync(join(diagnostics, "springboard-hierarchy-probe.json"), "utf8"),
+  );
+  assert.deepEqual(metadata, {
+    bytes: 0,
+    command: ["maestro", "--device", "simulator-timeout", "hierarchy", "--no-ansi"],
+    exitCode: null,
+    signal: "SIGTERM",
+    timedOut: true,
+  });
+});
+
+test("each iOS invocation creates, gates, and deletes only its own simulator", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-ephemeral-");
   const binaries = join(directory, "bin");
   const commandLog = join(directory, "xcrun.log");
+  const deletedIds = join(directory, "deleted-ids");
   mkdirSync(binaries);
+  writeFileSync(deletedIds, "");
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
@@ -101,13 +130,20 @@ case "$*" in
     count=$(grep -c '^simctl create ' "$FAKE_XCRUN_LOG")
     if [ "$count" -eq 1 ]; then printf '%s\n' '11111111-1111-1111-1111-111111111111'; else printf '%s\n' '22222222-2222-2222-2222-222222222222'; fi ;;
   "simctl list devices -j")
-    if [ "$FAKE_STATE_FAILURE" = 1 ]; then exit 1; fi
-    count=$(grep -c '^simctl list devices -j$' "$FAKE_XCRUN_LOG")
-    if [ $((count % 2)) -eq 1 ]; then state='Shutting Down'; else state='Shutdown'; fi
-    printf '{"devices":{"runtime":[{"udid":"11111111-1111-1111-1111-111111111111","state":"%s"},{"udid":"22222222-2222-2222-2222-222222222222","state":"%s"}]}}\n' "$state" "$state" ;;
+    printf '%s' '{"devices":{"runtime":['
+    separator=''
+    for udid in 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222; do
+      if ! grep -qx "$udid" "$FAKE_DELETED_IDS"; then
+        printf '%s{"udid":"%s","state":"Shutdown"}' "$separator" "$udid"
+        separator=','
+      fi
+    done
+    printf '%s\n' ']}}' ;;
   *"defaults read NSGlobalDomain AppleLanguages") printf '%s\n' '("en-US")' ;;
   *"defaults read NSGlobalDomain AppleLocale") printf '%s\n' 'en_US' ;;
-  "simctl delete "*) [ "$3" != "$FAKE_DELETE_FAILURE" ] || { printf '%s\n' 'injected delete failure' >&2; exit 1; } ;;
+  "simctl delete "*)
+    printf '%s\n' "$3" >> "$FAKE_DELETED_IDS"
+    [ "$3" != "$FAKE_DELETE_FAILURE" ] || { printf '%s\n' 'injected delete failure' >&2; exit 1; } ;;
 esac
 `,
   );
@@ -115,8 +151,8 @@ esac
   const devices = [];
   await withEnvironment(
     {
+      FAKE_DELETED_IDS: deletedIds,
       FAKE_DELETE_FAILURE: undefined,
-      FAKE_STATE_FAILURE: undefined,
       FAKE_XCRUN_LOG: commandLog,
       PATH: `${binaries}:${process.env.PATH}`,
     },
@@ -125,11 +161,8 @@ esac
         const cleanup = createCleanupManager();
         const device = await prepareIosDevice({ cleanup });
         devices.push(device);
-        if (invocation === 0) {
-          process.env.FAKE_STATE_FAILURE = "1";
-          await cleanup.run();
-          delete process.env.FAKE_STATE_FAILURE;
-        } else {
+        if (invocation === 0) await cleanup.run();
+        else {
           process.env.FAKE_DELETE_FAILURE = device.deviceId;
           await assert.rejects(cleanup.run(), /injected delete failure/);
         }
@@ -173,8 +206,103 @@ esac
   }
 });
 
-test("iOS bounds its single simulator boot transition", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-boot-timeout-"));
+test("iOS teardown proves its owned simulator is absent and records each stage", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-teardown-summary-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  const commandLog = join(directory, "xcrun.log");
+  const deletedMarker = join(directory, "deleted");
+  const deviceId = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
+case "$*" in
+  "simctl create "*) printf '%s\n' '${deviceId}' ;;
+  *"defaults read NSGlobalDomain AppleLanguages") printf '%s\n' '("en-US")' ;;
+  *"defaults read NSGlobalDomain AppleLocale") printf '%s\n' 'en_US' ;;
+  "simctl list devices -j")
+    if [ -f "$FAKE_DELETED_MARKER" ]; then
+      printf '%s\n' '{"devices":{"runtime":[]}}'
+    else
+      printf '%s\n' '{"devices":{"runtime":[{"udid":"${deviceId}","state":"Shutdown"}]}}'
+    fi ;;
+  "simctl delete ${deviceId}") : > "$FAKE_DELETED_MARKER" ;;
+esac
+`,
+  );
+
+  const cleanup = createCleanupManager();
+  await withEnvironment(
+    {
+      FAKE_DELETED_MARKER: deletedMarker,
+      FAKE_XCRUN_LOG: commandLog,
+      PATH: `${binaries}:${process.env.PATH}`,
+    },
+    async () => {
+      await prepareIosDevice({ artifactRoot, cleanup });
+      await cleanup.run();
+    },
+  );
+
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(artifactRoot, "ios", "device-cleanup.json"), "utf8")),
+    {
+      deletion: { status: "succeeded" },
+      deviceId,
+      shutdown: { status: "succeeded" },
+      verification: { status: "succeeded", udidAbsent: true },
+    },
+  );
+  const commands = readFileSync(commandLog, "utf8").trim().split("\n");
+  const shutdownIndex = commands.indexOf(`simctl shutdown ${deviceId}`);
+  const deleteIndex = commands.indexOf(`simctl delete ${deviceId}`);
+  const absentProbeIndex = commands.lastIndexOf("simctl list devices -j");
+  assert.ok(shutdownIndex < deleteIndex);
+  assert.ok(deleteIndex < absentProbeIndex);
+});
+
+test("iOS teardown fails closed when delete returns but the owned simulator remains", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-teardown-still-present-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  const deviceId = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB";
+  mkdirSync(binaries);
+  mkdirSync(artifactRoot);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+case "$*" in
+  "simctl create "*) printf '%s\n' '${deviceId}' ;;
+  *"defaults read NSGlobalDomain AppleLanguages") printf '%s\n' '("en-US")' ;;
+  *"defaults read NSGlobalDomain AppleLocale") printf '%s\n' 'en_US' ;;
+  "simctl list devices -j")
+    printf '%s\n' '{"devices":{"runtime":[{"udid":"${deviceId}","state":"Shutdown"}]}}' ;;
+esac
+`,
+  );
+
+  const cleanup = createCleanupManager();
+  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
+    await prepareIosDevice({ artifactRoot, cleanup, deletionVerificationTimeoutMs: 25 });
+    await assert.rejects(cleanup.run(), (error) => {
+      assert.match(error.message, /to disappear after deletion/);
+      return true;
+    });
+  });
+
+  const summary = JSON.parse(
+    readFileSync(join(artifactRoot, "ios", "device-cleanup.json"), "utf8"),
+  );
+  assert.equal(summary.deletion.status, "succeeded");
+  assert.equal(summary.verification.status, "failed");
+  assert.equal(summary.verification.udidAbsent, false);
+});
+
+test("iOS bounds its single simulator boot transition", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-boot-timeout-");
   const artifactRoot = join(directory, "artifacts");
   const binaries = join(directory, "bin");
   const bootstatusCount = join(directory, "bootstatus-count");
@@ -222,7 +350,7 @@ esac
 });
 
 test("iOS bounds every install and media command", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-mutation-timeout-"));
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-mutation-timeout-");
   const binaries = join(directory, "bin");
   const deviceId = "44444444-4444-4444-4444-444444444444";
   const artifact = join(directory, "PlogKit.app");
@@ -256,8 +384,8 @@ if [ "$*" = "$FAKE_HANG_COMMAND" ]; then sleep 0.15; fi
   });
 });
 
-test("iOS rejects a host outside the pinned Xcode toolchain", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-toolchain-"));
+test("iOS rejects a host outside the pinned Xcode toolchain", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-toolchain-");
   writeExecutable(
     join(directory, "xcode-select"),
     "#!/bin/sh\nprintf '%s\\n' '/Applications/Xcode-beta.app/Contents/Developer'\n",
@@ -307,8 +435,8 @@ esac
   );
 }
 
-test("iOS gives the first CoreSimulator runtime probe its lifecycle deadline", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-cold-init-"));
+test("iOS gives the first CoreSimulator runtime probe its lifecycle deadline", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-cold-init-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
   mkdirSync(binaries);
@@ -338,8 +466,8 @@ test("iOS gives the first CoreSimulator runtime probe its lifecycle deadline", a
 test(
   "iOS host runtime discovery kills a TERM-resistant child retaining output pipes",
   { skip: process.platform === "win32" },
-  async () => {
-    const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-process-tree-"));
+  async (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-process-tree-");
     const binaries = join(directory, "bin");
     const artifactRoot = join(directory, "artifacts");
     const leakMarker = join(directory, "descendant-survived");
@@ -373,8 +501,8 @@ test(
   },
 );
 
-test("iOS preserves a host timeout when writing its evidence also fails", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-evidence-write-"));
+test("iOS preserves a host timeout when writing its evidence also fails", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-evidence-write-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
   mkdirSync(binaries);
@@ -409,8 +537,8 @@ test("iOS preserves a host timeout when writing its evidence also fails", async 
   );
 });
 
-test("iOS preserves a host parse error when writing its evidence also fails", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-parse-evidence-write-"));
+test("iOS preserves a host parse error when writing its evidence also fails", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-parse-evidence-write-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
   mkdirSync(binaries);
@@ -447,8 +575,8 @@ test("iOS preserves a host parse error when writing its evidence also fails", as
   );
 });
 
-test("iOS bounds a hung host lifecycle probe with command and raw evidence", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-hang-"));
+test("iOS bounds a hung host lifecycle probe with command and raw evidence", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-hang-");
   const binaries = join(directory, "bin");
   const artifactRoot = join(directory, "artifacts");
   mkdirSync(binaries);
@@ -487,8 +615,8 @@ test("iOS bounds a hung host lifecycle probe with command and raw evidence", asy
   assert.match(evidence, /core-simulator-cold-init-started/);
 });
 
-test("iOS keeps ordinary simctl host queries on the short probe deadline", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-ios-host-ordinary-probe-"));
+test("iOS keeps ordinary simctl host queries on the short probe deadline", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-ordinary-probe-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries);
   writeIosSimulatorHostBinary(binaries);

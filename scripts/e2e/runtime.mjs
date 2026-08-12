@@ -314,6 +314,17 @@ export function run(
   } = {},
 ) {
   return new Promise((resolvePromise, reject) => {
+    const commandMetadata = {
+      bytes: 0,
+      command: [command, ...args],
+      exitCode: null,
+      signal: null,
+      timedOut: false,
+    };
+    const attachCommandMetadata = (error) => {
+      error.commandMetadata = commandMetadata;
+      return error;
+    };
     const child = spawn(command, args, {
       cwd,
       detached: process.platform !== "win32",
@@ -378,7 +389,7 @@ export function run(
       } else if (primaryError.code) {
         aggregate.code = primaryError.code;
       }
-      reject(aggregate);
+      reject(attachCommandMetadata(aggregate));
     };
     const terminateOnce = () => {
       terminationPromise ??= (async () => {
@@ -414,6 +425,13 @@ export function run(
         if (timeoutHandle) clearTimeout(timeoutHandle);
         await terminateOnce();
         await finishOutput();
+        if (outputPath && existsSync(outputPath)) {
+          try {
+            commandMetadata.bytes = statSync(outputPath).size;
+          } catch (error) {
+            recordOutputError(error);
+          }
+        }
         settle();
       })();
       return commandCompletionPromise;
@@ -428,24 +446,31 @@ export function run(
     output?.on("error", failOutput);
     child.once("error", (error) => {
       processTreeActive = false;
-      commandOutcome = error;
+      commandOutcome = attachCommandMetadata(error);
       void finishCommand();
     });
     child.once("close", (code, signal) => {
+      commandMetadata.exitCode = code;
+      commandMetadata.signal = signal;
       commandOutcome ??=
         code === 0
           ? null
-          : new Error(
-              `Command failed (${code ?? signal ?? "unknown"}): ${command} ${args.join(" ")}`,
+          : attachCommandMetadata(
+              new Error(
+                `Command failed (${code ?? signal ?? "unknown"}): ${command} ${args.join(" ")}`,
+              ),
             );
       void finishCommand();
     });
     if (timeoutMs !== undefined) {
       timeoutHandle = setTimeout(() => {
         if (settled || commandCompletionPromise) return;
-        commandOutcome = Object.assign(
-          new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`),
-          { code: "E2E_COMMAND_TIMEOUT" },
+        commandMetadata.timedOut = true;
+        commandOutcome = attachCommandMetadata(
+          Object.assign(
+            new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`),
+            { code: "E2E_COMMAND_TIMEOUT" },
+          ),
         );
         void finishCommand();
       }, timeoutMs);
@@ -511,6 +536,19 @@ export async function finalizeCleanup(cleanup, operationError = null) {
     throw cleanupError;
   }
   if (operationError) throw operationError;
+}
+
+export async function finalizeE2eRun({
+  artifactRoot,
+  commitSuccess = () => true,
+  cleanup,
+  operationError = null,
+  removeArtifactRoot = (path) => rmSync(path, { recursive: true }),
+}) {
+  await finalizeCleanup(cleanup, operationError);
+  if (!commitSuccess()) return false;
+  removeArtifactRoot(artifactRoot);
+  return true;
 }
 
 function processIsAlive(pid) {
@@ -596,8 +634,9 @@ export function acquireE2ePlatformLock(
 
 export function installSignalHandlers(cleanup) {
   let handlingSignal = false;
+  let successCommitted = false;
   const handle = (exitCode) => {
-    if (handlingSignal) return;
+    if (handlingSignal || successCommitted) return;
     handlingSignal = true;
     void cleanup
       .run()
@@ -606,6 +645,13 @@ export function installSignalHandlers(cleanup) {
   };
   process.once("SIGINT", () => handle(130));
   process.once("SIGTERM", () => handle(143));
+  return {
+    commitSuccess() {
+      if (handlingSignal) return false;
+      successCommitted = true;
+      return true;
+    },
+  };
 }
 
 export function createArtifactRoot() {
@@ -710,6 +756,8 @@ const DIAGNOSTIC_FILE_BYTES = 2 * 1024 * 1024;
 const DIAGNOSTIC_REPORT_BYTES = 8 * 1024 * 1024;
 const DIAGNOSTIC_REPORT_FILES = 8;
 const DIAGNOSTIC_CLOCK_SKEW_MS = 5000;
+const IOS_READINESS_SCREENSHOT_BYTES = 4 * 1024 * 1024;
+const IOS_READINESS_PROBE_TIMEOUT_MS = 2500;
 const IOS_REPORT_EXTENSION = /\.(ips|crash|diag)$/i;
 const IOS_RELEVANT_REPORT =
   /(PlogKit|Maestro|XCTest|XCTRunner|SpringBoard|backboardd|CoreSimulator)/i;
@@ -818,6 +866,92 @@ async function captureEvidence(path, command, args, state, maximumBytes, maximum
   if (!result) return null;
   storeEvidence(path, result.output, state, result.truncated);
   return result;
+}
+
+function commandProbeMetadata(command, args, result, details = {}) {
+  return {
+    bytes: result?.sourceBytes ?? 0,
+    command: [command, ...args],
+    error:
+      result?.error instanceof Error
+        ? { code: result.error.code ?? null, message: result.error.message }
+        : null,
+    exitCode: result?.exitCode ?? null,
+    signal: result?.exitSignal ?? null,
+    terminationError:
+      result?.terminationError instanceof Error
+        ? { code: result.terminationError.code ?? null, message: result.terminationError.message }
+        : null,
+    timedOut: result?.timedOut ?? false,
+    truncated: result?.truncated ?? false,
+    ...details,
+  };
+}
+
+function storeProbeMetadata(path, command, args, result, state, details) {
+  const metadata = `${JSON.stringify(commandProbeMetadata(command, args, result, details), null, 2)}\n`;
+  storeEvidence(path, metadata, state);
+}
+
+async function captureProbeEvidence({
+  args,
+  command,
+  maximumBytes,
+  maximumMs,
+  metadataPath,
+  outputPath,
+  state,
+}) {
+  const result = await runDiagnostic(command, args, state, maximumBytes, maximumMs);
+  if (result) storeEvidence(outputPath, result.output, state, result.truncated);
+  storeProbeMetadata(metadataPath, command, args, result, state);
+  return result;
+}
+
+async function captureIosScreenshot(diagnosticDirectory, device, state) {
+  const temporaryPath = join(
+    diagnosticDirectory,
+    `.springboard-screenshot-${randomUUID()}.tmp.png`,
+  );
+  const outputPath = join(diagnosticDirectory, "springboard-screenshot.png");
+  const metadataPath = join(diagnosticDirectory, "springboard-screenshot.probe.json");
+  const args = ["simctl", "io", device.deviceId, "screenshot", temporaryPath];
+  const result = await runDiagnostic(
+    "xcrun",
+    args,
+    state,
+    64 * 1024,
+    IOS_READINESS_PROBE_TIMEOUT_MS,
+  );
+  let bytes = 0;
+  let retained = false;
+  try {
+    if (!existsSync(temporaryPath)) {
+      state.complete = false;
+    } else {
+      bytes = statSync(temporaryPath).size;
+      if (bytes > 0 && bytes <= IOS_READINESS_SCREENSHOT_BYTES && bytes <= state.remainingBytes) {
+        const screenshot = readBoundedFile(temporaryPath, bytes);
+        retained = storeEvidence(outputPath, screenshot.body, state) === bytes;
+      } else {
+        state.complete = false;
+      }
+    }
+  } catch {
+    state.complete = false;
+  } finally {
+    try {
+      rmSync(temporaryPath, { force: true });
+    } catch {
+      state.complete = false;
+    }
+  }
+  storeProbeMetadata(metadataPath, "xcrun", args, result, state, {
+    bytes,
+    command: ["xcrun", "simctl", "io", device.deviceId, "screenshot", "springboard-screenshot.png"],
+    commandOutputBytes: result?.sourceBytes ?? 0,
+    retained,
+  });
 }
 
 function parseAndroidReportListing(output, remotePath, sinceMs) {
@@ -1002,26 +1136,63 @@ async function collectIosDiagnostics(
   state,
 ) {
   const lookbackSeconds = Math.max(30, Math.ceil((Date.now() - sinceMs) / 1000) + 5);
-  await captureEvidence(
-    join(diagnosticDirectory, "simulator-system.log"),
-    "xcrun",
-    [
-      "simctl",
-      "spawn",
-      device.deviceId,
-      "log",
-      "show",
-      "--style",
-      "compact",
-      "--last",
-      `${lookbackSeconds}s`,
-      "--predicate",
-      'process == "PlogKit" OR process == "SpringBoard" OR process == "backboardd" OR process == "XCTRunner" OR eventMessage CONTAINS[c] "crash" OR eventMessage CONTAINS[c] "jetsam"',
-    ],
+  for (const probe of [
+    {
+      args: ["simctl", "list", "devices", "-j"],
+      maximumBytes: 1024 * 1024,
+      metadataPath: join(diagnosticDirectory, "host-simulator-devices.probe.json"),
+      outputPath: join(diagnosticDirectory, "host-simulator-devices.json"),
+    },
+    {
+      args: ["simctl", "spawn", device.deviceId, "/usr/bin/true"],
+      maximumBytes: 64 * 1024,
+      metadataPath: join(diagnosticDirectory, "device-spawn.probe.json"),
+      outputPath: join(diagnosticDirectory, "device-spawn.txt"),
+    },
+    {
+      args: [
+        "simctl",
+        "spawn",
+        device.deviceId,
+        "launchctl",
+        "print",
+        "system/com.apple.SpringBoard",
+      ],
+      maximumBytes: 1024 * 1024,
+      metadataPath: join(diagnosticDirectory, "springboard-service.probe.json"),
+      outputPath: join(diagnosticDirectory, "springboard-service.txt"),
+    },
+  ]) {
+    await captureProbeEvidence({
+      ...probe,
+      command: "xcrun",
+      maximumMs: IOS_READINESS_PROBE_TIMEOUT_MS,
+      state,
+    });
+  }
+  await captureIosScreenshot(diagnosticDirectory, device, state);
+  const logArgs = [
+    "simctl",
+    "spawn",
+    device.deviceId,
+    "log",
+    "show",
+    "--style",
+    "compact",
+    "--last",
+    `${lookbackSeconds}s`,
+    "--predicate",
+    'process == "PlogKit" OR process == "SpringBoard" OR process == "backboardd" OR process == "XCTRunner" OR process CONTAINS[c] "maestro" OR subsystem CONTAINS[c] "XCTest" OR eventMessage CONTAINS[c] "crash" OR eventMessage CONTAINS[c] "jetsam"',
+  ];
+  await captureProbeEvidence({
+    args: logArgs,
+    command: "xcrun",
+    maximumBytes: 8 * 1024 * 1024,
+    maximumMs: 10000,
+    metadataPath: join(diagnosticDirectory, "simulator-system.probe.json"),
+    outputPath: join(diagnosticDirectory, "simulator-system.log"),
     state,
-    8 * 1024 * 1024,
-    10000,
-  );
+  });
   copyIosReports(
     diagnosticDirectory,
     iosReportsDirectory ?? join(homedir(), "Library", "Logs", "DiagnosticReports"),

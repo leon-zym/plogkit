@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -12,10 +11,10 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
+import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import {
   capture,
   captureBoundedCommand,
@@ -45,8 +44,8 @@ function totalFileBytes(directory) {
   }, 0);
 }
 
-test("capture bounds an unresponsive diagnostic command", () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-timeout-"));
+test("capture bounds an unresponsive diagnostic command", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-timeout-");
   const command = join(directory, "hang");
   writeExecutable(command, "#!/bin/sh\nsleep 1\n");
 
@@ -60,8 +59,8 @@ test("capture bounds an unresponsive diagnostic command", () => {
 test(
   "bounded command capture kills a TERM-resistant process tree retaining output pipes",
   { skip: process.platform === "win32" },
-  async () => {
-    const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-bounded-command-tree-"));
+  async (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-e2e-bounded-command-tree-");
     const command = join(directory, "retain-pipe");
     const leakMarker = join(directory, "descendant-survived");
     writeExecutable(
@@ -111,8 +110,8 @@ test("waitUntil propagates a channel failure without retrying it", async () => {
   assert.equal(attempts, 1);
 });
 
-test("Android diagnostics use the device-owned adb and preserve fresh raw evidence", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-android-diagnostics-"));
+test("Android diagnostics use the device-owned adb and preserve fresh raw evidence", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-android-diagnostics-");
   const adbPath = join(directory, "sdk", "platform-tools", "adb");
   const artifacts = join(directory, "artifacts");
   const invocationLog = join(directory, "adb.log");
@@ -159,8 +158,8 @@ esac
 test(
   "diagnostics bound a TERM-resistant process tree that retains output pipes",
   { skip: process.platform === "win32" },
-  async () => {
-    const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-diagnostic-tree-timeout-"));
+  async (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-e2e-diagnostic-tree-timeout-");
     const adbPath = join(directory, "adb");
     const artifacts = join(directory, "artifacts");
     const descendantReadyMarker = join(directory, "descendant-started");
@@ -203,8 +202,8 @@ setInterval(() => {}, 1000);
   },
 );
 
-test("run preserves complete command output beyond the writable high-water mark", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-command-output-"));
+test("run preserves complete command output beyond the writable high-water mark", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-command-output-");
   const outputPath = join(directory, "command.log");
   const bodyLength = 256 * 1024;
 
@@ -219,8 +218,8 @@ test("run preserves complete command output beyond the writable high-water mark"
   assert.equal(output.endsWith("END"), true);
 });
 
-test("run rejects an artifact write failure without an uncaught stream error", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-command-write-error-"));
+test("run rejects an artifact write failure without an uncaught stream error", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-command-write-error-");
 
   await assert.rejects(
     run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -231,8 +230,8 @@ test("run rejects an artifact write failure without an uncaught stream error", a
   );
 });
 
-test("run preserves a command failure when its output artifact also fails", async () => {
-  const outputPath = mkdtempSync(join(tmpdir(), "plogkit-e2e-command-combined-error-"));
+test("run preserves a command failure when its output artifact also fails", async (t) => {
+  const outputPath = createTemporaryTestDirectory(t, "plogkit-e2e-command-combined-error-");
 
   await assert.rejects(
     run(process.execPath, ["-e", "process.exit(23)"], {
@@ -269,8 +268,8 @@ test("run bounds a hung process tree and reports the stage timeout", async () =>
 test(
   "process cleanup escalates TERM to KILL and waits for the entire process group",
   { skip: process.platform === "win32" },
-  async () => {
-    const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-process-tree-"));
+  async (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-e2e-process-tree-");
     const descendantPidPath = join(directory, "descendant.pid");
     const child = spawn(
       process.execPath,
@@ -329,8 +328,8 @@ test("cleanup runs every task and preserves the primary operation error", async 
   assert.deepEqual(completed, ["first", "last"]);
 });
 
-test("device ownership lock rejects a concurrent runner and recovers a stale owner", async () => {
-  const lockRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-device-lock-test-"));
+test("device ownership lock rejects a concurrent runner and recovers a stale owner", async (t) => {
+  const lockRoot = createTemporaryTestDirectory(t, "plogkit-e2e-device-lock-test-");
   const firstCleanup = createCleanupManager();
   acquireE2ePlatformLock("android", firstCleanup, { lockRoot, ownerPid: process.pid });
 
@@ -360,8 +359,8 @@ test("device ownership lock rejects a concurrent runner and recovers a stale own
   assert.equal(existsSync(staleDirectory), false);
 });
 
-test("configured artifacts use a unique run directory below the upload root", () => {
-  const uploadRoot = mkdtempSync(join(tmpdir(), "plogkit-e2e-artifact-root-"));
+test("configured artifacts use a unique run directory below the upload root", (t) => {
+  const uploadRoot = createTemporaryTestDirectory(t, "plogkit-e2e-artifact-root-");
   const previous = process.env.E2E_ARTIFACTS_DIR;
   process.env.E2E_ARTIFACTS_DIR = uploadRoot;
   try {
@@ -378,8 +377,8 @@ test("configured artifacts use a unique run directory below the upload root", ()
   }
 });
 
-test("the acceptance transaction preserves an Android log-boundary failure", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-log-boundary-"));
+test("the acceptance transaction preserves an Android log-boundary failure", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-log-boundary-");
   const binaries = join(directory, "bin");
   const flows = join(directory, "e2e", "flows");
   const invocationLog = join(directory, "invocations.log");
@@ -441,8 +440,8 @@ esac
   );
 });
 
-test("Maestro validation and execution use the same PATH executable", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-maestro-path-"));
+test("Maestro validation and execution use the same PATH executable", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-maestro-path-");
   const binaries = join(directory, "bin");
   const packageBinaries = join(directory, "node_modules", ".bin");
   const invocationLog = join(directory, "path-maestro.log");
@@ -506,8 +505,8 @@ exit 79
   assert.equal(existsSync(shadowSentinel), false);
 });
 
-test("the acceptance transaction saves bounded evidence without rewriting a Maestro failure", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-platform-evidence-"));
+test("the acceptance transaction saves bounded evidence without rewriting a Maestro failure", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-platform-evidence-");
   const binaries = join(directory, "bin");
   const flows = join(directory, "e2e", "flows");
   const artifactRoot = join(directory, "artifacts");
@@ -585,8 +584,8 @@ esac
   );
 });
 
-test("Maestro owns full-suite ordering and fail-fast execution in one process", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-single-suite-"));
+test("Maestro owns full-suite ordering and fail-fast execution in one process", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-single-suite-");
   const binaries = join(directory, "bin");
   const flows = join(directory, "e2e", "flows");
   const invocationLog = join(directory, "invocations.log");
@@ -633,8 +632,8 @@ exit 0
   assert.doesNotMatch(invocations[0], /f00-first\.yaml|f01-second\.yaml/);
 });
 
-test("Maestro execution requires an immutable E2E run snapshot root", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-snapshot-root-"));
+test("Maestro execution requires an immutable E2E run snapshot root", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-snapshot-root-");
   const binaries = join(directory, "bin");
   mkdirSync(binaries, { recursive: true });
   mkdirSync(join(directory, "e2e"), { recursive: true });
@@ -664,8 +663,8 @@ test("Maestro execution requires an immutable E2E run snapshot root", async () =
   }
 });
 
-test("Android diagnostics mark an accessible fresh report read failure incomplete", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-report-read-failure-"));
+test("Android diagnostics mark an accessible fresh report read failure incomplete", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-report-read-failure-");
   const adbPath = join(directory, "adb");
   const artifacts = join(directory, "artifacts");
   writeExecutable(
@@ -694,8 +693,8 @@ esac
   assert.match(readFileSync(join(artifacts, "failure-summary.txt"), "utf8"), /incomplete/);
 });
 
-test("Android diagnostics keep the head and tail of a bounded fresh report", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-report-truncation-"));
+test("Android diagnostics keep the head and tail of a bounded fresh report", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-report-truncation-");
   const adbPath = join(directory, "adb");
   const artifacts = join(directory, "artifacts");
   writeExecutable(
@@ -728,8 +727,8 @@ if (args.includes("for report in /data/tombstones/")) {
   assert.equal(excerpt.endsWith("TAIL"), true);
 });
 
-test("all diagnostic artifacts share one fixed total byte cap", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-total-byte-cap-"));
+test("all diagnostic artifacts share one fixed total byte cap", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-total-byte-cap-");
   const adbPath = join(directory, "adb");
   const artifacts = join(directory, "artifacts");
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -762,15 +761,24 @@ if (args.includes("for report in /data/tombstones/")) {
   assert.match(readFileSync(join(artifacts, "failure-summary.txt"), "utf8"), /incomplete/);
 });
 
-test("iOS diagnostics copy only fresh relevant reports through the high-level seam", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-diagnostics-"));
+test("iOS diagnostics copy only fresh relevant reports through the high-level seam", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-diagnostics-");
   const binaries = join(directory, "bin");
   const reports = join(directory, "reports");
   const artifacts = join(directory, "artifacts");
   mkdirSync(binaries);
   mkdirSync(reports);
   const startedAt = Date.now();
-  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nprintf '%s\\n' 'raw simulator log'\n");
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+  printf '%s' 'PNG-EVIDENCE' > "$5"
+  exit 0
+fi
+printf '%s\n' 'raw simulator log'
+`,
+  );
   writeFileSync(join(reports, "PlogKit-fresh.ips"), "app crash");
   writeFileSync(join(reports, "MaestroDriver-fresh.crash"), "driver crash");
   writeFileSync(join(reports, "Unrelated-fresh.diag"), "unrelated");
@@ -801,8 +809,138 @@ test("iOS diagnostics copy only fresh relevant reports through the high-level se
   assert.match(readFileSync(join(artifacts, "simulator-system.log"), "utf8"), /raw simulator/);
 });
 
-test("iOS diagnostics preserve fresh relevant reports retired by macOS", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-retired-diagnostics-"));
+test("iOS diagnostics capture bounded device and XCTest readiness probes", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-readiness-diagnostics-");
+  const binaries = join(directory, "bin");
+  const reports = join(directory, "reports");
+  const artifacts = join(directory, "artifacts");
+  const commandLog = join(directory, "xcrun.log");
+  mkdirSync(binaries);
+  mkdirSync(reports);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
+if [ "$1 $2 $3" = "simctl list devices" ]; then
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+elif [ "$1 $2 $3" = "simctl spawn simulator-test" ] && [ "$4" = "/usr/bin/true" ]; then
+  exit 0
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
+  printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running'
+elif [ "$1 $2 $3 $4" = "simctl io simulator-test screenshot" ]; then
+  printf '%s' 'PNG-EVIDENCE' > "$5"
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test log" ]; then
+  printf '%s\n' 'Maestro iOS driver waiting for XCTest bootstrap'
+else
+  printf '%s\n' "unexpected xcrun command: $*" >&2
+  exit 2
+fi
+`,
+  );
+
+  const previous = { path: process.env.PATH, log: process.env.FAKE_XCRUN_LOG };
+  process.env.PATH = `${binaries}:${previous.path}`;
+  process.env.FAKE_XCRUN_LOG = commandLog;
+  let result;
+  try {
+    result = await collectFailureDiagnostics({
+      diagnosticDirectory: artifacts,
+      device: { platform: "ios", deviceId: "simulator-test" },
+      error: Object.assign(new Error("hierarchy timed out"), { code: "E2E_COMMAND_TIMEOUT" }),
+      iosReportsDirectory: reports,
+      sinceMs: Date.now() - 1000,
+      timeoutMs: 5000,
+    });
+  } finally {
+    process.env.PATH = previous.path;
+    if (previous.log === undefined) delete process.env.FAKE_XCRUN_LOG;
+    else process.env.FAKE_XCRUN_LOG = previous.log;
+  }
+
+  assert.deepEqual(result, { complete: true });
+  assert.match(readFileSync(join(artifacts, "host-simulator-devices.json"), "utf8"), /Booted/);
+  assert.equal(statSync(join(artifacts, "device-spawn.txt")).size, 0);
+  assert.match(readFileSync(join(artifacts, "springboard-service.txt"), "utf8"), /pid = 4242/);
+  assert.equal(readFileSync(join(artifacts, "springboard-screenshot.png"), "utf8"), "PNG-EVIDENCE");
+  assert.match(
+    readFileSync(join(artifacts, "simulator-system.log"), "utf8"),
+    /Maestro iOS driver waiting for XCTest/,
+  );
+
+  const spawnMetadata = JSON.parse(
+    readFileSync(join(artifacts, "device-spawn.probe.json"), "utf8"),
+  );
+  assert.deepEqual(spawnMetadata, {
+    bytes: 0,
+    command: ["xcrun", "simctl", "spawn", "simulator-test", "/usr/bin/true"],
+    error: null,
+    exitCode: 0,
+    signal: null,
+    terminationError: null,
+    timedOut: false,
+    truncated: false,
+  });
+  const screenshotMetadata = JSON.parse(
+    readFileSync(join(artifacts, "springboard-screenshot.probe.json"), "utf8"),
+  );
+  assert.equal(screenshotMetadata.bytes, Buffer.byteLength("PNG-EVIDENCE"));
+  assert.equal(screenshotMetadata.exitCode, 0);
+  assert.equal(screenshotMetadata.signal, null);
+  assert.equal(screenshotMetadata.timedOut, false);
+  assert.equal(screenshotMetadata.retained, true);
+
+  const commands = readFileSync(commandLog, "utf8");
+  assert.match(commands, /^simctl list devices -j$/m);
+  assert.match(commands, /launchctl print system\/com\.apple\.SpringBoard/);
+  assert.match(commands, /log show .*process CONTAINS\[c\] "maestro"/);
+});
+
+test("iOS readiness probe failures never replace the primary acceptance error", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-probe-failure-");
+  const binaries = join(directory, "bin");
+  const artifacts = join(directory, "artifacts");
+  const reports = join(directory, "reports");
+  mkdirSync(binaries);
+  mkdirSync(reports);
+  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nexit 9\n");
+  const primaryError = Object.assign(new Error("hierarchy timed out"), {
+    code: "E2E_COMMAND_TIMEOUT",
+  });
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await assert.rejects(
+      withFailureDiagnostics({
+        diagnosticDirectory: artifacts,
+        device: { platform: "ios", deviceId: "simulator-test" },
+        iosReportsDirectory: reports,
+        operation: async () => {
+          throw primaryError;
+        },
+        sinceMs: Date.now(),
+      }),
+      (error) => error === primaryError,
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  assert.match(
+    readFileSync(join(artifacts, "failure-summary.txt"), "utf8"),
+    /diagnostics: incomplete\noriginal error: hierarchy timed out/,
+  );
+  const metadata = JSON.parse(
+    readFileSync(join(artifacts, "host-simulator-devices.probe.json"), "utf8"),
+  );
+  assert.equal(metadata.error, null);
+  assert.equal(metadata.exitCode, 9);
+  assert.equal(metadata.terminationError, null);
+  assert.equal(metadata.timedOut, false);
+});
+
+test("iOS diagnostics preserve fresh relevant reports retired by macOS", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-retired-diagnostics-");
   const binaries = join(directory, "bin");
   const reports = join(directory, "reports");
   const retiredReports = join(reports, "Retired");
@@ -811,7 +949,15 @@ test("iOS diagnostics preserve fresh relevant reports retired by macOS", async (
   mkdirSync(binaries);
   mkdirSync(nestedReports, { recursive: true });
   const startedAt = Date.now();
-  writeExecutable(join(binaries, "xcrun"), "#!/bin/sh\nexit 0\n");
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+  printf '%s' 'PNG-EVIDENCE' > "$5"
+fi
+exit 0
+`,
+  );
   writeFileSync(join(reports, "PlogKit-current.ips"), "current app crash");
   writeFileSync(join(retiredReports, "PlogKit-retired.ips"), "retired app crash");
   writeFileSync(join(retiredReports, "Unrelated-retired.ips"), "unrelated crash");
@@ -850,8 +996,8 @@ test("iOS diagnostics preserve fresh relevant reports retired by macOS", async (
   );
 });
 
-test("iOS diagnostics prioritize the newest reports across current and Retired under one cap", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-report-cap-"));
+test("iOS diagnostics prioritize the newest reports across current and Retired under one cap", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-report-cap-");
   const binaries = join(directory, "bin");
   const reports = join(directory, "reports");
   const retiredReports = join(reports, "Retired");
@@ -899,8 +1045,8 @@ test("iOS diagnostics prioritize the newest reports across current and Retired u
   );
 });
 
-test("iOS report read and artifact write failures make diagnostics incomplete", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "plogkit-e2e-ios-report-failure-"));
+test("iOS report read and artifact write failures make diagnostics incomplete", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-report-failure-");
   const binaries = join(directory, "bin");
   const reports = join(directory, "reports");
   const artifacts = join(directory, "artifacts");

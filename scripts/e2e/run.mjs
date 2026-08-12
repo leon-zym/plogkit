@@ -33,6 +33,7 @@ import {
   createCleanupManager,
   acquireE2ePlatformLock,
   finalizeCleanup,
+  finalizeE2eRun,
   installSignalHandlers,
   log,
   run,
@@ -363,13 +364,14 @@ async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const cleanup = createCleanupManager();
-  const artifactRoot = createArtifactRoot();
-  installSignalHandlers(cleanup);
+  const signalState = installSignalHandlers(cleanup);
 
+  let artifactRoot = null;
   let operationError = null;
   try {
     validateMaestroVersion();
     const hostEnvironment = validateBeforePlatformLock(options);
+    artifactRoot = createArtifactRoot();
     await validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup });
     log("setup", `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`);
     await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment);
@@ -377,9 +379,23 @@ async function main() {
     operationError = error;
   }
   try {
-    await finalizeCleanup(cleanup, operationError);
+    if (artifactRoot === null) await finalizeCleanup(cleanup, operationError);
+    else {
+      const artifactsRemoved = await finalizeE2eRun({
+        artifactRoot,
+        cleanup,
+        commitSuccess: signalState.commitSuccess,
+        operationError,
+      });
+      if (artifactsRemoved) {
+        log("cleanup", `Removed temporary artifacts after successful E2E: ${artifactRoot}`);
+      }
+    }
   } catch (error) {
     console.error(`[e2e:error] ${error instanceof Error ? error.message : String(error)}`);
+    if (artifactRoot !== null && existsSync(artifactRoot)) {
+      console.error(`[e2e:error] Artifacts retained at ${artifactRoot}`);
+    }
     process.exitCode = 1;
   }
 }
