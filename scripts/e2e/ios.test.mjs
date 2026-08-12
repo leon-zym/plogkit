@@ -5,9 +5,7 @@ import test from "node:test";
 
 import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import {
-  assertIosDeviceReady,
   assertIosGuestHealthy,
-  assertIosLauncherHierarchy,
   installAndSeedIos,
   isIosEnglishLocale,
   prepareIosDevice,
@@ -37,83 +35,9 @@ async function withEnvironment(values, operation) {
   }
 }
 
-test("iOS locale and launcher gates reject ambiguous system state", () => {
+test("iOS locale rejects ambiguous system state", () => {
   assert.equal(isIosEnglishLocale({ languages: '("en-US")', locale: "en_US" }), true);
   assert.equal(isIosEnglishLocale({ languages: "(zh-Hans)", locale: "zh_CN" }), false);
-  assert.doesNotThrow(() => assertIosLauncherHierarchy('{"resource-id":"Home screen icons"}'));
-  assert.throws(() => assertIosLauncherHierarchy('{"resource-id":"Settings"}'), /Home screen/);
-  assert.throws(
-    () =>
-      assertIosLauncherHierarchy(
-        '{"resource-id":"Home screen icons","text":"SpringBoard quit unexpectedly"}',
-      ),
-    /system UI fault/,
-  );
-});
-
-test("iOS readiness preserves the failing hierarchy command output", async (t) => {
-  const directory = createTemporaryTestDirectory(t, "plogkit-ios-readiness-");
-  const binaries = join(directory, "bin");
-  const artifacts = join(directory, "artifacts");
-  mkdirSync(binaries);
-  writeExecutable(
-    join(binaries, "maestro"),
-    "#!/bin/sh\nprintf '%s\\n' 'SpringBoard quit unexpectedly' >&2\nexit 1\n",
-  );
-
-  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
-    await assert.rejects(
-      assertIosDeviceReady({
-        artifactRoot: artifacts,
-        cleanup: { add() {} },
-        device: { platform: "ios", deviceId: "simulator-test" },
-        stage: "post-install",
-      }),
-      /Command failed/,
-    );
-  });
-
-  const diagnostics = join(artifacts, "ios", "readiness-post-install");
-  assert.match(
-    readFileSync(join(diagnostics, "springboard-hierarchy.json"), "utf8"),
-    /SpringBoard/,
-  );
-});
-
-test("iOS readiness records a zero-byte hierarchy timeout as command metadata", async (t) => {
-  const directory = createTemporaryTestDirectory(t, "plogkit-ios-readiness-timeout-");
-  const binaries = join(directory, "bin");
-  const artifacts = join(directory, "artifacts");
-  mkdirSync(binaries);
-  writeExecutable(join(binaries, "maestro"), "#!/bin/sh\nsleep 10\n");
-
-  await withEnvironment({ PATH: `${binaries}:${process.env.PATH}` }, async () => {
-    await assert.rejects(
-      assertIosDeviceReady({
-        artifactRoot: artifacts,
-        cleanup: { add() {} },
-        device: { platform: "ios", deviceId: "simulator-timeout" },
-        readinessTimeoutMs: 25,
-        stage: "post-install",
-      }),
-      (error) => error.code === "E2E_COMMAND_TIMEOUT",
-    );
-  });
-
-  const diagnostics = join(artifacts, "ios", "readiness-post-install");
-  const hierarchyPath = join(diagnostics, "springboard-hierarchy.json");
-  assert.equal(statSync(hierarchyPath).size, 0);
-  const metadata = JSON.parse(
-    readFileSync(join(diagnostics, "springboard-hierarchy-probe.json"), "utf8"),
-  );
-  assert.deepEqual(metadata, {
-    argumentCount: 4,
-    bytes: 0,
-    executable: "maestro",
-    exitCode: null,
-    signal: "SIGTERM",
-    timedOut: true,
-  });
 });
 
 test("iOS guest health proves app-service and SpringBoard readiness before Maestro", async (t) => {
@@ -209,8 +133,7 @@ test("iOS guest health fails before installation when the app service is unrespo
         timeoutMs: 25,
       }),
       (error) =>
-        error.code === "E2E_COMMAND_TIMEOUT" &&
-        error.e2eStage === "ios-app-service-readiness",
+        error.code === "E2E_COMMAND_TIMEOUT" && error.e2eStage === "ios-app-service-readiness",
     ),
   );
   const probe = JSON.parse(
@@ -276,8 +199,7 @@ printf '%s\n' '{}'
           device: { deviceId, platform: "ios" },
         }),
         (error) =>
-          error.message ===
-            "iOS app-service readiness returned an empty application catalog." &&
+          error.message === "iOS app-service readiness returned an empty application catalog." &&
           error.e2eStage === "ios-app-service-readiness",
       ),
   );

@@ -58,7 +58,8 @@ jobs:
         run: pnpm e2e:ios
         timeout-minutes: 135
         env:
-          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-private
+          E2E_PUBLIC_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e
           E2E_FLOW: ${{ inputs.flow }}
       - name: Upload failure artifacts
         if: failure()

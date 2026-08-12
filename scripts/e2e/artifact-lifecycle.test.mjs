@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
-import { createCleanupManager, finalizeE2eRun } from "./runtime.mjs";
+import { createCleanupManager, finalizeE2eRun, publicE2eErrorText } from "./runtime.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -56,6 +56,7 @@ test("a signal observed during cleanup prevents successful artifact deletion", a
   const artifactRoot = createRunFixture(t);
   const cleanup = createCleanupManager();
   let signalObserved = false;
+  let publicationRan = false;
   cleanup.add(async () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
     signalObserved = true;
@@ -65,9 +66,13 @@ test("a signal observed during cleanup prevents successful artifact deletion", a
     artifactRoot,
     cleanup,
     commitSuccess: () => !signalObserved,
+    publishFailureArtifacts: () => {
+      publicationRan = true;
+    },
   });
 
   assert.equal(removed, false);
+  assert.equal(publicationRan, true);
   assert.equal(existsSync(artifactRoot), true);
 });
 
@@ -76,6 +81,7 @@ test("failed E2E finalization cleans owned resources but retains its evidence", 
   const cleanup = createCleanupManager();
   const operationError = new Error("Maestro acceptance failed");
   let cleanupRan = false;
+  let publicationRan = false;
   let removalAttempted = false;
   cleanup.add(() => {
     cleanupRan = true;
@@ -86,6 +92,10 @@ test("failed E2E finalization cleans owned resources but retains its evidence", 
       artifactRoot,
       cleanup,
       operationError,
+      publishFailureArtifacts: () => {
+        assert.equal(cleanupRan, true);
+        publicationRan = true;
+      },
       removeArtifactRoot: () => {
         removalAttempted = true;
       },
@@ -94,6 +104,7 @@ test("failed E2E finalization cleans owned resources but retains its evidence", 
   );
 
   assert.equal(cleanupRan, true);
+  assert.equal(publicationRan, true);
   assert.equal(removalAttempted, false);
   assert.equal(existsSync(artifactRoot), true);
 });
@@ -101,7 +112,10 @@ test("failed E2E finalization cleans owned resources but retains its evidence", 
 test("cleanup failure retains the primary E2E error and its evidence", async (t) => {
   const artifactRoot = createRunFixture(t);
   const cleanup = createCleanupManager();
-  const operationError = new Error("device acceptance failed");
+  const operationError = Object.assign(new Error("Device became unreachable during deviceInfo"), {
+    code: "E2E_COMMAND_TIMEOUT",
+    e2eStage: "ios-maestro-suite",
+  });
   const cleanupError = new Error("simulator deletion failed");
   let removalAttempted = false;
   cleanup.add(() => {
@@ -121,12 +135,48 @@ test("cleanup failure retains the primary E2E error and its evidence", async (t)
       assert.ok(error instanceof AggregateError);
       assert.equal(error.cause, operationError);
       assert.deepEqual(error.errors, [operationError, cleanupError]);
+      assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+      assert.equal(error.e2eStage, "ios-maestro-suite");
+      assert.equal(error.message, operationError.message);
+      assert.equal(
+        publicE2eErrorText(error),
+        "[ios-maestro-suite] Device became unreachable during deviceInfo",
+      );
       return true;
     },
   );
 
   assert.equal(removalAttempted, false);
   assert.equal(existsSync(artifactRoot), true);
+});
+
+test("failure publication errors never replace the primary E2E error", async (t) => {
+  const artifactRoot = createRunFixture(t);
+  const cleanup = createCleanupManager();
+  const operationError = Object.assign(new Error("Maestro failed"), {
+    code: "E2E_COMMAND_TIMEOUT",
+    e2eStage: "ios-maestro-suite",
+  });
+  const publicationError = new Error("sanitized evidence publication failed");
+
+  await assert.rejects(
+    finalizeE2eRun({
+      artifactRoot,
+      cleanup,
+      operationError,
+      publishFailureArtifacts: () => {
+        throw publicationError;
+      },
+    }),
+    (error) => {
+      assert.equal(error.cause, operationError);
+      assert.deepEqual(error.errors, [operationError, publicationError]);
+      assert.equal(error.message, operationError.message);
+      assert.equal(error.code, operationError.code);
+      assert.equal(error.e2eStage, operationError.e2eStage);
+      return true;
+    },
+  );
 });
 
 test("artifact deletion failure fails the run after cleanup and retains evidence", async (t) => {

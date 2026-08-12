@@ -19,7 +19,7 @@ export function assessPhotoResourceDelta(before, after, expected) {
   return observed === expected ? after : null;
 }
 
-export function createPerExportPhotoResourceAssessment(before) {
+function createPerExportPhotoResourceAssessment(before) {
   let expectedExport = 1;
   return (exportIndex, after) => {
     if (exportIndex !== expectedExport) {

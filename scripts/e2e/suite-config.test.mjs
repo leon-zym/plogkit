@@ -62,6 +62,28 @@ test("the Maestro workspace orders every top-level flow by its exact name and ex
   );
 });
 
+test("every targeted flow enters the canonical launch readiness path", () => {
+  const flows = readdirSync(join(root, "e2e/flows"))
+    .filter((name) => name.endsWith(".yaml"))
+    .sort();
+
+  for (const file of flows) {
+    const source = readFileSync(join(root, "e2e/flows", file), "utf8");
+    const commands = source.split(/^---\s*$/m)[1]?.trimStart() ?? "";
+    assert.match(
+      commands,
+      /^- runFlow: \.\.\/subflows\/(?:import-two-photos|launch-app)\.yaml\n/,
+      `${file} must enter the shared launch readiness path before business commands`,
+    );
+  }
+
+  const importFlow = readFileSync(join(root, "e2e/subflows/import-two-photos.yaml"), "utf8");
+  const importCommands = importFlow.split(/^---\s*$/m)[1]?.trimStart() ?? "";
+  assert.match(importCommands, /^- runFlow: launch-app\.yaml\n/);
+  const launchFlow = readFileSync(join(root, "e2e/subflows/launch-app.yaml"), "utf8");
+  assert.match(launchFlow, /visible:\n {6}id: home-screen\n {4}timeout: 60000/);
+});
+
 test("direct lifecycle relaunches declare an empty permission override", () => {
   const flows = readdirSync(join(root, "e2e/flows"))
     .filter((name) => name.endsWith(".yaml"))

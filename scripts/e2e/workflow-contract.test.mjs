@@ -76,6 +76,10 @@ test("each mobile job has one complete E2E step and diagnostic-upload headroom",
   assert.equal((workflow.match(/run: pnpm e2e:ios/g) ?? []).length, 1);
   assert.equal((workflow.match(/run: pnpm e2e:android/g) ?? []).length, 1);
   assert.equal((workflow.match(/path: \$\{\{ runner\.temp \}\}\/plogkit-e2e$/gm) ?? []).length, 2);
+  assert.match(
+    workflow,
+    /run: pnpm e2e:ios[\s\S]*E2E_ARTIFACTS_DIR: \$\{\{ runner\.temp \}\}\/plogkit-e2e-private[\s\S]*E2E_PUBLIC_ARTIFACTS_DIR: \$\{\{ runner\.temp \}\}\/plogkit-e2e[\s\S]*name: Upload failure artifacts/,
+  );
   assert.doesNotMatch(
     workflow,
     /PlogKit\.app\.dSYM|app-release\.apk|native-debug-symbols|generated\/sourcemaps/,

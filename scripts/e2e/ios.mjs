@@ -14,11 +14,7 @@ import {
   summarizeIosSpringBoardService,
   waitUntil,
 } from "./runtime.mjs";
-import {
-  createMaestroEnvironment,
-  createStandaloneBuildEnvironment,
-  isHermesBytecode,
-} from "./environment.mjs";
+import { createStandaloneBuildEnvironment, isHermesBytecode } from "./environment.mjs";
 import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
 
 const deviceNamePrefix = "PlogKit E2E";
@@ -35,7 +31,6 @@ const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
 const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
-const iosReadinessTimeoutMs = 120000;
 const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
@@ -576,66 +571,6 @@ export async function assertIosGuestHealthy({
     throw error;
   }
   log("ios", `CoreSimulator guest health ready on ${device.deviceId}.`);
-}
-
-const IOS_SYSTEM_UI_FAULT_PATTERN =
-  /(?:SpringBoard|backboardd|CoreSimulator|Simulator)[^\n]{0,200}(?:quit unexpectedly|crash(?:ed)?|not responding|unavailable|failed)/i;
-
-export function assertIosLauncherHierarchy(hierarchy) {
-  if (IOS_SYSTEM_UI_FAULT_PATTERN.test(hierarchy)) {
-    throw new Error(`iOS readiness hierarchy contains a system UI fault:\n${hierarchy}`);
-  }
-  if (!/"resource-id"\s*:\s*"Home screen icons"/.test(hierarchy)) {
-    throw new Error(`iOS readiness did not expose the SpringBoard Home screen launcher hierarchy.`);
-  }
-}
-
-export async function assertIosDeviceReady({
-  artifactRoot,
-  cleanup,
-  device,
-  readinessTimeoutMs = iosReadinessTimeoutMs,
-  stage = "readiness",
-}) {
-  const diagnosticDirectory = join(artifactRoot, "ios", `readiness-${stage}`);
-  mkdirSync(diagnosticDirectory, { recursive: true });
-  const hierarchyPath = join(diagnosticDirectory, "springboard-hierarchy.json");
-  const hierarchyArgs = ["--device", device.deviceId, "hierarchy", "--no-ansi"];
-  try {
-    await run("maestro", hierarchyArgs, {
-      cleanup,
-      env: createMaestroEnvironment(),
-      outputPath: hierarchyPath,
-      stdio: "ignore",
-      timeoutMs: readinessTimeoutMs,
-    });
-  } catch (error) {
-    try {
-      const metadata = error?.commandMetadata ?? {
-        argumentCount: hierarchyArgs.length,
-        bytes: existsSync(hierarchyPath) ? statSync(hierarchyPath).size : 0,
-        executable: "maestro",
-        exitCode: null,
-        signal: null,
-        timedOut: error?.code === "E2E_COMMAND_TIMEOUT",
-      };
-      writeFileSync(
-        join(diagnosticDirectory, "springboard-hierarchy-probe.json"),
-        `${JSON.stringify(metadata, null, 2)}\n`,
-      );
-    } catch (diagnosticError) {
-      log(
-        "ios",
-        `Unable to preserve hierarchy probe metadata: ${
-          diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)
-        }`,
-      );
-    }
-    throw error;
-  }
-  const hierarchy = readFileSync(hierarchyPath, "utf8");
-  assertIosLauncherHierarchy(hierarchy);
-  log("ios", `SpringBoard launcher hierarchy ready on ${device.deviceId}.`);
 }
 
 export async function installAndSeedIos({
