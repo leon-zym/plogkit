@@ -96,6 +96,19 @@ test("iOS observations atomically retain monotonic stage timing without primary 
   assert.deepEqual(readdirSync(directory), ["ios-observation.json"]);
 });
 
+test("iOS observations reject runner labels unavailable to this workflow", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-observation-runner-");
+  createIosObservationRecorder({
+    directory,
+    environment: {
+      E2E_IOS_RUNNER_LABEL: "macos-26-xlarge",
+      GITHUB_JOB: "ios-maestro",
+    },
+  });
+
+  assert.equal(readSnapshot(directory).run.runner, null);
+});
+
 test("iOS observations keep only bounded numeric host evidence", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-observation-");
   const recorder = createIosObservationRecorder({

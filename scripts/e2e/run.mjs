@@ -31,7 +31,7 @@ import {
   assertSeparateIosArtifactRoots,
   publishIosFailureArtifacts,
 } from "./ios-artifact-publication.mjs";
-import { createIosRunObservationRecorder } from "./ios-observation.mjs";
+import { createIosRunObservationRecorder, observeIosStage } from "./ios-observation.mjs";
 import {
   aggregateWithPrimary,
   createArtifactRoot,
@@ -74,10 +74,6 @@ function createIosObservation(options, cleanup) {
     log("ios", `Run observation unavailable: ${recorderErrorIdentity(error)}.`);
     return null;
   }
-}
-
-function observeIos(observation, stage, operation) {
-  return observation ? observation.run(stage, operation) : operation();
 }
 
 function parseArguments(argv) {
@@ -227,7 +223,7 @@ async function runSuiteWithExportAssertion(options) {
 
   let suiteError = null;
   try {
-    await observeIos(observation, "ios-maestro-suite", () =>
+    await observeIosStage(observation, "ios-maestro-suite", () =>
       runMaestroSuite({
         ...options,
         flowEnvironment: {
@@ -332,7 +328,7 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, observati
 async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation) {
   const repositorySha256 = captureBuildInputs(root);
   await build(options.platforms, cleanup, hostEnvironment, observation);
-  const snapshot = await observeIos(observation, "ios-input-snapshot", () =>
+  const snapshot = await observeIosStage(observation, "ios-input-snapshot", () =>
     createRunSnapshot({
       artifactRoot,
       builds: options.platforms.map((platform) => ({ platform, ...buildPaths(platform) })),
@@ -402,7 +398,7 @@ async function main() {
       throw error;
     }
     observation = createIosObservation({ ...options, artifactRoot }, cleanup);
-    await observeIos(observation, "ios-simulator-environment", () =>
+    await observeIosStage(observation, "ios-simulator-environment", () =>
       validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup }),
     );
     log(

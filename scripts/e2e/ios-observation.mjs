@@ -94,6 +94,10 @@ const allowedProcessFamilies = new Set(processFamilies.values());
 const allowedProcessExecutables = new Set(processFamilies.keys());
 const maestroSupportDirectories = new Set(["logs", "screen-hierarchy", "screenshots"]);
 
+export function observeIosStage(observation, stage, operation) {
+  return observation ? observation.run(stage, operation) : operation();
+}
+
 function finiteNumber(value, { integer = false, maximum = Number.MAX_SAFE_INTEGER } = {}) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
   const normalized = integer ? Math.round(value) : Math.round(value * 100) / 100;
@@ -127,7 +131,7 @@ function normalizedRun(environment) {
         : null,
     job: environment.GITHUB_JOB === "ios-maestro" ? "ios-maestro" : null,
     mode: environment.E2E_FLOW ? "targeted" : "full",
-    runner: new Set(["macos-26", "macos-26-xlarge"]).has(runner) ? runner : null,
+    runner: runner === "macos-26" ? runner : null,
     sha: typeof sha === "string" && /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : null,
   };
 }

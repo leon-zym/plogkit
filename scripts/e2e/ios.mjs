@@ -16,6 +16,7 @@ import {
 } from "./runtime.mjs";
 import { createStandaloneBuildEnvironment, isHermesBytecode } from "./environment.mjs";
 import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
+import { observeIosStage } from "./ios-observation.mjs";
 
 const deviceNamePrefix = "PlogKit E2E";
 const requiredXcodeVersion = "26.6";
@@ -34,10 +35,6 @@ const iosPrepareEvidenceProbeTimeoutMs = 5000;
 const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
-
-function observeStage(observation, stage, operation) {
-  return observation ? observation.run(stage, operation) : operation();
-}
 
 function boundedEvidence(value, maxBytes) {
   const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -365,7 +362,7 @@ export async function buildIos({ cleanup, observation, root, workers }) {
   ];
   if (workers) args.push("-jobs", workers);
   args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
-  await observeStage(observation, "ios-release-build", async () => {
+  await observeIosStage(observation, "ios-release-build", async () => {
     await run("xcodebuild", args, {
       cleanup,
       cwd: root,
@@ -408,10 +405,12 @@ export async function prepareIosDevice({
 }) {
   let device;
   try {
-    device = await observeStage(observation, "ios-device-create", () => createEphemeralIosDevice());
+    device = await observeIosStage(observation, "ios-device-create", () =>
+      createEphemeralIosDevice(),
+    );
 
     cleanup.add(async () => {
-      await observeStage(observation, "ios-cleanup", async () => {
+      await observeIosStage(observation, "ios-cleanup", async () => {
         log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
         await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
       });
@@ -420,8 +419,8 @@ export async function prepareIosDevice({
 
     // SpringBoard and permission prompts read locale at first process startup.
     // Configure the newly-created, still-shutdown device before its only boot.
-    await observeStage(observation, "ios-locale", () => configureIosEnglishLocale(device.udid));
-    await observeStage(observation, "ios-boot", () =>
+    await observeIosStage(observation, "ios-locale", () => configureIosEnglishLocale(device.udid));
+    await observeIosStage(observation, "ios-boot", () =>
       run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
         cleanup,
         timeoutMs: lifecycleTimeoutMs,
@@ -553,7 +552,7 @@ export async function assertIosGuestHealthy({
     }
   };
 
-  await observeStage(observation, "ios-app-service-readiness", async () => {
+  await observeIosStage(observation, "ios-app-service-readiness", async () => {
     const installedApps = await captureHealthProbe("app-service", [
       "simctl",
       "listapps",
@@ -574,7 +573,7 @@ export async function assertIosGuestHealthy({
     "print",
     "system/com.apple.SpringBoard",
   ];
-  await observeStage(observation, "ios-springboard-service-readiness", async () => {
+  await observeIosStage(observation, "ios-springboard-service-readiness", async () => {
     const output = await captureHealthProbe("springboard-service", args);
     const springBoard = summarizeIosSpringBoardService(output);
     preserveEvidence("springboard-service.json", `${JSON.stringify(springBoard, null, 2)}\n`);
@@ -607,7 +606,7 @@ export async function installAndSeedIos({
     }
   };
   log("ios", "Installing the standalone Release app and seeding photos.");
-  await observeStage(observation, "ios-app-install", () =>
+  await observeIosStage(observation, "ios-app-install", () =>
     runStage("ios-app-install", () =>
       run("xcrun", ["simctl", "install", device.deviceId, artifact], {
         cleanup,
@@ -616,7 +615,7 @@ export async function installAndSeedIos({
       }),
     ),
   );
-  await observeStage(observation, "ios-fixture-addmedia", () =>
+  await observeIosStage(observation, "ios-fixture-addmedia", () =>
     runStage("ios-fixture-addmedia", () =>
       run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
         cleanup,
@@ -625,7 +624,7 @@ export async function installAndSeedIos({
       }),
     ),
   );
-  await observeStage(observation, "ios-photo-index", () =>
+  await observeIosStage(observation, "ios-photo-index", () =>
     runStage("ios-photo-index", () =>
       waitUntil(
         () => captureIosPhotoResources(device).size >= fixtures.length,

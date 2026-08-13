@@ -2,8 +2,7 @@
 
 - 状态：已接受
 - 接受日期：2026-08-13
-- 修订：[ADR 0047](0047-sanitized-ios-e2e-artifact-publication.md) 中只在失败后发布 iOS 证据的生命周期边界
-- 关联：[Issue 99](https://github.com/leon-zym/plogkit/issues/99)
+- 关联：[ADR 0045](0045-sanitized-e2e-diagnostic-evidence.md)、[Issue 99](https://github.com/leon-zym/plogkit/issues/99)
 
 ## 背景
 

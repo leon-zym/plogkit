@@ -4,6 +4,7 @@ appId: com.leonzym.plogkit
     visible:
       id: PXGGridLayout-Info
       index: 1
+      enabled: true
     timeout: 90000
 - tapOn:
     id: PXGGridLayout-Info

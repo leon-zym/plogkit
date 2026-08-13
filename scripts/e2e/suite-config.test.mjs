@@ -139,7 +139,10 @@ test("the iOS picker waits for two interactive photos before selecting them", ()
 
   assert.ok(gridWait >= 0, "the picker must wait for the second fixture cell");
   assert.ok(gridWait < firstTap, "the loaded grid must precede photo selection");
-  assert.match(source, /visible:\n {6}id: PXGGridLayout-Info\n {6}index: 1\n {4}timeout: 90000/);
+  assert.match(
+    source,
+    /visible:\n {6}id: PXGGridLayout-Info\n {6}index: 1\n {6}enabled: true\n {4}timeout: 90000/,
+  );
   assert.match(source, /- assertVisible: \^Done\$\n- tapOn: \^Done\$$/m);
   assert.doesNotMatch(source, /extendedWaitUntil:\n\s+visible: Done/);
   assert.doesNotMatch(source, /\bsleep\b|point:\s|\d+%,\s*\d+%/);

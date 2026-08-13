@@ -1,22 +1,27 @@
-# ADR 0045：iOS E2E 系统诊断证据先脱敏再保留
+# ADR 0045：iOS E2E 使用隔离且脱敏的公开证据集
 
-- 状态：部分修订
+- 状态：已接受
 - 接受日期：2026-08-13
-- 修订：[ADR 0042](0042-controlled-standalone-simulator-e2e.md) 中原始平台日志的保留决策
-- 后继：[ADR 0047](0047-sanitized-ios-e2e-artifact-publication.md)
+- 修订：[ADR 0042](0042-controlled-standalone-simulator-e2e.md) 中 iOS 原始平台日志的保留与上传边界
 - 关联：[Issue 99](https://github.com/leon-zym/plogkit/issues/99)
 
 ## 背景
 
-iOS 系统日志与系统探针会包含宿主 home、Simulator container 路径和本地验证端点。这些值不参与 guest、driver 或系统扩展的故障分类，不应随 E2E artifact 保留。
+iOS 系统日志、Maestro 输出、crash report 与系统探针可能包含宿主 home、Simulator container 路径、完整命令参数和本地 capability 端点。它们在临时工作区中可用于 runner 收集证据，但不能因此直接成为可下载的 CI artifact；只在个别探针落盘前脱敏也无法覆盖第三方工具生成的全部文件。
 
 ## 决策
 
-- iOS E2E 文本系统诊断在落盘前删除私人宿主路径及包含 capability token 的 loopback 端点；iOS 结构化系统探针只保留诊断所需的白名单字段和执行元数据。Android 原始诊断证据不在本次修订范围。
-- 脱敏不参与测试控制流，不改变 primary error、deadline、字节上限或 artifact 生命周期。
-- [ADR 0042](0042-controlled-standalone-simulator-e2e.md) 的其他失败证据决策保持不变。
+- iOS runner 将私有执行工作区与可上传证据集分离；workflow 只上传公开根目录，绝不直接上传私有工作区。
+- iOS 文本证据删除私人宿主路径与 capability 端点；结构化证据只保留诊断所需的白名单字段和有界执行元数据。无法安全解释的文件省略，受支持图片在发布前验证结构并移除附加元数据。
+- 失败清理完成后，runner 从白名单生成有扫描深度、文件数、读取量、单文件与总字节上限的副本；公开证据先在独立目录完整生成，再原子发布。摘要必须显式标记截断、省略或发布不完整。
+- 脱敏与发布不参与测试控制流。发布或清理失败作为次级错误保留，不覆盖原始 E2E failure 的身份、阶段、错误码与 cause。Android 原始诊断证据不在本次修订范围。
 
 ## 影响与代价
 
-- iOS 文本平台日志不再保证与系统命令输出逐字节相同，但时间、进程、subsystem 和事件语义继续保留。
-- 系统探针失去容器路径等低价值细节，以换取可安全上传的故障证据。
+- iOS CI artifact 不再是私有执行工作区的逐字节镜像，但仍保留故障阶段、Maestro flow、UI hierarchy、日志语义、截图与结构化探针。
+- 不透明或超出预算的证据不会上传；摘要明确标记缺口，维护者可据此决定是否在受控环境追加采样。
+- runner 增加一个失败后、只读且有界的发布步骤，不新增设备生命周期、driver、retry 或业务控制分支。
+
+## 迁移与兼容
+
+workflow 与人工下载只消费公开根目录；私有工作区不提供兼容路径。公开证据按白名单增量演进，消费者必须检查 publication summary 的完整性，不能把缺失文件解释为对应系统状态不存在。
