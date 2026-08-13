@@ -152,7 +152,15 @@ function createBoundedCapture(maxBytes) {
 async function captureDiagnostic(
   command,
   args,
-  { captureStdout = false, cleanup, cwd, env = process.env, maxBytes, timeoutMs },
+  {
+    captureStdout = false,
+    cleanup,
+    cwd,
+    env = process.env,
+    maxBytes,
+    terminate = terminateProcessTree,
+    timeoutMs,
+  },
 ) {
   const captureWindow = createBoundedCapture(maxBytes);
   const stdoutWindow = captureStdout ? createBoundedCapture(maxBytes) : null;
@@ -184,15 +192,19 @@ async function captureDiagnostic(
     let exitCode = null;
     let exitSignal = null;
     let finalizing = false;
+    let lifecycleActive = true;
     let spawnError = null;
     let stopPromise = null;
     let timeoutHandle = null;
     const stopTree = () =>
-      (stopPromise ??= terminateProcessTree(child, {
+      (stopPromise ??= terminate(child, {
         gracefulTimeoutMs: killGraceMs,
         killTimeoutMs: killGraceMs,
       }));
-    cleanup?.add(stopTree);
+    cleanup?.add(async () => {
+      if (!lifecycleActive) return;
+      await stopTree();
+    });
     const finish = async (timedOut = false) => {
       if (finalizing) return;
       finalizing = true;
@@ -203,6 +215,7 @@ async function captureDiagnostic(
       } catch (error) {
         terminationError = error;
       }
+      lifecycleActive = false;
       child.stdout?.destroy();
       child.stderr?.destroy();
       const captured = captureWindow.finish();
@@ -285,7 +298,15 @@ function boundedCommandError(command, args, result, { includeOutputInError, maxB
 export async function captureBoundedCommand(
   command,
   args,
-  { cleanup, cwd, env = process.env, includeOutputInError = true, maxBytes, timeoutMs },
+  {
+    cleanup,
+    cwd,
+    env = process.env,
+    includeOutputInError = true,
+    maxBytes,
+    terminate,
+    timeoutMs,
+  },
 ) {
   const result = await captureDiagnostic(command, args, {
     captureStdout: true,
@@ -293,6 +314,7 @@ export async function captureBoundedCommand(
     cwd,
     env,
     maxBytes,
+    terminate,
     timeoutMs,
   });
   if (!result.ok) {

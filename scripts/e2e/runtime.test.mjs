@@ -160,6 +160,32 @@ test("bounded commands can omit sensitive output from their primary error", asyn
   );
 });
 
+test("bounded command finalization failures are not replayed by global cleanup", async () => {
+  const cleanup = createCleanupManager();
+  const terminationError = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  let terminationAttempts = 0;
+
+  await assert.rejects(
+    captureBoundedCommand(process.execPath, ["--input-type=module", "-e", ""], {
+      cleanup,
+      maxBytes: 1024,
+      terminate: async () => {
+        terminationAttempts += 1;
+        throw terminationError;
+      },
+      timeoutMs: 1000,
+    }),
+    (error) => {
+      assert.equal(error.code, "E2E_PROCESS_TREE_TERMINATION_FAILED");
+      assert.equal(error.errors.includes(terminationError), true);
+      return true;
+    },
+  );
+
+  await cleanup.run();
+  assert.equal(terminationAttempts, 1);
+});
+
 test(
   "bounded command capture kills a TERM-resistant process tree retaining output pipes",
   { skip: process.platform === "win32" },
