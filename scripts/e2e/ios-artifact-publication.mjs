@@ -25,6 +25,9 @@ const MAXIMUM_READ_BYTES = 48 * 1024 * 1024;
 const MAXIMUM_TEXT_BYTES = 2 * 1024 * 1024;
 const MAXIMUM_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAXIMUM_TOTAL_BYTES = 32 * 1024 * 1024;
+const MAXIMUM_SUMMARY_BYTES = 16 * 1024;
+const MAXIMUM_PAYLOAD_FILES = MAXIMUM_FILES - 1;
+const MAXIMUM_PAYLOAD_BYTES = MAXIMUM_TOTAL_BYTES - MAXIMUM_SUMMARY_BYTES;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const RETAINED_PNG_CHUNKS = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
 const TEXT_EXTENSIONS = new Set([
@@ -189,14 +192,15 @@ function createSummary() {
     complete: true,
     filesPublished: 0,
     omitted: { overLimit: 0, readFailure: 0, unsupported: 0 },
+    totalBytes: 0,
     truncatedFiles: 0,
   };
 }
 
 function writePublishedFile(stagingRoot, relativePath, body, summary, state) {
   if (
-    summary.filesPublished >= MAXIMUM_FILES ||
-    state.totalBytes + body.length > MAXIMUM_TOTAL_BYTES
+    summary.filesPublished >= MAXIMUM_PAYLOAD_FILES ||
+    state.totalBytes + body.length > MAXIMUM_PAYLOAD_BYTES
   ) {
     summary.complete = false;
     summary.omitted.overLimit += 1;
@@ -207,6 +211,23 @@ function writePublishedFile(stagingRoot, relativePath, body, summary, state) {
   writeFileSync(target, body);
   state.totalBytes += body.length;
   summary.filesPublished += 1;
+}
+
+function encodePublicationSummary(summary, state) {
+  summary.filesPublished += 1;
+  let body;
+  let totalBytes = state.totalBytes;
+  do {
+    summary.totalBytes = totalBytes;
+    body = Buffer.from(`${JSON.stringify(summary)}\n`);
+    totalBytes = state.totalBytes + body.length;
+  } while (summary.totalBytes !== totalBytes);
+  if (body.length > MAXIMUM_SUMMARY_BYTES || totalBytes > MAXIMUM_TOTAL_BYTES) {
+    throw new Error("The iOS publication summary exceeded its reserved artifact budget.");
+  }
+  summary.totalBytes = totalBytes;
+  state.totalBytes = totalBytes;
+  return body;
 }
 
 function readTextEvidence(source, size, summary) {
@@ -322,8 +343,8 @@ export function publishIosFailureArtifacts({ publicationRoot, sourceRoot }) {
     }
     for (const candidate of candidates) {
       if (
-        summary.filesPublished >= MAXIMUM_FILES ||
-        state.totalBytes >= MAXIMUM_TOTAL_BYTES ||
+        summary.filesPublished >= MAXIMUM_PAYLOAD_FILES ||
+        state.totalBytes >= MAXIMUM_PAYLOAD_BYTES ||
         state.readBytes >= MAXIMUM_READ_BYTES
       ) {
         summary.complete = false;
@@ -332,7 +353,10 @@ export function publishIosFailureArtifacts({ publicationRoot, sourceRoot }) {
       }
       publishCandidate(candidate, stagingRoot, summary, state);
     }
-    writeFileSync(join(stagingRoot, "publication-summary.json"), `${JSON.stringify(summary)}\n`);
+    writeFileSync(
+      join(stagingRoot, "publication-summary.json"),
+      encodePublicationSummary(summary, state),
+    );
     renameSync(stagingRoot, destination);
     return configuredDestination;
   } catch (error) {

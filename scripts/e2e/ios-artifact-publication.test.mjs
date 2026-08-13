@@ -27,6 +27,13 @@ function filesBelow(directory, relativeDirectory = "") {
   });
 }
 
+function totalBytesBelow(directory) {
+  return filesBelow(directory).reduce(
+    (total, path) => total + readFileSync(join(directory, path)).length,
+    0,
+  );
+}
+
 test("iOS failure publication exposes only bounded sanitized evidence", (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-ios-publication-");
   const sourceRoot = join(directory, "private", "run-id");
@@ -157,10 +164,36 @@ test("iOS failure publication stops at its scan and file budgets", (t) => {
 
   const destination = publishIosFailureArtifacts({ publicationRoot, sourceRoot });
   const summary = JSON.parse(readFileSync(join(destination, "publication-summary.json"), "utf8"));
+  const publishedFiles = filesBelow(destination);
   const publishedLogs = filesBelow(destination).filter((path) => path.endsWith(".log"));
 
   assert.equal(summary.complete, false);
   assert.equal(summary.omitted.overLimit, 2);
   assert.equal(summary.filesPublished, 256);
-  assert.equal(publishedLogs.length, summary.filesPublished);
+  assert.equal(publishedFiles.length, summary.filesPublished);
+  assert.equal(publishedLogs.length, summary.filesPublished - 1);
+  assert.equal(summary.totalBytes, totalBytesBelow(destination));
+  assert.ok(summary.totalBytes <= 32 * 1024 * 1024);
+});
+
+test("iOS failure publication includes its summary in the total byte budget", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-publication-bytes-");
+  const sourceRoot = join(directory, "private", "run-id");
+  const flowRoot = join(sourceRoot, "ios", "flows", "large-files");
+  const publicationRoot = join(directory, "public");
+  mkdirSync(flowRoot, { recursive: true });
+  for (let index = 0; index < 16; index += 1) {
+    writeFileSync(join(flowRoot, `${index}.log`), "x".repeat(2 * 1024 * 1024));
+  }
+
+  const destination = publishIosFailureArtifacts({ publicationRoot, sourceRoot });
+  const summary = JSON.parse(readFileSync(join(destination, "publication-summary.json"), "utf8"));
+  const publishedLogs = filesBelow(destination).filter((path) => path.endsWith(".log"));
+
+  assert.equal(summary.complete, false);
+  assert.equal(summary.omitted.overLimit, 1);
+  assert.equal(publishedLogs.length, 15);
+  assert.equal(summary.filesPublished, 16);
+  assert.equal(summary.totalBytes, totalBytesBelow(destination));
+  assert.ok(summary.totalBytes <= 32 * 1024 * 1024);
 });
