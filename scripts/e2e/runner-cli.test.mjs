@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -171,7 +171,7 @@ test("the runner rejects an incomplete flow selector before validation", () => {
 });
 
 test("photo resource assessment waits while fewer than the expected identities are present", async () => {
-  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const { assessPhotoResourceDelta } = await import("./export-assertion.mjs");
   const before = new Set(["fixture-1", "fixture-2"]);
   const after = new Set([...before, "export-1"]);
 
@@ -179,7 +179,7 @@ test("photo resource assessment waits while fewer than the expected identities a
 });
 
 test("photo resource assessment accepts exactly the expected new identities", async () => {
-  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const { assessPhotoResourceDelta } = await import("./export-assertion.mjs");
   const before = new Set(["fixture-1", "fixture-2"]);
   const after = new Set([...before, "export-1", "export-2"]);
 
@@ -187,7 +187,7 @@ test("photo resource assessment accepts exactly the expected new identities", as
 });
 
 test("photo resource assessment rejects more than the expected new identities", async () => {
-  const { assessPhotoResourceDelta } = await import("./run.mjs");
+  const { assessPhotoResourceDelta } = await import("./export-assertion.mjs");
   const before = new Set(["fixture-1", "fixture-2"]);
   const after = new Set([...before, "export-1", "export-2", "unexpected-export"]);
 
@@ -197,82 +197,91 @@ test("photo resource assessment rejects more than the expected new identities", 
   );
 });
 
-test("per-export photo assessment accepts one new identity at each boundary", async () => {
-  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
-  const before = new Set(["fixture-1", "fixture-2"]);
-  const assess = createPerExportPhotoResourceAssessment(before);
-  const afterFirstExport = new Set([...before, "export-1"]);
-  const afterSecondExport = new Set([...afterFirstExport, "export-2"]);
-
-  assert.equal(assess(1, before), null);
-  assert.equal(assess(1, afterFirstExport), afterFirstExport);
-  assert.equal(assess(2, afterSecondExport), afterSecondExport);
-});
-
-test("per-export photo assessment rejects two identities at the first boundary", async () => {
-  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
-  const before = new Set(["fixture-1", "fixture-2"]);
-  const assess = createPerExportPhotoResourceAssessment(before);
-  const afterBothExports = new Set([...before, "export-1", "export-2"]);
-
-  assert.throws(
-    () => assess(1, afterBothExports),
-    /Expected exactly 1 new system photo resources, but observed 2/,
-  );
-});
-
-test("per-export photo assessment rejects an out-of-order boundary", async () => {
-  const { createPerExportPhotoResourceAssessment } = await import("./run.mjs");
-  const before = new Set(["fixture-1", "fixture-2"]);
-  const assess = createPerExportPhotoResourceAssessment(before);
-
-  assert.throws(
-    () => assess(2, new Set([...before, "export-1", "export-2"])),
-    /Expected photo assertion for export 1, but received export 2/,
-  );
-});
-
 test("the export photo assertion server binds each request to its exact delta", async () => {
-  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const { startExportAssertionBridge } = await import("./export-assertion.mjs");
   const device = { platform: "ios" };
   const before = new Set(["fixture-1", "fixture-2"]);
   let resources = new Set([...before, "export-1"]);
-  const server = await startExportPhotoAssertionServer(device, before, {
-    captureResources: () => resources,
-    timeoutMs: 100,
+  const bridge = await startExportAssertionBridge({
+    beforePhotoResources: before,
+    capturePhotoResources: () => resources,
+    device,
+    exportTimeoutMs: 100,
   });
 
   try {
-    const first = await fetch(`${server.url}/1`, { method: "POST" });
+    const assertionUrl = new URL(bridge.environment.PLOGKIT_EXPORT_ASSERTION_URL);
+    assert.match(assertionUrl.pathname, /^\/[0-9a-f-]{36}$/);
+    const unauthenticated = await fetch(new URL("/1", assertionUrl), { method: "POST" });
+    assert.equal(unauthenticated.status, 404);
+    const first = await fetch(`${bridge.environment.PLOGKIT_EXPORT_ASSERTION_URL}/1`, {
+      method: "POST",
+    });
     assert.equal(first.status, 204);
     resources = new Set([...resources, "export-2"]);
-    const second = await fetch(`${server.url}/2`, { method: "POST" });
+    const second = await fetch(`${bridge.environment.PLOGKIT_EXPORT_ASSERTION_URL}/2`, {
+      method: "POST",
+    });
     assert.equal(second.status, 204);
   } finally {
-    await server.close();
+    await bridge.close();
   }
 });
 
 test("the first export assertion rejects a cumulative delta of two", async () => {
-  const { startExportPhotoAssertionServer } = await import("./run.mjs");
+  const { startExportAssertionBridge } = await import("./export-assertion.mjs");
   const device = { platform: "android" };
   const before = new Set(["fixture-1", "fixture-2"]);
   const resources = new Set([...before, "export-1", "export-2"]);
-  const server = await startExportPhotoAssertionServer(device, before, {
-    captureResources: () => resources,
-    timeoutMs: 100,
+  const bridge = await startExportAssertionBridge({
+    beforePhotoResources: before,
+    capturePhotoResources: () => resources,
+    device,
+    exportTimeoutMs: 100,
   });
 
   try {
-    const response = await fetch(`${server.url}/1`, { method: "POST" });
+    const response = await fetch(`${bridge.environment.PLOGKIT_EXPORT_ASSERTION_URL}/1`, {
+      method: "POST",
+    });
     assert.equal(response.status, 409);
     assert.match(
       await response.text(),
       /Expected exactly 1 new system photo resources, but observed 2/,
     );
   } finally {
-    await server.close();
+    await bridge.close();
   }
+});
+
+test("export bridge close cancels active assertion polling", async () => {
+  const { startExportAssertionBridge } = await import("./export-assertion.mjs");
+  const requestStarted = Promise.withResolvers();
+  const before = new Set(["fixture-1", "fixture-2"]);
+  let captures = 0;
+  const bridge = await startExportAssertionBridge({
+    beforePhotoResources: before,
+    capturePhotoResources() {
+      captures += 1;
+      requestStarted.resolve();
+      return before;
+    },
+    closeTimeoutMs: 250,
+    device: { platform: "ios" },
+    exportTimeoutMs: 1000,
+  });
+
+  const request = fetch(`${bridge.environment.PLOGKIT_EXPORT_ASSERTION_URL}/1`, {
+    method: "POST",
+  }).catch(() => null);
+  await requestStarted.promise;
+  const closeStartedAt = Date.now();
+  await bridge.close();
+  assert.ok(Date.now() - closeStartedAt < 250);
+  await request;
+  const capturesAfterClose = captures;
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+  assert.equal(captures, capturesAfterClose);
 });
 
 test("sorted platform locks precede locked CoreSimulator validation", async () => {

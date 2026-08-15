@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -20,6 +21,7 @@ import {
   captureBoundedCommand,
   acquireE2ePlatformLock,
   collectFailureDiagnostics,
+  publicE2eErrorText,
   createCleanupManager,
   createArtifactRoot,
   finalizeCleanup,
@@ -54,6 +56,134 @@ test("capture bounds an unresponsive diagnostic command", (t) => {
 
   assert.equal(result, null);
   assert.ok(Date.now() - startedAt < 500);
+});
+
+test("public E2E errors redact command arguments, loopback endpoints, and private paths", () => {
+  const source = Object.assign(
+    new Error(
+      "Command failed (1): /Users/runner/work/plogkit/maestro --env PLOGKIT_EXPORT_ASSERTION_URL=http://127.0.0.1:4312/private-token /var/folders/private/output\n" +
+        "artifact: /home/runner/work/plogkit/private.log\n" +
+        "endpoint: http://127.0.0.1:9876/another-token",
+    ),
+    { e2eStage: "ios-app-install" },
+  );
+  const output = publicE2eErrorText(source);
+
+  assert.equal(
+    output,
+    "[ios-app-install] Command failed (1): maestro <arguments redacted>\n" +
+      "artifact: <PRIVATE_PATH>\n" +
+      "endpoint: <LOOPBACK_ENDPOINT>",
+  );
+  assert.doesNotMatch(output, /Users|127\.0\.0\.1|private-token|var\/folders/);
+});
+
+test("public E2E text redacts JSON-escaped private paths and loopback capabilities", () => {
+  const output = publicE2eErrorText(
+    String.raw`{"path":"\/Users\/runner\/Library\/private","temp":"\/private\/var\/folders\/secret","endpoint":"http:\/\/127.0.0.1:4312\/private-token"}`,
+  );
+
+  assert.equal((output.match(/<PRIVATE_PATH>/g) ?? []).length, 2);
+  assert.match(output, /<LOOPBACK_ENDPOINT>/);
+  assert.doesNotMatch(output, /Users|127\.0\.0\.1|private-token/);
+});
+
+test("public E2E text redacts prefixed commands and every loopback spelling", () => {
+  const output = publicE2eErrorText(
+    "original error: Command timed out after 120000ms: /usr/bin/xcrun simctl boot PRIVATE-UDID\n" +
+      "driver: 127.0.0.1:53168 <127.0.0.1> localhost:4312/token http://[::1]:9876/private",
+  );
+
+  assert.equal(
+    output,
+    "original error: Command timed out after 120000ms: xcrun <arguments redacted>\n" +
+      "driver: <LOOPBACK_ENDPOINT> <LOOPBACK_ENDPOINT> <LOOPBACK_ENDPOINT> <LOOPBACK_ENDPOINT>",
+  );
+  assert.doesNotMatch(output, /PRIVATE-UDID|127\.0\.0\.1|localhost|::1|token|private/);
+});
+
+test("signal cleanup publishes bounded evidence before the runner exits", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-signal-publication-");
+  const eventLog = join(directory, "events.log");
+  const runtimeUrl = new URL("./runtime.mjs", import.meta.url).href;
+  const source = `
+import { appendFileSync } from "node:fs";
+import { createCleanupManager, installSignalHandlers } from ${JSON.stringify(runtimeUrl)};
+const cleanup = createCleanupManager();
+cleanup.add(() => appendFileSync(${JSON.stringify(eventLog)}, "cleanup\\n"));
+installSignalHandlers(cleanup, {
+  recordInterruption: () => appendFileSync(${JSON.stringify(eventLog)}, "interrupted\\n"),
+  publishFailureArtifacts: () => appendFileSync(${JSON.stringify(eventLog)}, "publish\\n"),
+});
+process.stdout.write("ready\\n");
+setInterval(() => {}, 1000);
+`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  });
+  await Promise.race([
+    new Promise((resolvePromise) => {
+      child.stdout.once("data", resolvePromise);
+    }),
+    new Promise((_, rejectPromise) =>
+      setTimeout(() => rejectPromise(new Error("signal fixture did not become ready")), 2000),
+    ),
+  ]);
+
+  child.kill("SIGTERM");
+  const [exitCode, signal] = await once(child, "exit");
+
+  assert.equal(exitCode, 143);
+  assert.equal(signal, null);
+  assert.equal(readFileSync(eventLog, "utf8"), "interrupted\ncleanup\npublish\n");
+});
+
+test("bounded commands can omit sensitive output from their primary error", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-private-command-output-");
+  const command = join(directory, "private-output");
+  writeExecutable(command, "#!/bin/sh\nprintf '%s\\n' '/Users/runner/private-catalog'\nexit 7\n");
+
+  await assert.rejects(
+    captureBoundedCommand(command, [], {
+      includeOutputInError: false,
+      maxBytes: 1024,
+      timeoutMs: 1000,
+    }),
+    (error) => {
+      assert.doesNotMatch(error.message, /Users\/runner|private-catalog/);
+      assert.match(error.message, /Command failed \(7\)/);
+      return true;
+    },
+  );
+});
+
+test("bounded command finalization failures are not replayed by global cleanup", async () => {
+  const cleanup = createCleanupManager();
+  const terminationError = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  let terminationAttempts = 0;
+
+  await assert.rejects(
+    captureBoundedCommand(process.execPath, ["--input-type=module", "-e", ""], {
+      cleanup,
+      maxBytes: 1024,
+      terminate: async () => {
+        terminationAttempts += 1;
+        throw terminationError;
+      },
+      timeoutMs: 1000,
+    }),
+    (error) => {
+      assert.equal(error.code, "E2E_PROCESS_TREE_TERMINATION_FAILED");
+      assert.equal(error.errors.includes(terminationError), true);
+      return true;
+    },
+  );
+
+  await cleanup.run();
+  assert.equal(terminationAttempts, 1);
 });
 
 test(
@@ -436,7 +566,7 @@ esac
       join(directory, "artifacts", "android", "acceptance-failure", "failure-summary.txt"),
       "utf8",
     ),
-    /original error: Command failed \(1\): .*\/adb /,
+    /original error: Command failed \(1\): adb <arguments redacted>/,
   );
 });
 
@@ -632,6 +762,89 @@ exit 0
   assert.doesNotMatch(invocations[0], /f00-first\.yaml|f01-second\.yaml/);
 });
 
+test("an iOS Maestro failure is classified at the single suite lifecycle", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-maestro-stage-");
+  const binaries = join(directory, "bin");
+  const flows = join(directory, "e2e", "flows");
+  mkdirSync(binaries, { recursive: true });
+  mkdirSync(flows, { recursive: true });
+  writeFileSync(join(flows, "target-flow.yaml"), "appId: test\n---\n");
+  writeExecutable(
+    join(binaries, "maestro"),
+    "#!/bin/sh\nprintf 'startup=%s\\n' \"$MAESTRO_DRIVER_STARTUP_TIMEOUT\" >&2\nprintf '%s\\n' 'Device became unreachable during deviceInfo' >&2\nexit 1\n",
+  );
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await assert.rejects(
+      runMaestroSuite({
+        artifactRoot: join(directory, "artifacts"),
+        cleanup: { add() {} },
+        device: { platform: "ios", deviceId: "simulator-test" },
+        e2eRoot: join(directory, "e2e"),
+        flow: "target-flow",
+        root: directory,
+      }),
+      (error) => {
+        assert.equal(error.e2eStage, "ios-maestro-suite");
+        assert.match(error.message, /Command failed/);
+        return true;
+      },
+    );
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  assert.match(
+    readFileSync(join(directory, "artifacts", "ios", "flows", "runner-output.log"), "utf8"),
+    /startup=120000.*Device became unreachable during deviceInfo/s,
+  );
+});
+
+test("full and targeted iOS suites each start exactly one Maestro test lifecycle", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-e2e-ios-single-driver-");
+  const binaries = join(directory, "bin");
+  const e2eRoot = join(directory, "e2e");
+  const flows = join(e2eRoot, "flows");
+  const invocationLog = join(directory, "invocations.log");
+  mkdirSync(binaries, { recursive: true });
+  mkdirSync(flows, { recursive: true });
+  writeFileSync(join(e2eRoot, "config.yaml"), "flows:\n  - flows/*.yaml\n");
+  writeFileSync(join(flows, "target-flow.yaml"), "appId: test\n---\n");
+  writeExecutable(
+    join(binaries, "maestro"),
+    `#!/bin/sh
+printf '%s\n' "$*" >> ${JSON.stringify(invocationLog)}
+exit 0
+`,
+  );
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    for (const flow of [null, "target-flow"]) {
+      await runMaestroSuite({
+        artifactRoot: join(directory, "artifacts"),
+        cleanup: { add() {} },
+        device: { platform: "ios", deviceId: "simulator-test" },
+        e2eRoot,
+        flow,
+        root: directory,
+      });
+    }
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const invocations = readFileSync(invocationLog, "utf8").trim().split("\n");
+  assert.equal(invocations.length, 2);
+  assert.ok(invocations.every((invocation) => /--device simulator-test test /.test(invocation)));
+  assert.ok(invocations.every((invocation) => !/\bhierarchy\b/.test(invocation)));
+  assert.match(invocations[0], /--config=.*\/e2e\/config\.yaml .*\/e2e$/);
+  assert.match(invocations[1], /\/e2e\/flows\/target-flow\.yaml$/);
+});
+
 test("Maestro execution requires an immutable E2E run snapshot root", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-e2e-snapshot-root-");
   const binaries = join(directory, "bin");
@@ -772,15 +985,31 @@ test("iOS diagnostics copy only fresh relevant reports through the high-level se
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
-if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+if [ "$1 $2 $3" = "simctl list devices" ]; then
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = {}; }'
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
+  printf '%s\n' 'pid = 4242' 'state = running'
+elif [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
-  exit 0
+else
+  printf '%s\n' 'raw simulator log'
 fi
-printf '%s\n' 'raw simulator log'
 `,
   );
-  writeFileSync(join(reports, "PlogKit-fresh.ips"), "app crash");
-  writeFileSync(join(reports, "MaestroDriver-fresh.crash"), "driver crash");
+  writeFileSync(join(reports, "PlogKit-fresh.ips"), "app crash /Users/runner/private/app");
+  writeFileSync(
+    join(reports, "MaestroDriver-fresh.crash"),
+    String.raw`driver crash \/Users\/runner\/private\/driver`,
+  );
+  writeFileSync(join(reports, "PUPicker-fresh.ips"), "picker crash");
+  writeFileSync(join(reports, "PhotosUIService-fresh.crash"), "photos ui crash");
+  writeFileSync(
+    join(reports, "photolibraryd-fresh.diag"),
+    "photo library crash http://127.0.0.1:4312/private-token",
+  );
+  writeFileSync(join(reports, "assetsd-fresh.ips"), "photo assets crash");
   writeFileSync(join(reports, "Unrelated-fresh.diag"), "unrelated");
   writeFileSync(join(reports, "PlogKit-old.ips"), "old app crash");
   utimesSync(join(reports, "PlogKit-old.ips"), new Date(0), new Date(0));
@@ -802,8 +1031,24 @@ printf '%s\n' 'raw simulator log'
   }
 
   assert.deepEqual(result, { complete: true });
-  assert.equal(readFileSync(join(artifacts, "PlogKit-fresh.ips"), "utf8"), "app crash");
-  assert.equal(readFileSync(join(artifacts, "MaestroDriver-fresh.crash"), "utf8"), "driver crash");
+  assert.equal(
+    readFileSync(join(artifacts, "PlogKit-fresh.ips"), "utf8"),
+    "app crash <PRIVATE_PATH>",
+  );
+  assert.equal(
+    readFileSync(join(artifacts, "MaestroDriver-fresh.crash"), "utf8"),
+    "driver crash <PRIVATE_PATH>",
+  );
+  assert.equal(readFileSync(join(artifacts, "PUPicker-fresh.ips"), "utf8"), "picker crash");
+  assert.equal(
+    readFileSync(join(artifacts, "PhotosUIService-fresh.crash"), "utf8"),
+    "photos ui crash",
+  );
+  assert.equal(
+    readFileSync(join(artifacts, "photolibraryd-fresh.diag"), "utf8"),
+    "photo library crash <LOOPBACK_ENDPOINT>",
+  );
+  assert.equal(readFileSync(join(artifacts, "assetsd-fresh.ips"), "utf8"), "photo assets crash");
   assert.equal(existsSync(join(artifacts, "Unrelated-fresh.diag")), false);
   assert.equal(existsSync(join(artifacts, "PlogKit-old.ips")), false);
   assert.match(readFileSync(join(artifacts, "simulator-system.log"), "utf8"), /raw simulator/);
@@ -822,15 +1067,15 @@ test("iOS diagnostics capture bounded device and XCTest readiness probes", async
     `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
 if [ "$1 $2 $3" = "simctl list devices" ]; then
-  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
-elif [ "$1 $2 $3" = "simctl spawn simulator-test" ] && [ "$4" = "/usr/bin/true" ]; then
-  exit 0
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted","dataPath":"/Users/runner/private-device"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = { DataContainer = "file:///Users/runner/Library/private"; }; }'
 elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
-  printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running'
+  printf '%s\n' 'service = com.apple.SpringBoard' 'pid = 4242' 'state = running' 'SIMULATOR_HOST_HOME = /Users/runner/private-home'
 elif [ "$1 $2 $3 $4" = "simctl io simulator-test screenshot" ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
 elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test log" ]; then
-  printf '%s\n' 'Maestro iOS driver waiting for XCTest bootstrap'
+  printf '%s\n' 'Maestro iOS driver waiting for XCTest bootstrap at /Users/runner/private-log http://127.0.0.1:4312/private-token'
 else
   printf '%s\n' "unexpected xcrun command: $*" >&2
   exit 2
@@ -848,7 +1093,7 @@ fi
       device: { platform: "ios", deviceId: "simulator-test" },
       error: Object.assign(new Error("hierarchy timed out"), { code: "E2E_COMMAND_TIMEOUT" }),
       iosReportsDirectory: reports,
-      sinceMs: Date.now() - 1000,
+      sinceMs: Date.now() - 60 * 60 * 1000,
       timeoutMs: 5000,
     });
   } finally {
@@ -859,27 +1104,31 @@ fi
 
   assert.deepEqual(result, { complete: true });
   assert.match(readFileSync(join(artifacts, "host-simulator-devices.json"), "utf8"), /Booted/);
-  assert.equal(statSync(join(artifacts, "device-spawn.txt")).size, 0);
-  assert.match(readFileSync(join(artifacts, "springboard-service.txt"), "utf8"), /pid = 4242/);
+  const appServiceProbe = JSON.parse(
+    readFileSync(join(artifacts, "device-app-service.probe.json"), "utf8"),
+  );
+  assert.ok(appServiceProbe.bytes > 0);
+  assert.equal(existsSync(join(artifacts, "device-app-service.txt")), false);
+  assert.match(readFileSync(join(artifacts, "springboard-service.json"), "utf8"), /"pid": 4242/);
+  const safeProbeEvidence = [
+    "host-simulator-devices.json",
+    "device-app-service.probe.json",
+    "springboard-service.json",
+    "springboard-service.probe.json",
+  ]
+    .map((name) => readFileSync(join(artifacts, name), "utf8"))
+    .join("\n");
+  assert.doesNotMatch(safeProbeEvidence, /Users\/runner|DataContainer|SIMULATOR_HOST_HOME/);
   assert.equal(readFileSync(join(artifacts, "springboard-screenshot.png"), "utf8"), "PNG-EVIDENCE");
   assert.match(
     readFileSync(join(artifacts, "simulator-system.log"), "utf8"),
     /Maestro iOS driver waiting for XCTest/,
   );
-
-  const spawnMetadata = JSON.parse(
-    readFileSync(join(artifacts, "device-spawn.probe.json"), "utf8"),
+  assert.doesNotMatch(
+    readFileSync(join(artifacts, "simulator-system.log"), "utf8"),
+    /Users\/runner|127\.0\.0\.1|private-token/,
   );
-  assert.deepEqual(spawnMetadata, {
-    bytes: 0,
-    command: ["xcrun", "simctl", "spawn", "simulator-test", "/usr/bin/true"],
-    error: null,
-    exitCode: 0,
-    signal: null,
-    terminationError: null,
-    timedOut: false,
-    truncated: false,
-  });
+
   const screenshotMetadata = JSON.parse(
     readFileSync(join(artifacts, "springboard-screenshot.probe.json"), "utf8"),
   );
@@ -892,7 +1141,25 @@ fi
   const commands = readFileSync(commandLog, "utf8");
   assert.match(commands, /^simctl list devices -j$/m);
   assert.match(commands, /launchctl print system\/com\.apple\.SpringBoard/);
+  assert.match(commands, /log show .*--last 120s/);
   assert.match(commands, /log show .*process CONTAINS\[c\] "maestro"/);
+  assert.match(commands, /log show .*process == "testmanagerd"/);
+  assert.match(commands, /log show .*process == "PhotosUIService"/);
+  assert.match(commands, /log show .*subsystem CONTAINS\[c\] "PhotoKit"/);
+  assert.match(
+    commands,
+    /\(process == "SpringBoard" OR process CONTAINS\[c\] "CoreSimulator"\) AND \(/,
+  );
+  const predicate = commands.match(/--predicate (.+)$/m)?.[1] ?? "";
+  assert.equal((predicate.match(/process == "backboardd"/g) ?? []).length, 1);
+  assert.match(
+    predicate,
+    /process == "backboardd" AND \( eventMessage CONTAINS\[c\] "not responding"/,
+  );
+  assert.doesNotMatch(
+    predicate,
+    /process == "backboardd"[^)]*CONTAINS\[c\] "(?:failed|error|fault)"/,
+  );
 });
 
 test("iOS readiness probe failures never replace the primary acceptance error", async (t) => {
@@ -952,7 +1219,13 @@ test("iOS diagnostics preserve fresh relevant reports retired by macOS", async (
   writeExecutable(
     join(binaries, "xcrun"),
     `#!/bin/sh
-if [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
+if [ "$1 $2 $3" = "simctl list devices" ]; then
+  printf '%s\n' '{"devices":{"iOS 26.5":[{"udid":"simulator-test","state":"Booted"}]}}'
+elif [ "$1 $2 $3" = "simctl listapps simulator-test" ]; then
+  printf '%s\n' '{ "com.apple.mobilesafari" = {}; }'
+elif [ "$1 $2 $3 $4" = "simctl spawn simulator-test launchctl" ]; then
+  printf '%s\n' 'pid = 4242' 'state = running'
+elif [ "$1" = simctl ] && [ "$2" = io ] && [ "$4" = screenshot ]; then
   printf '%s' 'PNG-EVIDENCE' > "$5"
 fi
 exit 0

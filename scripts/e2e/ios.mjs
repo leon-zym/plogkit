@@ -2,14 +2,22 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 
-import { capture, captureBoundedCommand, log, run, waitUntil } from "./runtime.mjs";
 import {
-  createMaestroEnvironment,
-  createStandaloneBuildEnvironment,
-  isHermesBytecode,
-} from "./environment.mjs";
+  capture,
+  captureBoundedCommand,
+  hasIosAppCatalogEntry,
+  log,
+  publicE2eErrorText,
+  run,
+  summarizeIosSimulatorDevices,
+  summarizeIosSpringBoardService,
+  waitUntil,
+} from "./runtime.mjs";
+import { createStandaloneBuildEnvironment, isHermesBytecode } from "./environment.mjs";
 import { assertIosExpoModulesCoreAbi } from "./ios-native-abi.mjs";
+import { observeIosStage } from "./ios-observation.mjs";
 
 const deviceNamePrefix = "PlogKit E2E";
 const requiredXcodeVersion = "26.6";
@@ -25,7 +33,8 @@ const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
 const iosHostLifecycleEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceMaxBytes = 1024 * 1024;
 const iosPrepareEvidenceProbeTimeoutMs = 5000;
-const iosReadinessTimeoutMs = 120000;
+const iosGuestHealthTimeoutMs = 60000;
+const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
 function boundedEvidence(value, maxBytes) {
@@ -114,15 +123,15 @@ export async function validateIosSimulatorEnvironment({
   log("ios", "iOS Simulator environment validation passed.");
 }
 
-function throwIosHostLifecycleFailure(artifactRoot, command, error) {
+function throwIosHostLifecycleFailure(artifactRoot, probe, error) {
   if (!artifactRoot) throw error;
-  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const details = publicE2eErrorText(error);
   const evidencePath = join(artifactRoot, "ios-host-lifecycle.log");
   try {
     writeFileSync(
       evidencePath,
       boundedEvidence(
-        `=== iOS host lifecycle probe failure ===\ncommand: ${command}\n${details}\n`,
+        `=== iOS host lifecycle probe failure ===\nprobe: ${probe}\n${details}\n`,
         iosHostLifecycleEvidenceMaxBytes,
       ),
     );
@@ -162,7 +171,7 @@ async function requiredRuntime({ artifactRoot, cleanup, timeoutMs }) {
       (runtime) => runtime.isAvailable && runtime.identifier === runtimeIdentifier,
     );
   } catch (error) {
-    throwIosHostLifecycleFailure(artifactRoot, command, error);
+    throwIosHostLifecycleFailure(artifactRoot, "runtime-discovery", error);
   }
 }
 
@@ -209,10 +218,7 @@ function createEphemeralIosDevice() {
 }
 
 function cleanupErrorText(error) {
-  return boundedEvidence(
-    error instanceof Error ? error.message : String(error),
-    iosCleanupStageErrorMaxBytes,
-  ).toString("utf8");
+  return boundedEvidence(publicE2eErrorText(error), iosCleanupStageErrorMaxBytes).toString("utf8");
 }
 
 function cleanupStage(error) {
@@ -282,7 +288,12 @@ async function deleteOwnedIosDevice(deviceId, artifactRoot, verificationTimeoutM
           2,
         )}\n`,
       );
-      log("ios", `Cleanup summary: ${summaryPath}`);
+      log(
+        "ios",
+        process.env.CI
+          ? "Cleanup summary retained for workflow upload."
+          : `Cleanup summary: ${summaryPath}`,
+      );
     } catch (error) {
       summaryError = error;
       log("ios", `Unable to preserve iOS cleanup summary: ${cleanupErrorText(error)}`);
@@ -334,7 +345,7 @@ function configureIosEnglishLocale(deviceId) {
   log("ios", "Simulator locale: en-US.");
 }
 
-export async function buildIos({ cleanup, root, workers }) {
+export async function buildIos({ cleanup, observation, root, workers }) {
   log("ios", "Building the standalone Release app without booting a simulator.");
   const args = [
     "-workspace",
@@ -352,13 +363,15 @@ export async function buildIos({ cleanup, root, workers }) {
   ];
   if (workers) args.push("-jobs", workers);
   args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
-  await run("xcodebuild", args, {
-    cleanup,
-    cwd: root,
-    env: createStandaloneBuildEnvironment(),
-    timeoutMs: buildTimeoutMs,
+  await observeIosStage(observation, "ios-release-build", async () => {
+    await run("xcodebuild", args, {
+      cleanup,
+      cwd: root,
+      env: createStandaloneBuildEnvironment(),
+      timeoutMs: buildTimeoutMs,
+    });
+    assertIosStandaloneArtifact(root);
   });
-  assertIosStandaloneArtifact(root);
 }
 
 export function assertIosStandaloneArtifact(root) {
@@ -389,23 +402,31 @@ export async function prepareIosDevice({
   cleanup,
   deletionVerificationTimeoutMs = 30000,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  observation,
 }) {
+  let device;
   try {
-    const device = createEphemeralIosDevice();
+    device = await observeIosStage(observation, "ios-device-create", () =>
+      createEphemeralIosDevice(),
+    );
 
     cleanup.add(async () => {
-      log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
-      await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
+      await observeIosStage(observation, "ios-cleanup", async () => {
+        log("ios", `Deleting owned simulator ${device.name} (${device.udid}).`);
+        await deleteOwnedIosDevice(device.udid, artifactRoot, deletionVerificationTimeoutMs);
+      });
     });
     log("ios", `Created owned simulator ${device.name} (${device.udid}).`);
 
     // SpringBoard and permission prompts read locale at first process startup.
     // Configure the newly-created, still-shutdown device before its only boot.
-    configureIosEnglishLocale(device.udid);
-    await run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
-      cleanup,
-      timeoutMs: lifecycleTimeoutMs,
-    });
+    await observeIosStage(observation, "ios-locale", () => configureIosEnglishLocale(device.udid));
+    await observeIosStage(observation, "ios-boot", () =>
+      run("xcrun", ["simctl", "bootstatus", device.udid, "-b"], {
+        cleanup,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    );
     return { platform: "ios", deviceId: device.udid };
   } catch (error) {
     const prepareEvidencePath = artifactRoot ? join(artifactRoot, "ios-prepare.log") : null;
@@ -417,12 +438,19 @@ export async function prepareIosDevice({
         allowFailure: true,
         timeoutMs: iosPrepareEvidenceProbeTimeoutMs,
       });
+      const stateSummary = simulatorState
+        ? summarizeIosSimulatorDevices(simulatorState, device?.udid)
+        : null;
       writeFileSync(
         prepareEvidencePath,
         boundedEvidence(
-          `=== prepare failure ===\n${
-            error instanceof Error ? (error.stack ?? error.message) : String(error)
-          }\n\n=== raw simulator state ===\n${simulatorState ?? "(probe failed or timed out)"}\n`,
+          `=== prepare failure ===\n${publicE2eErrorText(
+            error,
+          )}\n\n=== simulator state summary ===\n${
+            stateSummary
+              ? JSON.stringify(stateSummary, null, 2)
+              : "(probe failed or returned invalid output)"
+          }\n`,
           iosPrepareEvidenceMaxBytes,
         ),
       );
@@ -442,63 +470,133 @@ export async function prepareIosDevice({
   }
 }
 
-const IOS_SYSTEM_UI_FAULT_PATTERN =
-  /(?:SpringBoard|backboardd|CoreSimulator|Simulator)[^\n]{0,200}(?:quit unexpectedly|crash(?:ed)?|not responding|unavailable|failed)/i;
-
-export function assertIosLauncherHierarchy(hierarchy) {
-  if (IOS_SYSTEM_UI_FAULT_PATTERN.test(hierarchy)) {
-    throw new Error(`iOS readiness hierarchy contains a system UI fault:\n${hierarchy}`);
-  }
-  if (!/"resource-id"\s*:\s*"Home screen icons"/.test(hierarchy)) {
-    throw new Error(`iOS readiness did not expose the SpringBoard Home screen launcher hierarchy.`);
-  }
-}
-
-export async function assertIosDeviceReady({
+export async function assertIosGuestHealthy({
   artifactRoot,
   cleanup,
   device,
-  readinessTimeoutMs = iosReadinessTimeoutMs,
-  stage = "readiness",
+  monotonicNow = () => performance.now(),
+  observation,
+  timeoutMs = iosGuestHealthTimeoutMs,
 }) {
-  const diagnosticDirectory = join(artifactRoot, "ios", `readiness-${stage}`);
-  mkdirSync(diagnosticDirectory, { recursive: true });
-  const hierarchyPath = join(diagnosticDirectory, "springboard-hierarchy.json");
-  const hierarchyArgs = ["--device", device.deviceId, "hierarchy", "--no-ansi"];
+  const startedAtMs = monotonicNow();
+  const remainingTimeout = () => {
+    const remainingMs = timeoutMs - (monotonicNow() - startedAtMs);
+    if (remainingMs > 0) return remainingMs;
+    const error = Object.assign(
+      new Error(`iOS guest health exhausted its shared ${timeoutMs}ms deadline.`),
+      { code: "E2E_COMMAND_TIMEOUT", e2eStage: "ios-guest-health-readiness" },
+    );
+    throw error;
+  };
+  const diagnosticDirectory = join(artifactRoot, "ios", "guest-health");
+  let evidenceAvailable = true;
   try {
-    await run("maestro", hierarchyArgs, {
-      cleanup,
-      env: createMaestroEnvironment(),
-      outputPath: hierarchyPath,
-      stdio: "ignore",
-      timeoutMs: readinessTimeoutMs,
-    });
+    mkdirSync(diagnosticDirectory, { recursive: true });
   } catch (error) {
+    evidenceAvailable = false;
+    log(
+      "ios",
+      `Guest-health evidence unavailable: ${
+        error instanceof Error
+          ? `${error.name}${error.code ? ` (${error.code})` : ""}`
+          : "NonErrorFailure"
+      }`,
+    );
+  }
+  const preserveEvidence = (name, contents) => {
+    if (!evidenceAvailable) return;
     try {
-      const metadata = error?.commandMetadata ?? {
-        bytes: existsSync(hierarchyPath) ? statSync(hierarchyPath).size : 0,
-        command: ["maestro", ...hierarchyArgs],
-        exitCode: null,
-        signal: null,
-        timedOut: error?.code === "E2E_COMMAND_TIMEOUT",
-      };
-      writeFileSync(
-        join(diagnosticDirectory, "springboard-hierarchy-probe.json"),
-        `${JSON.stringify(metadata, null, 2)}\n`,
-      );
-    } catch (diagnosticError) {
+      writeFileSync(join(diagnosticDirectory, name), contents);
+    } catch (error) {
       log(
         "ios",
-        `Unable to preserve hierarchy probe metadata: ${
-          diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)
+        `Guest-health evidence write failed: ${
+          error instanceof Error
+            ? `${error.name}${error.code ? ` (${error.code})` : ""}`
+            : "NonErrorFailure"
         }`,
       );
     }
-    throw error;
-  }
-  const hierarchy = readFileSync(hierarchyPath, "utf8");
-  assertIosLauncherHierarchy(hierarchy);
-  log("ios", `SpringBoard launcher hierarchy ready on ${device.deviceId}.`);
+  };
+
+  const captureHealthProbe = async (stage, args) => {
+    const probeStartedAtMs = Date.now();
+    try {
+      const output = await captureBoundedCommand("xcrun", args, {
+        cleanup,
+        includeOutputInError: false,
+        maxBytes: iosGuestHealthMaxBytes,
+        timeoutMs: remainingTimeout(),
+      });
+      preserveEvidence(
+        `${stage}.probe.json`,
+        `${JSON.stringify(
+          {
+            bytes: Buffer.byteLength(output),
+            durationMs: Date.now() - probeStartedAtMs,
+            status: "completed",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return output;
+    } catch (error) {
+      if (error instanceof Error && !error.e2eStage) error.e2eStage = `ios-${stage}-readiness`;
+      preserveEvidence(
+        `${stage}.probe.json`,
+        `${JSON.stringify(
+          {
+            durationMs: Date.now() - probeStartedAtMs,
+            error: {
+              code: error?.code ?? null,
+              name: error instanceof Error ? error.name : "NonErrorFailure",
+            },
+            status: "failed",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      throw error;
+    }
+  };
+
+  await observeIosStage(observation, "ios-app-service-readiness", async () => {
+    const installedApps = await captureHealthProbe("app-service", [
+      "simctl",
+      "listapps",
+      device.deviceId,
+    ]);
+    if (!hasIosAppCatalogEntry(installedApps)) {
+      const error = new Error("iOS app-service readiness returned an empty application catalog.");
+      error.e2eStage = "ios-app-service-readiness";
+      throw error;
+    }
+  });
+
+  const args = [
+    "simctl",
+    "spawn",
+    device.deviceId,
+    "launchctl",
+    "print",
+    "system/com.apple.SpringBoard",
+  ];
+  remainingTimeout();
+  await observeIosStage(observation, "ios-springboard-service-readiness", async () => {
+    const output = await captureHealthProbe("springboard-service", args);
+    const springBoard = summarizeIosSpringBoardService(output);
+    preserveEvidence("springboard-service.json", `${JSON.stringify(springBoard, null, 2)}\n`);
+    if (springBoard.state !== "running" || springBoard.pid === null) {
+      const error = new Error(
+        "iOS guest health did not expose a running SpringBoard service with a PID.",
+      );
+      error.e2eStage = "ios-springboard-service-readiness";
+      throw error;
+    }
+  });
+  log("ios", `CoreSimulator guest health ready on ${device.deviceId}.`);
 }
 
 export async function installAndSeedIos({
@@ -507,24 +605,45 @@ export async function installAndSeedIos({
   device,
   fixtures,
   lifecycleTimeoutMs = deviceLifecycleTimeoutMs,
+  observation,
   root,
 }) {
+  const runStage = async (stage, operation) => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof Error) error.e2eStage = stage;
+      throw error;
+    }
+  };
   log("ios", "Installing the standalone Release app and seeding photos.");
-  await run("xcrun", ["simctl", "install", device.deviceId, artifact], {
-    cleanup,
-    cwd: root,
-    timeoutMs: lifecycleTimeoutMs,
-  });
-  await run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
-    cleanup,
-    cwd: root,
-    timeoutMs: lifecycleTimeoutMs,
-  });
-  await waitUntil(
-    () => captureIosPhotoResources(device).size >= fixtures.length,
-    10000,
-    `iOS Photos to index ${fixtures.length} seeded resources`,
-    500,
+  await observeIosStage(observation, "ios-app-install", () =>
+    runStage("ios-app-install", () =>
+      run("xcrun", ["simctl", "install", device.deviceId, artifact], {
+        cleanup,
+        cwd: root,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    ),
+  );
+  await observeIosStage(observation, "ios-fixture-addmedia", () =>
+    runStage("ios-fixture-addmedia", () =>
+      run("xcrun", ["simctl", "addmedia", device.deviceId, ...fixtures], {
+        cleanup,
+        cwd: root,
+        timeoutMs: lifecycleTimeoutMs,
+      }),
+    ),
+  );
+  await observeIosStage(observation, "ios-photo-index", () =>
+    runStage("ios-photo-index", () =>
+      waitUntil(
+        () => captureIosPhotoResources(device).size >= fixtures.length,
+        10000,
+        `iOS Photos to index ${fixtures.length} seeded resources`,
+        500,
+      ),
+    ),
   );
 }
 

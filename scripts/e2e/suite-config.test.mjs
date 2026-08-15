@@ -62,6 +62,28 @@ test("the Maestro workspace orders every top-level flow by its exact name and ex
   );
 });
 
+test("every targeted flow enters the canonical launch readiness path", () => {
+  const flows = readdirSync(join(root, "e2e/flows"))
+    .filter((name) => name.endsWith(".yaml"))
+    .sort();
+
+  for (const file of flows) {
+    const source = readFileSync(join(root, "e2e/flows", file), "utf8");
+    const commands = source.split(/^---\s*$/m)[1]?.trimStart() ?? "";
+    assert.match(
+      commands,
+      /^- runFlow: \.\.\/subflows\/(?:import-two-photos|launch-app)\.yaml\n/,
+      `${file} must enter the shared launch readiness path before business commands`,
+    );
+  }
+
+  const importFlow = readFileSync(join(root, "e2e/subflows/import-two-photos.yaml"), "utf8");
+  const importCommands = importFlow.split(/^---\s*$/m)[1]?.trimStart() ?? "";
+  assert.match(importCommands, /^- runFlow: launch-app\.yaml\n/);
+  const launchFlow = readFileSync(join(root, "e2e/subflows/launch-app.yaml"), "utf8");
+  assert.match(launchFlow, /visible:\n {6}id: home-screen\n {4}timeout: 60000/);
+});
+
 test("direct lifecycle relaunches declare an empty permission override", () => {
   const flows = readdirSync(join(root, "e2e/flows"))
     .filter((name) => name.endsWith(".yaml"))
@@ -108,4 +130,20 @@ test("the export flow asserts the system photo delta after each successful expor
   assert.ok(successOffsets[0] < assertionCalls[0].index);
   assert.ok(assertionCalls[0].index < successOffsets[1]);
   assert.ok(successOffsets[1] < assertionCalls[1].index);
+});
+
+test("the iOS picker waits for two interactive photos before selecting them", () => {
+  const source = readFileSync(join(root, "e2e/subflows/select-two-photos-ios.yaml"), "utf8");
+  const gridWait = source.indexOf("visible:\n      id: PXGGridLayout-Info");
+  const firstTap = source.indexOf("id: PXGGridLayout-Info\n    index: 0");
+
+  assert.ok(gridWait >= 0, "the picker must wait for the second fixture cell");
+  assert.ok(gridWait < firstTap, "the loaded grid must precede photo selection");
+  assert.match(
+    source,
+    /visible:\n {6}id: PXGGridLayout-Info\n {6}index: 1\n {6}enabled: true\n {4}timeout: 90000/,
+  );
+  assert.match(source, /- assertVisible: \^Done\$\n- tapOn: \^Done\$$/m);
+  assert.doesNotMatch(source, /extendedWaitUntil:\n\s+visible: Done/);
+  assert.doesNotMatch(source, /\bsleep\b|point:\s|\d+%,\s*\d+%/);
 });
