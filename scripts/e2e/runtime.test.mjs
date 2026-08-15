@@ -571,6 +571,28 @@ esac
   );
 });
 
+test("Maestro version validation distinguishes a bounded cold start from a missing executable", () => {
+  const timeoutError = Object.assign(new Error("spawnSync maestro ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+
+  assert.throws(
+    () =>
+      validateMaestroVersion({
+        captureVersion(timeoutMs) {
+          assert.equal(timeoutMs, 60_000);
+          throw timeoutError;
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+      assert.match(error.message, /version probe timed out after 60000ms/i);
+      assert.doesNotMatch(error.message, /not found on PATH/i);
+      return true;
+    },
+  );
+});
+
 test("Maestro validation and execution use the same PATH executable", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-e2e-maestro-path-");
   const binaries = join(directory, "bin");
