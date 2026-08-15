@@ -150,7 +150,8 @@ test("bounded commands can omit sensitive output from their primary error", asyn
     captureBoundedCommand(command, [], {
       includeOutputInError: false,
       maxBytes: 1024,
-      timeoutMs: 1000,
+      // This asserts redaction, not process-start latency; shared CI needs scheduling headroom.
+      timeoutMs: 5000,
     }),
     (error) => {
       assert.doesNotMatch(error.message, /Users\/runner|private-catalog/);
