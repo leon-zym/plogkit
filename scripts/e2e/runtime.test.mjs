@@ -1093,7 +1093,7 @@ fi
       device: { platform: "ios", deviceId: "simulator-test" },
       error: Object.assign(new Error("hierarchy timed out"), { code: "E2E_COMMAND_TIMEOUT" }),
       iosReportsDirectory: reports,
-      sinceMs: Date.now() - 1000,
+      sinceMs: Date.now() - 60 * 60 * 1000,
       timeoutMs: 5000,
     });
   } finally {
@@ -1141,6 +1141,7 @@ fi
   const commands = readFileSync(commandLog, "utf8");
   assert.match(commands, /^simctl list devices -j$/m);
   assert.match(commands, /launchctl print system\/com\.apple\.SpringBoard/);
+  assert.match(commands, /log show .*--last 120s/);
   assert.match(commands, /log show .*process CONTAINS\[c\] "maestro"/);
   assert.match(commands, /log show .*process == "testmanagerd"/);
   assert.match(commands, /log show .*process == "PhotosUIService"/);

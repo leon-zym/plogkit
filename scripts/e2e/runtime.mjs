@@ -1331,6 +1331,7 @@ async function collectIosDiagnostics(
   state,
 ) {
   const lookbackSeconds = Math.max(30, Math.ceil((Date.now() - sinceMs) / 1000) + 5);
+  const failureLogLookbackSeconds = Math.min(120, lookbackSeconds);
   for (const probe of [
     {
       args: ["simctl", "list", "devices", "-j"],
@@ -1384,7 +1385,7 @@ async function collectIosDiagnostics(
     "--style",
     "compact",
     "--last",
-    `${lookbackSeconds}s`,
+    `${failureLogLookbackSeconds}s`,
     "--predicate",
     IOS_SYSTEM_LOG_PREDICATE,
   ];

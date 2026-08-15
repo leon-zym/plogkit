@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
   capture,
@@ -473,11 +474,20 @@ export async function assertIosGuestHealthy({
   artifactRoot,
   cleanup,
   device,
+  monotonicNow = () => performance.now(),
   observation,
   timeoutMs = iosGuestHealthTimeoutMs,
 }) {
-  const startedAtMs = Date.now();
-  const remainingTimeout = () => Math.max(1, timeoutMs - (Date.now() - startedAtMs));
+  const startedAtMs = monotonicNow();
+  const remainingTimeout = () => {
+    const remainingMs = timeoutMs - (monotonicNow() - startedAtMs);
+    if (remainingMs > 0) return remainingMs;
+    const error = Object.assign(
+      new Error(`iOS guest health exhausted its shared ${timeoutMs}ms deadline.`),
+      { code: "E2E_COMMAND_TIMEOUT", e2eStage: "ios-guest-health-readiness" },
+    );
+    throw error;
+  };
   const diagnosticDirectory = join(artifactRoot, "ios", "guest-health");
   let evidenceAvailable = true;
   try {
@@ -532,7 +542,7 @@ export async function assertIosGuestHealthy({
       );
       return output;
     } catch (error) {
-      if (error instanceof Error) error.e2eStage = `ios-${stage}-readiness`;
+      if (error instanceof Error && !error.e2eStage) error.e2eStage = `ios-${stage}-readiness`;
       preserveEvidence(
         `${stage}.probe.json`,
         `${JSON.stringify(
@@ -573,6 +583,7 @@ export async function assertIosGuestHealthy({
     "print",
     "system/com.apple.SpringBoard",
   ];
+  remainingTimeout();
   await observeIosStage(observation, "ios-springboard-service-readiness", async () => {
     const output = await captureHealthProbe("springboard-service", args);
     const springBoard = summarizeIosSpringBoardService(output);

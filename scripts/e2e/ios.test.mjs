@@ -153,6 +153,51 @@ test("iOS guest health fails before installation when the app service is unrespo
   assert.equal(probe.status, "failed");
 });
 
+test("iOS guest health does not start SpringBoard after its shared deadline is exhausted", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-guest-deadline-");
+  const binaries = join(directory, "bin");
+  const artifactRoot = join(directory, "artifacts");
+  const commandLog = join(directory, "xcrun.log");
+  const deviceId = "FAFAFAFA-FAFA-FAFA-FAFA-FAFAFAFAFAFA";
+  let elapsedMs = 0;
+  mkdirSync(binaries);
+  writeExecutable(
+    join(binaries, "xcrun"),
+    `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_XCRUN_LOG"
+case "$*" in
+  "simctl listapps ${deviceId}") printf '%s\n' '{ "com.apple.mobilesafari" = {}; }' ;;
+  *) printf '%s\n' 'pid = 4242' 'state = running' ;;
+esac
+`,
+  );
+
+  await withEnvironment(
+    { FAKE_XCRUN_LOG: commandLog, PATH: `${binaries}:${process.env.PATH}` },
+    () =>
+      assert.rejects(
+        assertIosGuestHealthy({
+          artifactRoot,
+          cleanup: { add() {} },
+          device: { deviceId, platform: "ios" },
+          observation: {
+            run: async (_stage, operation) => {
+              const result = await operation();
+              elapsedMs = 60_001;
+              return result;
+            },
+          },
+          monotonicNow: () => elapsedMs,
+          timeoutMs: 60_000,
+        }),
+        (error) =>
+          error.code === "E2E_COMMAND_TIMEOUT" && error.e2eStage === "ios-guest-health-readiness",
+      ),
+  );
+
+  assert.equal(readFileSync(commandLog, "utf8").trim(), `simctl listapps ${deviceId}`);
+});
+
 test("iOS guest health never persists a failed app catalog", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-ios-app-service-private-");
   const binaries = join(directory, "bin");
