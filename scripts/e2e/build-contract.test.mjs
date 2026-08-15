@@ -73,7 +73,12 @@ test("iOS E2E builds a standalone Release simulator app", async (t) => {
   const previousPath = process.env.PATH;
   process.env.PATH = `${binaries}:${previousPath}`;
   try {
-    await buildIos({ cleanup: { add() {} }, root: directory, workers: "2" });
+    await buildIos({
+      architecture: "arm64",
+      cleanup: { add() {} },
+      root: directory,
+      workers: "2",
+    });
   } finally {
     process.env.PATH = previousPath;
   }
@@ -139,7 +144,12 @@ test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async
   process.env.PATH = `${binaries}:${previousPath}`;
   try {
     await assert.rejects(
-      buildIos({ cleanup: { add() {} }, root: directory, workers: "2" }),
+      buildIos({
+        architecture: "arm64",
+        cleanup: { add() {} },
+        root: directory,
+        workers: "2",
+      }),
       /ExpoMediaLibrary.*symbol.*missing.*Missing/s,
     );
   } finally {
