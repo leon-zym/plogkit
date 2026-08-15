@@ -15,7 +15,7 @@ import { performance } from "node:perf_hooks";
 
 import { captureBoundedCommand } from "./runtime.mjs";
 
-const schemaVersion = 1;
+const schemaVersion = 2;
 const maximumEvents = 128;
 const maximumHostSamples = 24;
 const maximumSnapshotBytes = 256 * 1024;
@@ -93,6 +93,7 @@ const processFamilies = new Map([
 const allowedProcessFamilies = new Set(processFamilies.values());
 const allowedProcessExecutables = new Set(processFamilies.keys());
 const maestroSupportDirectories = new Set(["logs", "screen-hierarchy", "screenshots"]);
+const maestroCommandStatuses = new Set(["COMPLETED", "FAILED", "SKIPPED"]);
 
 export function observeIosStage(observation, stage, operation) {
   return observation ? observation.run(stage, operation) : operation();
@@ -364,6 +365,58 @@ function commandTiming(entry) {
     : { duration, finishedAt: timestamp + duration, startedAt: timestamp };
 }
 
+function boundedMaestroIdentifier(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+    ? value
+    : null;
+}
+
+function normalizeMaestroEntry(entry) {
+  const status = entry?.metadata?.status;
+  const timing = commandTiming(entry);
+  const hasCommand = [entry?.command, entry?.metadata?.evaluatedCommand].some(
+    (command) =>
+      command !== null &&
+      typeof command === "object" &&
+      !Array.isArray(command) &&
+      Object.keys(command).length > 0,
+  );
+  if (!maestroCommandStatuses.has(status) || !timing || !hasCommand) {
+    return null;
+  }
+  const assertion = maestroCommand(entry, "assertConditionCommand");
+  const visible = assertion?.condition?.visible;
+  const notVisible = assertion?.condition?.notVisible;
+  const tap = maestroCommand(entry, "tapOnElement")?.selector;
+  const launch = maestroCommand(entry, "launchAppCommand");
+  const runFlow = maestroCommand(entry, "runFlowCommand");
+  let context = null;
+  if (visible) {
+    context = {
+      assertionId: boundedMaestroIdentifier(visible.idRegex),
+      command: "assert-visible",
+      targetId: null,
+    };
+  } else if (notVisible) {
+    context = {
+      assertionId: boundedMaestroIdentifier(notVisible.idRegex),
+      command: "assert-not-visible",
+      targetId: null,
+    };
+  } else if (tap) {
+    context = {
+      assertionId: null,
+      command: "tap",
+      targetId: boundedMaestroIdentifier(tap.idRegex),
+    };
+  } else if (launch) {
+    context = { assertionId: null, command: "launch-app", targetId: null };
+  } else if (runFlow) {
+    context = { assertionId: null, command: "run-flow", targetId: null };
+  }
+  return { context, launch, notVisible, runFlow, status, tap, timing, visible };
+}
+
 function summarizeMaestroFlow(entries) {
   let launch = null;
   let home = null;
@@ -372,41 +425,90 @@ function summarizeMaestroFlow(entries) {
   let pickerDone = null;
   let pickerFailed = false;
   let appHomeFailed = false;
+  let businessAssertionFailed = false;
   let failed = false;
+  let failure = null;
+  let failurePriority = -1;
+  let firstTimestamp = null;
+  let lastSuccessfulCommand = null;
+  let metadataComplete = true;
+  let sawExecutedCommand = false;
   for (const entry of entries) {
-    const status = entry?.metadata?.status;
-    const timing = commandTiming(entry);
-    if (status === "FAILED") failed = true;
-    if (maestroCommand(entry, "launchAppCommand") && timing) launch ??= timing;
-    const assertion = maestroCommand(entry, "assertConditionCommand");
-    const visible = assertion?.condition?.visible;
-    if (visible?.idRegex === "home-screen" && timing) {
+    const normalized = normalizeMaestroEntry(entry);
+    if (normalized === null) {
+      metadataComplete = false;
+      continue;
+    }
+    const {
+      context,
+      launch: launchCommand,
+      notVisible,
+      runFlow,
+      status,
+      tap,
+      timing,
+      visible,
+    } = normalized;
+    firstTimestamp =
+      firstTimestamp === null ? timing.startedAt : Math.min(firstTimestamp, timing.startedAt);
+    if (status === "COMPLETED" || status === "FAILED") sawExecutedCommand = true;
+    if (status === "FAILED") {
+      failed = true;
+      if (context === null) metadataComplete = false;
+      const contextPriority = context?.command.startsWith("assert-") ? 1 : 0;
+      if (context !== null && contextPriority > failurePriority) {
+        failure = {
+          assertionId: context.assertionId,
+          command: context.command,
+          lastSuccessfulCommand: lastSuccessfulCommand?.command ?? null,
+          lastSuccessfulTargetId: lastSuccessfulCommand?.targetId ?? null,
+        };
+        failurePriority = contextPriority;
+      }
+    }
+    if (launchCommand) launch ??= timing;
+    if (visible?.idRegex === "home-screen") {
       home ??= timing;
       if (status === "FAILED") appHomeFailed = true;
     }
-    if (visible?.idRegex === "PXGGridLayout-Info" && String(visible.index) === "1" && timing) {
+    if (visible?.idRegex === "PXGGridLayout-Info" && String(visible.index) === "1") {
       pickerGrid ??= timing;
       if (status === "FAILED") pickerFailed = true;
     }
-    if ((visible?.textRegex === "^Done$" || visible?.textRegex === "Done") && timing) {
+    if (visible?.textRegex === "^Done$" || visible?.textRegex === "Done") {
       pickerDone ??= timing;
       if (status === "FAILED") pickerFailed = true;
     }
-    const tap = maestroCommand(entry, "tapOnElement")?.selector;
-    if (tap?.idRegex === "choose-photos" && timing) pickerOpen ??= timing;
-    if (
-      status === "FAILED" &&
-      maestroCommand(entry, "runFlowCommand")?.sourceDescription === "select-two-photos-ios.yaml"
-    ) {
+    if (tap?.idRegex === "choose-photos") pickerOpen ??= timing;
+    if (status === "FAILED" && runFlow?.sourceDescription === "select-two-photos-ios.yaml") {
       pickerFailed = true;
     }
+    if (
+      status === "FAILED" &&
+      (notVisible ||
+        (visible &&
+          visible.idRegex !== "home-screen" &&
+          !(visible.idRegex === "PXGGridLayout-Info" && String(visible.index) === "1") &&
+          visible.textRegex !== "^Done$" &&
+          visible.textRegex !== "Done"))
+    ) {
+      businessAssertionFailed = true;
+    }
+    if (status === "COMPLETED" && context !== null) {
+      lastSuccessfulCommand = context;
+    }
   }
+  if (!sawExecutedCommand) metadataComplete = false;
   return {
     appHomeFailed,
+    businessAssertionFailed,
     failed,
+    firstTimestamp,
+    metadataComplete,
     pickerFailed,
     summary: {
       appHomeReadyMs: launch && home ? finiteNumber(home.finishedAt - launch.startedAt) : null,
+      failure,
       pickerDoneReadyMs:
         pickerGrid && pickerDone
           ? finiteNumber(pickerDone.finishedAt - pickerGrid.finishedAt)
@@ -438,17 +540,16 @@ export function summarizeIosMaestroArtifacts(directory, suiteStartedAtMs, suiteF
         complete = false;
         continue;
       }
-      const timestamps = value
-        .map((entry) => finiteNumber(entry?.metadata?.timestamp, { integer: true }))
-        .filter((value) => value !== null);
-      const firstTimestamp = timestamps.length > 0 ? Math.min(...timestamps) : null;
+      const flow = summarizeMaestroFlow(value);
+      const { firstTimestamp } = flow;
       if (firstTimestamp === null) {
         complete = false;
         continue;
       }
+      if (!flow.metadataComplete) complete = false;
       parsedFlows.push({
         firstTimestamp,
-        ...summarizeMaestroFlow(value),
+        ...flow,
       });
     } catch {
       complete = false;
@@ -470,11 +571,13 @@ export function summarizeIosMaestroArtifacts(directory, suiteStartedAtMs, suiteF
         ? "app-home"
         : parsedFlows.some(({ pickerFailed }) => pickerFailed)
           ? "picker"
-          : anyFailed
-            ? "other-command"
-            : suiteFailed
+          : parsedFlows.some(({ businessAssertionFailed }) => businessAssertionFailed)
+            ? "business-assertion"
+            : anyFailed
               ? "other-command"
-              : "none";
+              : suiteFailed
+                ? "other-command"
+                : "none";
   return {
     complete: complete && parsedFlows.length > 0,
     driverStartupMs:
@@ -548,7 +651,12 @@ export function createIosObservationRecorder({
   const outputPath = join(directory, "ios-observation.json");
   const recorderStartedAt = monotonicNow();
   const state = {
-    complete: true,
+    completeness: {
+      execution: false,
+      maestro: null,
+      recorder: true,
+      telemetry: true,
+    },
     events: [],
     limits: {
       events: maximumEvents,
@@ -564,30 +672,33 @@ export function createIosObservationRecorder({
   };
   let sequence = 0;
   let activeStage = null;
+  let firstHostSampleRequested = false;
   let sampleInFlight = null;
   let samplerActive = false;
   let samplerTimer = null;
 
-  const addRecorderError = (operation, error) => {
-    state.complete = false;
-    state.recorderErrors ??= [];
-    const candidate = { ...safeError(error), operation };
+  const addObservationError = (dimension, operation, error) => {
+    state.completeness[dimension] = false;
+    state.observationErrors ??= [];
+    const candidate = { ...safeError(error), dimension, operation };
     if (
-      !state.recorderErrors.some(
+      !state.observationErrors.some(
         (existing) =>
           existing.operation === candidate.operation &&
+          existing.dimension === candidate.dimension &&
           existing.name === candidate.name &&
           existing.code === candidate.code,
       )
     ) {
-      state.recorderErrors.push(candidate);
+      state.observationErrors.push(candidate);
     }
   };
 
   const persist = () => {
     const body = `${JSON.stringify(state, null, 2)}\n`;
     if (Buffer.byteLength(body) > maximumSnapshotBytes) {
-      addRecorderError(
+      addObservationError(
+        "recorder",
         "snapshot-size",
         Object.assign(new Error("iOS observation snapshot exceeded its byte budget."), {
           code: "E2E_OBSERVATION_SIZE_LIMIT",
@@ -598,13 +709,14 @@ export function createIosObservationRecorder({
     try {
       writeSnapshot({ body, path: outputPath, writeDefault: defaultWriteSnapshot });
     } catch (error) {
-      addRecorderError("snapshot-write", error);
+      addObservationError("recorder", "snapshot-write", error);
     }
   };
 
   const append = (event) => {
     if (state.events.length + (state.hostSamples?.length ?? 0) >= maximumEvents) {
-      addRecorderError(
+      addObservationError(
+        "recorder",
         "event-limit",
         Object.assign(new Error("iOS observation event limit reached."), {
           code: "E2E_OBSERVATION_EVENT_LIMIT",
@@ -620,7 +732,8 @@ export function createIosObservationRecorder({
 
   const appendHostSample = (reason, host, durationMs, sampleContext) => {
     if (state.events.length + (state.hostSamples?.length ?? 0) >= maximumEvents) {
-      addRecorderError(
+      addObservationError(
+        "recorder",
         "event-limit",
         Object.assign(new Error("iOS observation event limit reached."), {
           code: "E2E_OBSERVATION_EVENT_LIMIT",
@@ -640,7 +753,7 @@ export function createIosObservationRecorder({
       stage: sampleContext.stage,
       timestampMs: finiteNumber(sampleContext.startedAtMs, { integer: true }),
     });
-    if (host.complete !== true) state.complete = false;
+    if (host.complete !== true) state.completeness.telemetry = false;
     persist();
   };
 
@@ -650,7 +763,8 @@ export function createIosObservationRecorder({
       samplerActive = false;
       if (samplerTimer !== null) cancelTimer(samplerTimer);
       samplerTimer = null;
-      addRecorderError(
+      addObservationError(
+        "telemetry",
         "sample-limit",
         Object.assign(new Error("iOS observation sample limit reached."), {
           code: "E2E_OBSERVATION_SAMPLE_LIMIT",
@@ -660,8 +774,11 @@ export function createIosObservationRecorder({
       return;
     }
     if (sampleInFlight) {
-      state.omissions ??= { overlap: 0 };
-      state.omissions.overlap += 1;
+      state.completeness.telemetry = false;
+      state.omissions ??= { overlaps: [] };
+      if (state.omissions.overlaps.length < maximumHostSamples) {
+        state.omissions.overlaps.push({ reason });
+      }
       persist();
       return;
     }
@@ -671,14 +788,14 @@ export function createIosObservationRecorder({
       startedAtMs: now(),
       startedElapsedMs: sampleStartedAt,
     };
-    sampleInFlight = (async () => {
+    const currentSample = (async () => {
       try {
         const host = normalizedHostSnapshot(await captureHostSnapshot());
         if (host === null) {
           const error = Object.assign(new Error("Invalid host snapshot."), {
             code: "E2E_OBSERVATION_HOST_INVALID",
           });
-          addRecorderError("host-capture", error);
+          addObservationError("telemetry", "host-capture", error);
           appendHostSample(
             reason,
             { complete: false, error: safeError(error) },
@@ -689,7 +806,7 @@ export function createIosObservationRecorder({
           appendHostSample(reason, host, monotonicNow() - sampleStartedAt, sampleContext);
         }
       } catch (error) {
-        addRecorderError("host-capture", error);
+        addObservationError("telemetry", "host-capture", error);
         appendHostSample(
           reason,
           { complete: false, error: safeError(error) },
@@ -698,10 +815,11 @@ export function createIosObservationRecorder({
         );
       }
     })();
+    sampleInFlight = currentSample;
     try {
-      await sampleInFlight;
+      await currentSample;
     } finally {
-      sampleInFlight = null;
+      if (sampleInFlight === currentSample) sampleInFlight = null;
     }
   };
 
@@ -716,23 +834,28 @@ export function createIosObservationRecorder({
     samplerTimer?.unref?.();
   };
 
-  const startSampler = async (sampleImmediately) => {
+  const startSampler = () => {
     if (samplerActive || !captureHostSnapshot) return;
     samplerActive = true;
-    if (sampleImmediately) await sampleHost("preparation-start");
     scheduleNextSample();
   };
 
+  const drainHostSample = async () => {
+    if (!sampleInFlight) return;
+    const inFlight = sampleInFlight;
+    await inFlight;
+    if (sampleInFlight === inFlight) sampleInFlight = null;
+  };
+
   const stopSampler = async (reason, { captureFinal = true } = {}) => {
-    if (!samplerActive) return;
+    if (!samplerActive) {
+      await drainHostSample();
+      return;
+    }
     samplerActive = false;
     if (samplerTimer !== null) cancelTimer(samplerTimer);
     samplerTimer = null;
-    if (sampleInFlight) {
-      const inFlight = sampleInFlight;
-      await inFlight;
-      if (sampleInFlight === inFlight) sampleInFlight = null;
-    }
+    await drainHostSample();
     if (captureFinal) await sampleHost(reason);
   };
 
@@ -753,11 +876,13 @@ export function createIosObservationRecorder({
         ...(error ? { error: safeError(error) } : {}),
         status,
       };
+      state.completeness.execution = status !== "interrupted";
       persist();
     },
     async run(stage, operation) {
       if (!allowedStages.has(stage)) {
-        addRecorderError(
+        addObservationError(
+          "recorder",
           "stage",
           Object.assign(new Error("Unsupported iOS observation stage."), {
             code: "E2E_OBSERVATION_STAGE_INVALID",
@@ -769,10 +894,15 @@ export function createIosObservationRecorder({
       if (stage === "ios-maestro-suite") await stopSampler("pre-maestro");
       if (stage === "ios-cleanup") await stopSampler("pre-cleanup");
       activeStage = stage;
-      const firstHostSample = (state.hostSamples?.length ?? 0) === 0;
-      if (firstHostSample) await sampleHost("job-start");
-      if (stage === "ios-release-build" && !firstHostSample) await sampleHost("build-start");
-      if (preparationStages.has(stage)) await startSampler(!firstHostSample);
+      const firstHostSample = captureHostSnapshot && !firstHostSampleRequested;
+      if (firstHostSample) {
+        firstHostSampleRequested = true;
+        void sampleHost("job-start");
+      } else if (stage === "ios-release-build") void sampleHost("build-start");
+      else if (preparationStages.has(stage) && !samplerActive) {
+        void sampleHost("preparation-start");
+      }
+      if (preparationStages.has(stage)) startSampler();
       const startedAtMs = now();
       const startedElapsedMs = monotonicNow();
       append({
@@ -785,11 +915,11 @@ export function createIosObservationRecorder({
         const value = await operation();
         const finishedAtMs = now();
         const finishedElapsedMs = monotonicNow();
-        if (stage === "ios-release-build") await sampleHost("build-finished");
-        if (stage === "ios-boot") await sampleHost("post-boot");
+        if (stage === "ios-release-build") void sampleHost("build-finished");
+        if (stage === "ios-boot") void sampleHost("post-boot");
         if (stage === "ios-maestro-suite" && maestroDirectory) {
           state.maestro = summarizeIosMaestroArtifacts(maestroDirectory, startedAtMs, false);
-          if (!state.maestro.complete) state.complete = false;
+          state.completeness.maestro = state.maestro.complete;
         }
         if (stage === "ios-maestro-suite") await sampleHost("maestro-finished");
         append({
@@ -807,7 +937,7 @@ export function createIosObservationRecorder({
         if (samplerActive) await stopSampler("stage-failure");
         if (stage === "ios-maestro-suite" && maestroDirectory) {
           state.maestro = summarizeIosMaestroArtifacts(maestroDirectory, startedAtMs, true);
-          if (!state.maestro.complete) state.complete = false;
+          state.completeness.maestro = state.maestro.complete;
         }
         if (stage === "ios-maestro-suite") await sampleHost("maestro-failed");
         append({

@@ -48,7 +48,12 @@ test("iOS observations atomically retain monotonic stage timing without primary 
 
   const snapshot = readSnapshot(directory);
   assert.deepEqual(snapshot, {
-    complete: true,
+    completeness: {
+      execution: true,
+      maestro: null,
+      recorder: true,
+      telemetry: true,
+    },
     events: [
       {
         elapsedMs: 25,
@@ -88,7 +93,7 @@ test("iOS observations atomically retain monotonic stage timing without primary 
       runner: "macos-26",
       sha: "432fa49df8c7e3c234c6af3025a89a32267adc5e",
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     startedAtMs: 1000,
   });
   const published = readFileSync(join(directory, "ios-observation.json"), "utf8");
@@ -148,7 +153,11 @@ test("iOS observations keep only bounded numeric host evidence", async (t) => {
     now: () => 2000,
   });
 
-  await recorder.run("ios-release-build", async () => {});
+  await recorder.run(
+    "ios-release-build",
+    () => new Promise((resolvePromise) => setImmediate(resolvePromise)),
+  );
+  await recorder.finish("passed");
 
   assert.deepEqual(
     readSnapshot(directory).hostSamples.map(({ host, reason, stage }) => ({
@@ -254,10 +263,17 @@ test("observation capture and persistence failures never replace the E2E result"
 
   assert.equal(value, "kept");
   const snapshot = readSnapshot(directory);
-  assert.equal(snapshot.complete, false);
-  assert.deepEqual(snapshot.recorderErrors, [
-    { name: "Error", operation: "host-capture" },
-    { code: "ENOSPC", name: "Error", operation: "snapshot-write" },
+  assert.equal(snapshot.completeness.execution, true);
+  assert.equal(snapshot.completeness.recorder, false);
+  assert.equal(snapshot.completeness.telemetry, false);
+  assert.deepEqual(snapshot.observationErrors, [
+    {
+      code: "ENOSPC",
+      dimension: "recorder",
+      name: "Error",
+      operation: "snapshot-write",
+    },
+    { dimension: "telemetry", name: "Error", operation: "host-capture" },
   ]);
   const published = readFileSync(join(directory, "ios-observation.json"), "utf8");
   assert.doesNotMatch(published, /Users|private host failure|write failed/);
@@ -269,9 +285,10 @@ test("unknown observation stages cannot change the acceptance result", async (t)
   const result = await recorder.run("arbitrary-user-value", async () => "kept");
 
   assert.equal(result, "kept");
-  assert.deepEqual(readSnapshot(directory).recorderErrors, [
+  assert.deepEqual(readSnapshot(directory).observationErrors, [
     {
       code: "E2E_OBSERVATION_STAGE_INVALID",
+      dimension: "recorder",
       name: "Error",
       operation: "stage",
     },
@@ -394,6 +411,117 @@ test("host snapshots explicitly mark missing or unrecognized metrics", async () 
     snapshot.errors.map(({ metric }) => metric),
     ["memory-pressure", "swap", "processes"],
   );
+});
+
+test("telemetry gaps do not make a completed E2E execution structurally incomplete", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-observation-completeness-");
+  const recorder = createIosObservationRecorder({
+    captureHostSnapshot: async () => ({
+      complete: false,
+      cpuCount: 3,
+      diskAvailableBytes: 1,
+      errors: [],
+      loadAverage: [0, 0, 0],
+      memoryFreeBytes: 1,
+      memoryPressureFreePercent: null,
+      memoryTotalBytes: 1,
+      processes: [],
+      swapUsedBytes: 0,
+    }),
+    directory,
+    environment: {},
+  });
+
+  await recorder.run("ios-device-create", async () => {});
+  await recorder.finish("passed");
+
+  const snapshot = readSnapshot(directory);
+  assert.equal(snapshot.schemaVersion, 2);
+  assert.equal("complete" in snapshot, false);
+  assert.deepEqual(snapshot.completeness, {
+    execution: true,
+    maestro: null,
+    recorder: true,
+    telemetry: false,
+  });
+});
+
+test("preparation host sampling does not delay the operation it observes", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-observation-nonblocking-");
+  let operationStarted = false;
+  let releaseCapture;
+  let captures = 0;
+  const hostSnapshot = {
+    complete: true,
+    cpuCount: 3,
+    diskAvailableBytes: 1,
+    loadAverage: [0, 0, 0],
+    memoryFreeBytes: 1,
+    memoryPressureFreePercent: 100,
+    memoryTotalBytes: 1,
+    processes: [],
+    swapUsedBytes: 0,
+  };
+  const recorder = createIosObservationRecorder({
+    captureHostSnapshot: () => {
+      captures += 1;
+      if (captures > 1) return Promise.resolve(hostSnapshot);
+      return new Promise((resolvePromise) => {
+        releaseCapture = () => resolvePromise(hostSnapshot);
+      });
+    },
+    directory,
+    environment: {},
+  });
+
+  const stage = recorder.run("ios-device-create", async () => {
+    operationStarted = true;
+  });
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
+  assert.equal(operationStarted, true);
+  releaseCapture();
+  await stage;
+  await recorder.finish("passed");
+});
+
+test("a pending first host sample is not requested again by the next stage", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-observation-first-sample-");
+  let captures = 0;
+  let releaseCapture;
+  const hostSnapshot = {
+    complete: true,
+    cpuCount: 3,
+    diskAvailableBytes: 1,
+    loadAverage: [0, 0, 0],
+    memoryFreeBytes: 1,
+    memoryPressureFreePercent: 100,
+    memoryTotalBytes: 1,
+    processes: [],
+    swapUsedBytes: 0,
+  };
+  const recorder = createIosObservationRecorder({
+    captureHostSnapshot: () => {
+      captures += 1;
+      return new Promise((resolvePromise) => {
+        releaseCapture = () => resolvePromise(hostSnapshot);
+      });
+    },
+    directory,
+    environment: {},
+  });
+
+  await recorder.run("ios-simulator-environment", async () => {});
+  await recorder.run("ios-release-build", async () => {});
+  assert.equal(captures, 1);
+  assert.deepEqual(readSnapshot(directory).omissions, {
+    overlaps: [{ reason: "build-start" }, { reason: "build-finished" }],
+  });
+  releaseCapture();
+  await recorder.finish("passed");
+
+  const snapshot = readSnapshot(directory);
+  assert.equal(snapshot.hostSamples[0].reason, "job-start");
+  assert.equal(snapshot.completeness.telemetry, false);
 });
 
 test("the host sampler is non-overlapping, fixed-rate, and stops before Maestro", async (t) => {
@@ -530,9 +658,11 @@ test("the preparation sampler stops at its exact host-sample budget", async (t) 
   const snapshot = readSnapshot(directory);
   assert.equal(snapshot.hostSamples.length, 24);
   assert.equal(captures, 24);
-  assert.equal(snapshot.complete, false);
-  assert.deepEqual(snapshot.recorderErrors.at(-1), {
+  assert.equal(snapshot.completeness.recorder, true);
+  assert.equal(snapshot.completeness.telemetry, false);
+  assert.deepEqual(snapshot.observationErrors.at(-1), {
     code: "E2E_OBSERVATION_SAMPLE_LIMIT",
+    dimension: "telemetry",
     name: "Error",
     operation: "sample-limit",
   });
@@ -591,6 +721,7 @@ test("Maestro artifacts expose bounded driver, app-home, and Picker semantic tim
     flows: [
       {
         appHomeReadyMs: 500,
+        failure: null,
         pickerDoneReadyMs: 20,
         pickerGridReadyMs: 1_100,
         status: "passed",
@@ -648,6 +779,94 @@ test("Maestro artifact interpretation fails closed on empty, failed, or bounded 
   assert.equal(bounded.complete, false);
   assert.equal(bounded.flows.length, 32);
   assert.doesNotMatch(JSON.stringify(bounded), /Users|private|commands\.json/);
+
+  const malformedDirectory = createTemporaryTestDirectory(t, "plogkit-ios-maestro-malformed-");
+  mkdirSync(join(malformedDirectory, "flow"));
+  writeFileSync(
+    join(malformedDirectory, "flow", "commands.json"),
+    `${JSON.stringify([
+      {
+        command: { launchAppCommand: {} },
+        metadata: { timestamp: 1_100 },
+      },
+      {
+        command: { hideKeyboardCommand: {} },
+        metadata: { duration: 20, status: "FAILED", timestamp: 1_200 },
+      },
+    ])}\n`,
+  );
+  assert.equal(summarizeIosMaestroArtifacts(malformedDirectory, 1_000, true).complete, false);
+});
+
+test("Maestro artifacts classify failed product assertions with bounded action context", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-maestro-assertion-");
+  const flowDirectory = join(directory, "flow");
+  mkdirSync(flowDirectory);
+  writeFileSync(
+    join(flowDirectory, "commands.json"),
+    `${JSON.stringify([
+      {
+        command: { launchAppCommand: {} },
+        metadata: { duration: 20, status: "COMPLETED", timestamp: 1_100 },
+      },
+      {
+        command: { tapOnElement: { selector: { idRegex: "draft-item-0" } } },
+        metadata: { duration: 20, status: "COMPLETED", timestamp: 1_200 },
+      },
+      {
+        command: { runFlowCommand: { sourceDescription: "open-draft.yaml" } },
+        metadata: { duration: 20, status: "FAILED", timestamp: 1_250 },
+      },
+      {
+        command: {
+          assertConditionCommand: { condition: { visible: { idRegex: "editor-screen" } } },
+        },
+        metadata: { duration: 20, status: "FAILED", timestamp: 1_300 },
+      },
+    ])}\n`,
+  );
+
+  const summary = summarizeIosMaestroArtifacts(directory, 1_000, true);
+  assert.equal(summary.failureBoundary, "business-assertion");
+  assert.deepEqual(summary.flows[0].failure, {
+    assertionId: "editor-screen",
+    command: "assert-visible",
+    lastSuccessfulCommand: "tap",
+    lastSuccessfulTargetId: "draft-item-0",
+  });
+});
+
+test("Maestro artifacts classify not-visible product assertions without leaking regexes", (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-maestro-not-visible-");
+  const flowDirectory = join(directory, "flow");
+  mkdirSync(flowDirectory);
+  writeFileSync(
+    join(flowDirectory, "commands.json"),
+    `${JSON.stringify([
+      {
+        command: { launchAppCommand: {} },
+        metadata: { duration: 20, status: "COMPLETED", timestamp: 1_100 },
+      },
+      {
+        command: {
+          assertConditionCommand: {
+            condition: { notVisible: { idRegex: "private.*regex" } },
+          },
+        },
+        metadata: { duration: 20, status: "FAILED", timestamp: 1_200 },
+      },
+    ])}\n`,
+  );
+
+  const summary = summarizeIosMaestroArtifacts(directory, 1_000, true);
+  assert.equal(summary.failureBoundary, "business-assertion");
+  assert.deepEqual(summary.flows[0].failure, {
+    assertionId: null,
+    command: "assert-not-visible",
+    lastSuccessfulCommand: "launch-app",
+    lastSuccessfulTargetId: null,
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /private|regex/);
 });
 
 test("a failed post-Maestro host checkpoint cannot replace the suite primary", async (t) => {
@@ -670,7 +889,9 @@ test("a failed post-Maestro host checkpoint cannot replace the suite primary", a
 
   const snapshot = readSnapshot(directory);
   assert.equal(snapshot.events.at(-1).status, "failed");
-  assert.deepEqual(snapshot.recorderErrors, [{ name: "Error", operation: "host-capture" }]);
+  assert.deepEqual(snapshot.observationErrors, [
+    { dimension: "telemetry", name: "Error", operation: "host-capture" },
+  ]);
   assert.doesNotMatch(
     JSON.stringify(snapshot),
     /PRIVATE_TOKEN|host checkpoint failed|driver failed/,
