@@ -11,8 +11,11 @@ import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
 const commitSha = "0123456789abcdef0123456789abcdef01234567";
 const iosContract = Object.freeze({
   architecture: "x86_64",
+  configuration: "Release",
   deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
   runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+  scheme: "PlogKit",
+  sdk: "iphonesimulator",
   xcodeBuild: "17F113",
   xcodeVersion: "26.6",
 });

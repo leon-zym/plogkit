@@ -119,5 +119,9 @@ test("the iOS isolation experiment reuses one sealed package on same and fresh I
   assert.equal((workflow.match(/actions\/upload-artifact@v7\.0\.1/g) ?? []).length, 5);
   assert.match(workflow, /retention-days: 1/);
   assert.equal((workflow.match(/E2E_IOS_RUNNER_LABEL: macos-26-intel/g) ?? []).length, 2);
+  assert.match(
+    workflow,
+    /ios-isolation-control:[\s\S]*?timeout-minutes: 150[\s\S]*ios-isolation-fresh-host:[\s\S]*?timeout-minutes: 90/,
+  );
   assert.doesNotMatch(workflow, /retry|sleep|macos-15|macos-26-xlarge|continue-on-error/);
 });

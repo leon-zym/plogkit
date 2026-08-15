@@ -91,7 +91,7 @@ jobs:
       (inputs.platform == 'all' || inputs.platform == 'ios') &&
       inputs.ios_execution == 'isolation-pair'
     runs-on: macos-26-intel
-    timeout-minutes: 120
+    timeout-minutes: 150
     outputs:
       package-ready: ${{ steps.package-upload.outcome == 'success' }}
     steps:
@@ -156,7 +156,7 @@ jobs:
     needs: ios-isolation-control
     if: ${{ always() && needs.ios-isolation-control.outputs.package-ready == 'true' }}
     runs-on: macos-26-intel
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.10

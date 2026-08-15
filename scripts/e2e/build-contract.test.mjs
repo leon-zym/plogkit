@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { createTemporaryTestDirectory } from "../test-support/temp-directory.mjs";
 import { androidBuildArtifact, androidBuildSidecars, buildAndroid } from "./android.mjs";
-import { buildIos, iosBuildArtifact, iosBuildSidecars } from "./ios.mjs";
+import { buildIos, iosAcceptanceContract, iosBuildArtifact, iosBuildSidecars } from "./ios.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const compatibleExpoModulesCoreSymbol =
@@ -115,6 +115,19 @@ test("iOS E2E builds the x86_64-only Release slice selected by an Intel test hos
   const argumentsLine = readFileSync(commandLog, "utf8").trim().split("\n")[1];
   assert.match(argumentsLine, /ARCHS=x86_64/);
   assert.match(argumentsLine, /ONLY_ACTIVE_ARCH=YES/);
+});
+
+test("the iOS acceptance contract explicitly binds the native Release build", () => {
+  assert.deepEqual(iosAcceptanceContract("x86_64"), {
+    architecture: "x86_64",
+    configuration: "Release",
+    deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+    runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+    scheme: "PlogKit",
+    sdk: "iphonesimulator",
+    xcodeBuild: "17F113",
+    xcodeVersion: "26.6",
+  });
 });
 
 test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async (t) => {

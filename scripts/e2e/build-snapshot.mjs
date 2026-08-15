@@ -1,14 +1,11 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  closeSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
-  readSync,
   readdirSync,
   readlinkSync,
   renameSync,
@@ -16,6 +13,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, relative } from "node:path";
+
+import { updateHashWithFileContents } from "./file-hash.mjs";
 
 function updateHash(hash, label, value) {
   const buffer = Buffer.isBuffer(value) ? value : Buffer.from(String(value));
@@ -25,16 +24,7 @@ function updateHash(hash, label, value) {
 
 function updateHashFromFile(hash, label, path, bytes) {
   hash.update(`${label.length}:${label}:${bytes}:`);
-  const descriptor = openSync(path, "r");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  try {
-    let read;
-    while ((read = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
-      hash.update(buffer.subarray(0, read));
-    }
-  } finally {
-    closeSync(descriptor);
-  }
+  updateHashWithFileContents(hash, path);
 }
 
 export function hashPath(path) {

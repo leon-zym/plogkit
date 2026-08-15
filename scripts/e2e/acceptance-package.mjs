@@ -1,14 +1,10 @@
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
-  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -19,6 +15,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { hashPath } from "./build-snapshot.mjs";
+import { sha256File } from "./file-hash.mjs";
 
 const schemaVersion = 1;
 const manifestFilename = "acceptance-package.json";
@@ -57,21 +54,6 @@ function canonicalJson(value) {
       .join(",")}}`;
   }
   return JSON.stringify(value);
-}
-
-function sha256File(path) {
-  const hash = createHash("sha256");
-  const descriptor = openSync(path, "r");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  try {
-    let read;
-    while ((read = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
-      hash.update(buffer.subarray(0, read));
-    }
-  } finally {
-    closeSync(descriptor);
-  }
-  return hash.digest("hex");
 }
 
 function assertPayloadContained(root) {

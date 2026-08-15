@@ -26,7 +26,10 @@ const requiredCocoaPodsVersion = "1.17.0";
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-26-5";
 const deviceTypeName = "iPhone 17 Pro";
 const deviceTypeIdentifier = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
-const appPath = "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app";
+const buildConfiguration = "Release";
+const buildScheme = "PlogKit";
+const buildSdk = "iphonesimulator";
+const appPath = `ios/build/Build/Products/${buildConfiguration}-${buildSdk}/PlogKit.app`;
 const buildTimeoutMs = 45 * 60 * 1000;
 const deviceLifecycleTimeoutMs = 3 * 60 * 1000;
 const hostLifecycleProbeTimeoutMs = 2 * 60 * 1000;
@@ -47,8 +50,11 @@ export function iosSimulatorArchitecture(architecture = hostArch()) {
 export function iosAcceptanceContract(architecture = iosSimulatorArchitecture()) {
   return Object.freeze({
     architecture: iosSimulatorArchitecture(architecture),
+    configuration: buildConfiguration,
     deviceTypeIdentifier,
     runtimeIdentifier,
+    scheme: buildScheme,
+    sdk: buildSdk,
     xcodeBuild: requiredXcodeBuild,
     xcodeVersion: requiredXcodeVersion,
   });
@@ -376,11 +382,11 @@ export async function buildIos({
     "-workspace",
     "ios/PlogKit.xcworkspace",
     "-scheme",
-    "PlogKit",
+    buildScheme,
     "-configuration",
-    "Release",
+    buildConfiguration,
     "-sdk",
-    "iphonesimulator",
+    buildSdk,
     "-destination",
     "generic/platform=iOS Simulator",
     "-derivedDataPath",
