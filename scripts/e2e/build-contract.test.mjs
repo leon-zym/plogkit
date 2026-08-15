@@ -20,6 +20,7 @@ function writeExecutable(path, contents) {
 function createIosReleaseBuildFixture(
   t,
   {
+    architecture = "arm64",
     coreExports = [compatibleExpoModulesCoreSymbol],
     mediaImports = [compatibleExpoModulesCoreSymbol],
   } = {},
@@ -52,12 +53,12 @@ printf '%s' symbols > "${directory}/ios/build/Build/Products/Release-iphonesimul
     `#!/bin/sh
 case "$*" in
   "lipo -archs ${appBinary}"|"lipo -archs ${coreBinary}"|"lipo -archs ${mediaBinary}")
-    printf '%s\\n' arm64 ;;
-  "nm -arch arm64 -gU ${coreBinary}")
+    printf '%s\\n' ${architecture} ;;
+  "nm -arch ${architecture} -gU ${coreBinary}")
     printf '%s\\n' ${coreExports.map((symbol) => `'0000000000001000 T ${symbol}'`).join(" ")} ;;
-  "nm -arch arm64 -u ${mediaBinary}")
+  "nm -arch ${architecture} -u ${mediaBinary}")
     printf '%s\\n' ${mediaImports.map((symbol) => `'                 U ${symbol}'`).join(" ")} ;;
-  "nm -arch arm64 -u ${appBinary}")
+  "nm -arch ${architecture} -u ${appBinary}")
     printf '%s\\n' '                 U _$s10Foundation3URLVMa' ;;
   *) exit 65 ;;
 esac
@@ -91,6 +92,29 @@ test("iOS E2E builds a standalone Release simulator app", async (t) => {
   assert.deepEqual(iosBuildSidecars(directory), [
     join(directory, "ios/build/Build/Products/Release-iphonesimulator/PlogKit.app.dSYM"),
   ]);
+});
+
+test("iOS E2E builds the x86_64-only Release slice selected by an Intel test host", async (t) => {
+  const { binaries, commandLog, directory } = createIosReleaseBuildFixture(t, {
+    architecture: "x86_64",
+  });
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binaries}:${previousPath}`;
+  try {
+    await buildIos({
+      architecture: "x86_64",
+      cleanup: { add() {} },
+      root: directory,
+      workers: "2",
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+
+  const argumentsLine = readFileSync(commandLog, "utf8").trim().split("\n")[1];
+  assert.match(argumentsLine, /ARCHS=x86_64/);
+  assert.match(argumentsLine, /ONLY_ACTIVE_ARCH=YES/);
 });
 
 test("iOS Release build rejects an embedded ExpoModulesCore ABI mismatch", async (t) => {

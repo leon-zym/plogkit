@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+  closeSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
+  openSync,
+  readSync,
   readdirSync,
   readlinkSync,
   renameSync,
@@ -21,7 +23,21 @@ function updateHash(hash, label, value) {
   hash.update(buffer);
 }
 
-function hashPath(path) {
+function updateHashFromFile(hash, label, path, bytes) {
+  hash.update(`${label.length}:${label}:${bytes}:`);
+  const descriptor = openSync(path, "r");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let read;
+    while ((read = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, read));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function hashPath(path) {
   if (!existsSync(path)) throw new Error(`Build or E2E input is missing: ${path}`);
   const hash = createHash("sha256");
   const visit = (entryPath, relativePath) => {
@@ -31,6 +47,7 @@ function hashPath(path) {
       return;
     }
     if (stat.isDirectory()) {
+      updateHash(hash, `mode:${relativePath}`, stat.mode & 0o777);
       updateHash(hash, "directory", relativePath);
       for (const entry of readdirSync(entryPath).sort()) {
         visit(join(entryPath, entry), relativePath ? join(relativePath, entry) : entry);
@@ -38,7 +55,8 @@ function hashPath(path) {
       return;
     }
     if (!stat.isFile()) throw new Error(`Unsupported build or E2E input: ${entryPath}`);
-    updateHash(hash, `file:${relativePath}`, readFileSync(entryPath));
+    updateHash(hash, `mode:${relativePath}`, stat.mode & 0o777);
+    updateHashFromFile(hash, `file:${relativePath}`, entryPath, stat.size);
   };
   visit(path, "");
   return hash.digest("hex");
@@ -67,8 +85,10 @@ function repositoryFingerprint(root) {
     }
     const stat = lstatSync(absolutePath);
     if (stat.isSymbolicLink()) updateHash(hash, `link:${path}`, readlinkSync(absolutePath));
-    else if (stat.isFile()) updateHash(hash, `file:${path}`, readFileSync(absolutePath));
-    else throw new Error(`Unsupported repository build input: ${path}`);
+    else if (stat.isFile()) {
+      updateHash(hash, `mode:${path}`, stat.mode & 0o777);
+      updateHashFromFile(hash, `file:${path}`, absolutePath, stat.size);
+    } else throw new Error(`Unsupported repository build input: ${path}`);
   }
   return hash.digest("hex");
 }
@@ -166,6 +186,7 @@ export function createRunSnapshot({ artifactRoot, builds, repositorySha256, root
           builds: provenanceBuilds,
           e2eSha256: hashPath(e2eRoot),
           repositorySha256,
+          schemaVersion: 1,
         },
         null,
         2,

@@ -34,7 +34,7 @@ pnpm install
 
 ### iOS
 
-- macOS 和完整安装的 Xcode；日常开发可使用与 Expo SDK 57 兼容的版本。本地 L4 E2E 当前要求 Apple Silicon，精确使用 Xcode 26.6（build 17F113），并只构建宿主实际执行的 arm64 Simulator slice。
+- macOS 和完整安装的 Xcode；日常开发可使用与 Expo SDK 57 兼容的版本。本地 L4 E2E 精确使用 Xcode 26.6（build 17F113），并只构建宿主实际执行的单一 Simulator slice：Apple Silicon 为 `arm64`，Intel 为 `x86_64`。
 - 普通开发至少需要一个兼容的 iOS Simulator runtime；L4 E2E 精确使用 iOS 26.5 runtime 与 iPhone 17 Pro device type。
 - CocoaPods 1.17.0。
 
@@ -160,6 +160,8 @@ pnpm e2e:android
 ```
 
 上述三个命令都会在单次 runner 调用中完成 clean prebuild、Release 构建、产物快照、临时设备、安装与验收，不复用 development build 或可变的旧产物。`pnpm e2e` 在一台 Mac 上按 iOS、Android 顺序执行；GitHub 使用两台独立 runner 并行运行相同的平台入口。
+
+GitHub 的 #101 手动实验在现有 `Mobile simulator E2E` workflow 中选择 `ios_execution=isolation-pair`。构建端使用显式 `--build-package` 生成一次 sealed acceptance package；同宿主控制和 fresh-host 实验分别使用 `--accept-package` 消费它。这两个参数是配对实验接口，不是复用本地旧 build 的捷径：package 必须属于同一 workflow、同一 commit、同一仓库输入和同一 x86_64/Xcode/runtime 契约，任一身份或内容 hash 不符都会在创建设备前失败。普通 `pnpm e2e:ios` 仍保持单进程完整事务。
 
 定位已知失败时可只运行一条 flow；它仍走完整 Release 构建与设备生命周期：
 

@@ -19,6 +19,17 @@ on:
         description: Optional flow basename, for example f06-session-persistence
         required: false
         type: string
+      ios_execution:
+        description: iOS execution topology
+        required: true
+        default: same-host
+        type: choice
+        options:
+          - same-host
+          - isolation-pair
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
@@ -27,7 +38,9 @@ concurrency:
 jobs:
   ios-maestro:
     name: iOS Maestro acceptance suite
-    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ios'
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      ((inputs.platform == 'all' || inputs.platform == 'ios') && inputs.ios_execution == 'same-host')
     runs-on: macos-26
     timeout-minutes: 165
     steps:
@@ -69,6 +82,125 @@ jobs:
           name: ios-maestro-artifacts
           if-no-files-found: warn
           path: ${{ runner.temp }}/plogkit-e2e
+          retention-days: 7
+
+  ios-isolation-control:
+    name: Same-host build and acceptance control
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.platform == 'all' || inputs.platform == 'ios') &&
+      inputs.ios_execution == 'isolation-pair'
+    runs-on: macos-26-intel
+    timeout-minutes: 120
+    outputs:
+      package-ready: ${{ steps.package-upload.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+      - name: Select pinned Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer
+      - run: pnpm install --frozen-lockfile
+      - name: Install Maestro CLI
+        run: |
+          MAESTRO_VERSION="$(< .maestro-version)"
+          MAESTRO_ARCHIVE="$RUNNER_TEMP/maestro-$MAESTRO_VERSION"
+          mkdir -p "$MAESTRO_ARCHIVE"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/checksums_sha256.txt" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/checksums_sha256.txt"
+          (cd "$MAESTRO_ARCHIVE" && shasum -a 256 -c checksums_sha256.txt)
+          unzip -q "$MAESTRO_ARCHIVE/maestro.zip" -d "$MAESTRO_ARCHIVE"
+          echo "$MAESTRO_ARCHIVE/maestro/bin" >> "$GITHUB_PATH"
+      - name: Build sealed iOS acceptance package
+        id: package-build
+        run: pnpm e2e:ios --build-package "$RUNNER_TEMP/plogkit-ios-package"
+        timeout-minutes: 60
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-build-private
+      - name: Run same-host iOS acceptance control
+        run: pnpm e2e:ios --accept-package "$RUNNER_TEMP/plogkit-ios-package"
+        timeout-minutes: 45
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-control-private
+          E2E_PUBLIC_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-control
+          E2E_FLOW: ${{ inputs.flow }}
+          E2E_IOS_RUNNER_LABEL: macos-26-intel
+      - name: Upload sealed iOS acceptance package
+        id: package-upload
+        if: ${{ always() && steps.package-build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-sealed-acceptance-package
+          compression-level: 1
+          if-no-files-found: error
+          path: ${{ runner.temp }}/plogkit-ios-package
+          retention-days: 1
+      - name: Upload same-host observations and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-same-host-observations
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/plogkit-e2e-control
+          retention-days: 7
+
+  ios-isolation-fresh-host:
+    name: Fresh-host packaged acceptance experiment
+    needs: ios-isolation-control
+    if: ${{ always() && needs.ios-isolation-control.outputs.package-ready == 'true' }}
+    runs-on: macos-26-intel
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+      - name: Select pinned Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer
+      - run: pnpm install --frozen-lockfile
+      - name: Download sealed iOS acceptance package
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: ios-sealed-acceptance-package
+          path: ${{ runner.temp }}/plogkit-ios-package
+      - name: Install Maestro CLI
+        run: |
+          MAESTRO_VERSION="$(< .maestro-version)"
+          MAESTRO_ARCHIVE="$RUNNER_TEMP/maestro-$MAESTRO_VERSION"
+          mkdir -p "$MAESTRO_ARCHIVE"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          curl -fsSL -o "$MAESTRO_ARCHIVE/checksums_sha256.txt" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/checksums_sha256.txt"
+          (cd "$MAESTRO_ARCHIVE" && shasum -a 256 -c checksums_sha256.txt)
+          unzip -q "$MAESTRO_ARCHIVE/maestro.zip" -d "$MAESTRO_ARCHIVE"
+          echo "$MAESTRO_ARCHIVE/maestro/bin" >> "$GITHUB_PATH"
+      - name: Run fresh-host iOS packaged acceptance
+        run: pnpm e2e:ios --accept-package "$RUNNER_TEMP/plogkit-ios-package"
+        timeout-minutes: 45
+        env:
+          E2E_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-fresh-private
+          E2E_PUBLIC_ARTIFACTS_DIR: ${{ runner.temp }}/plogkit-e2e-fresh
+          E2E_FLOW: ${{ inputs.flow }}
+          E2E_IOS_RUNNER_LABEL: macos-26-intel
+      - name: Upload fresh-host observations and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-fresh-host-observations
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/plogkit-e2e-fresh
           retention-days: 7
 
   android-maestro:

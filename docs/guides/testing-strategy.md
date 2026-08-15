@@ -55,6 +55,8 @@ Maestro 在 iOS Simulator 和 Android Emulator 上驱动 clean Release standalon
 
 每个平台只构建并冻结一份 Release 产物，随后在一个临时设备和一个 Maestro workspace 中串行执行 `e2e/config.yaml` 配置的顶层 flows。每条 flow 按 Maestro 的平台语义清空 App 数据，但不重新构建或更换受测产物；同一 flow 内可以保留数据验证生命周期。系统相册等设备级状态跨 flow 保留，因此 fixture 只注入一次，会改变系统状态的 Export 固定最后执行。任一 flow 失败都立即终止；timeout 只负责有界结束失控进程，不承担失败恢复。
 
+Issue #101 的手动 `isolation-pair` 模式是尚未进入正式门禁的执行面实验。它在 x86_64 `macos-26-intel` 上只构建一次 host-native Release slice，把 App、dSYM、flows、subflows、fixtures 与输入 provenance 封装为同一 sealed acceptance package；同宿主控制组和全新宿主实验组都必须先校验 commit、仓库输入、执行契约、archive digest 与 payload digest，再消费该包。控制组失败不得阻止已经发布的同一包进入 fresh-host 组，两个首轮结果都计入，均不 retry。该模式在形成配对证据并由新 ADR 修订 ADR 0042 前，不替换定时或普通手动 L4。
+
 ## Scenario 可追踪性
 
 已实现 Scenario 必须由 L2/L3 原生测试标题或 L4 Maestro Flow tags 声明至少一项自动化证据，具体格式见 [Spec 规范](../specs/README.md)。绑定是跨层多对多关系，不要求每个 Scenario 拥有独立 Maestro flow，也不维护独立映射清单。
@@ -76,6 +78,7 @@ L2/L3 层级由测试文件路径推导，L4 由顶层 Flow 路径确定。`pnpm
 | ready / 正式 PR 的新提交 | macOS + Ubuntu（并行）   | iOS Simulator Debug 与 Android arm64 Debug 原生集成编译 |
 | 每周一 02:30（北京时间） | macOS + Ubuntu（并行）   | 双端 Release standalone 的完整 Maestro 验收套件         |
 | 手动                     | macOS / Ubuntu（按选择） | 完整双端或指定平台 / flow                               |
+| 手动隔离实验             | 两台 x86_64 macOS        | 同一 sealed iOS package 的同宿主控制与全新宿主验收      |
 
 Draft PR 的每次提交只运行 `pnpm verify`。转为 ready 时触发双端编译检查，此后正式 PR 的每次新提交重新运行全部三项检查。`main` ruleset 要求 PR 和这三项检查全部通过后才能合并，见 [ADR 0016](../adr/0016-git-workflow.md) 和 [ADR 0020](../adr/0020-ci-lifecycle-and-main-ruleset.md)。
 

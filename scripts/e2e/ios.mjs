@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { arch as hostArch, homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -37,6 +37,23 @@ const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
 
+export function iosSimulatorArchitecture(architecture = hostArch()) {
+  if (architecture === "arm64") return "arm64";
+  if (architecture === "x64") return "x86_64";
+  if (architecture === "x86_64") return "x86_64";
+  throw new Error(`Unsupported iOS E2E host architecture: ${architecture}.`);
+}
+
+export function iosAcceptanceContract(architecture = iosSimulatorArchitecture()) {
+  return Object.freeze({
+    architecture: iosSimulatorArchitecture(architecture),
+    deviceTypeIdentifier,
+    runtimeIdentifier,
+    xcodeBuild: requiredXcodeBuild,
+    xcodeVersion: requiredXcodeVersion,
+  });
+}
+
 function boundedEvidence(value, maxBytes) {
   const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
   if (source.length <= maxBytes) return source;
@@ -57,6 +74,7 @@ export function validateIosHost() {
   if (platform() !== "darwin") {
     throw new Error("iOS E2E requires macOS. Run the Android-only command on this host.");
   }
+  iosSimulatorArchitecture();
 }
 
 export function validateIosToolchain() {
@@ -345,7 +363,14 @@ function configureIosEnglishLocale(deviceId) {
   log("ios", "Simulator locale: en-US.");
 }
 
-export async function buildIos({ cleanup, observation, root, workers }) {
+export async function buildIos({
+  architecture = iosSimulatorArchitecture(),
+  cleanup,
+  observation,
+  root,
+  workers,
+}) {
+  const selectedArchitecture = iosSimulatorArchitecture(architecture);
   log("ios", "Building the standalone Release app without booting a simulator.");
   const args = [
     "-workspace",
@@ -362,7 +387,13 @@ export async function buildIos({ cleanup, observation, root, workers }) {
     "ios/build",
   ];
   if (workers) args.push("-jobs", workers);
-  args.push("-quiet", "ARCHS=arm64", "ONLY_ACTIVE_ARCH=YES", "CODE_SIGNING_ALLOWED=NO", "build");
+  args.push(
+    "-quiet",
+    `ARCHS=${selectedArchitecture}`,
+    "ONLY_ACTIVE_ARCH=YES",
+    "CODE_SIGNING_ALLOWED=NO",
+    "build",
+  );
   await observeIosStage(observation, "ios-release-build", async () => {
     await run("xcodebuild", args, {
       cleanup,
@@ -370,11 +401,12 @@ export async function buildIos({ cleanup, observation, root, workers }) {
       env: createStandaloneBuildEnvironment(),
       timeoutMs: buildTimeoutMs,
     });
-    assertIosStandaloneArtifact(root);
+    assertIosStandaloneArtifact(root, selectedArchitecture);
   });
 }
 
-export function assertIosStandaloneArtifact(root) {
+export function assertIosStandaloneArtifact(root, architecture = iosSimulatorArchitecture()) {
+  const selectedArchitecture = iosSimulatorArchitecture(architecture);
   const artifact = iosBuildArtifact(root);
   const bundle = join(artifact, "main.jsbundle");
   if (!existsSync(artifact) || !existsSync(bundle) || !statSync(bundle).isFile()) {
@@ -394,7 +426,7 @@ export function assertIosStandaloneArtifact(root) {
   if (statSync(dwarf).size === 0) {
     throw new Error(`iOS Release dSYM DWARF binary is empty: ${dwarf}`);
   }
-  assertIosExpoModulesCoreAbi(artifact);
+  assertIosExpoModulesCoreAbi(artifact, selectedArchitecture);
 }
 
 export async function prepareIosDevice({

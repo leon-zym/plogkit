@@ -65,6 +65,8 @@ const allowedErrorCodes = new Set([
   "E2E_PROCESS_TREE_TERMINATION_FAILED",
   "ENOSPC",
 ]);
+const allowedJobs = new Set(["ios-isolation-control", "ios-isolation-fresh-host", "ios-maestro"]);
+const allowedRunners = new Set(["macos-26", "macos-26-intel"]);
 const processFamilies = new Map([
   ["CoreSimulatorBridge", "core-simulator"],
   ["CoreSimulatorService", "core-simulator"],
@@ -130,9 +132,9 @@ function normalizedRun(environment) {
       typeof imageVersion === "string" && /^\d{8}\.\d+\.\d+$/.test(imageVersion)
         ? imageVersion
         : null,
-    job: environment.GITHUB_JOB === "ios-maestro" ? "ios-maestro" : null,
+    job: allowedJobs.has(environment.GITHUB_JOB) ? environment.GITHUB_JOB : null,
     mode: environment.E2E_FLOW ? "targeted" : "full",
-    runner: runner === "macos-26" ? runner : null,
+    runner: allowedRunners.has(runner) ? runner : null,
     sha: typeof sha === "string" && /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : null,
   };
 }

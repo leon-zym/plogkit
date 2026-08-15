@@ -160,6 +160,76 @@ test("the runner rejects the removed cross-process phase interface", () => {
   assert.match(result.stderr, /Unknown argument: --phase/);
 });
 
+test("the runner exposes explicit sealed-package build and acceptance modes", async () => {
+  const { parseArguments } = await import("./run.mjs");
+  assert.deepEqual(parseArguments(["ios", "--build-package", "/tmp/package"]), {
+    flow: null,
+    mode: "build-package",
+    packageDirectory: "/tmp/package",
+    platforms: ["ios"],
+    target: "ios",
+  });
+  assert.deepEqual(
+    parseArguments(["ios", "--accept-package", "/tmp/package", "--flow", "f01-add-text"]),
+    {
+      flow: "f01-add-text",
+      mode: "accept-package",
+      packageDirectory: "/tmp/package",
+      platforms: ["ios"],
+      target: "ios",
+    },
+  );
+  assert.throws(
+    () =>
+      parseArguments([
+        "ios",
+        "--build-package",
+        "/tmp/package",
+        "--accept-package",
+        "/tmp/package",
+      ]),
+    /exactly one sealed-package mode/i,
+  );
+  assert.throws(
+    () => parseArguments(["android", "--build-package", "/tmp/package"]),
+    /only supported for iOS/i,
+  );
+});
+
+test(
+  "sealed-package build does not require Maestro before validating the iOS host",
+  { skip: process.platform === "darwin" },
+  (t) => {
+    const directory = createTemporaryTestDirectory(t, "plogkit-runner-ios-package-build-");
+    const binaries = join(directory, "bin");
+    mkdirSync(binaries);
+    writeExecutable(join(binaries, "pnpm"), "#!/bin/sh\nprintf '%s\\n' '11.21.0'\n");
+    writeExecutable(
+      join(binaries, "java"),
+      "#!/bin/sh\nprintf '%s\\n' '    java.home = /tmp/temurin' '    java.runtime.version = 17.0.20+8' '    java.vendor = Eclipse Adoptium' >&2\n",
+    );
+
+    const result = runCli(
+      ["scripts/e2e/run.mjs", "ios", "--build-package", join(directory, "package")],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${binaries}:${process.env.PATH}`,
+          TEMP: directory,
+          TMP: directory,
+          TMPDIR: directory,
+        },
+      },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /iOS E2E requires macOS/);
+    assert.doesNotMatch(result.stderr, /Maestro .* is required/);
+  },
+);
+
 test("the runner rejects an incomplete flow selector before validation", () => {
   const result = runCli(["scripts/e2e/run.mjs", "android", "--flow"], {
     cwd: root,

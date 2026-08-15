@@ -16,7 +16,13 @@ function writeExecutable(path, contents) {
 
 function createAppFixture(
   t,
-  { architectures = "arm64", exportedSymbols, appImports = [], supportImports = null },
+  {
+    architecture = "arm64",
+    architectures = architecture,
+    exportedSymbols,
+    appImports = [],
+    supportImports = null,
+  },
 ) {
   const root = createTemporaryTestDirectory(t, "plogkit-ios-abi-");
   const app = join(root, "PlogKit.app");
@@ -44,7 +50,7 @@ function createAppFixture(
       : `  "lipo -archs ${supportBinary}")
     printf '%s\\n' '${architectures}'
     ;;
-  "nm -arch arm64 -u ${supportBinary}")
+  "nm -arch ${architecture} -u ${supportBinary}")
     printf '%s\\n' ${supportImports.map((symbol) => `'                 U ${symbol}'`).join(" ")}
     ;;
 `;
@@ -53,21 +59,21 @@ function createAppFixture(
     `#!/bin/sh
 case "$*" in
   "lipo -archs ${appBinary}")
-    printf '%s\\n' arm64
+    printf '%s\\n' '${architecture}'
     ;;
   "lipo -archs ${coreBinary}"|"lipo -archs ${mediaBinary}"|"lipo -archs ${otherBinary}")
     printf '%s\\n' '${architectures}'
     ;;
-  "nm -arch arm64 -gU ${coreBinary}")
+  "nm -arch ${architecture} -gU ${coreBinary}")
     printf '%s\\n' ${exportedSymbols.map((symbol) => `'0000000000001000 T ${symbol}'`).join(" ")}
     ;;
-  "nm -arch arm64 -u ${mediaBinary}")
+  "nm -arch ${architecture} -u ${mediaBinary}")
     printf '%s\\n' '                 U ${compatibleSymbol}' '                 U _$s10Foundation3URLVMa'
     ;;
-  "nm -arch arm64 -u ${otherBinary}")
+  "nm -arch ${architecture} -u ${otherBinary}")
     printf '%s\\n' '                 U _$s10Foundation4DataVMa'
     ;;
-  "nm -arch arm64 -u ${appBinary}")
+  "nm -arch ${architecture} -u ${appBinary}")
     printf '%s\\n' ${appImports.map((symbol) => `'                 U ${symbol}'`).join(" ")}
     ;;
 ${supportCases}
@@ -153,6 +159,23 @@ test("iOS Release accepts a PlogKit executable resolved by the embedded ExpoModu
     assert.deepEqual(assertIosExpoModulesCoreAbi(fixture.app), {
       consumers: 2,
       requiredSymbols: 2,
+    });
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
+test("iOS Release accepts an x86_64-only simulator package on an Intel host", (t) => {
+  const fixture = createAppFixture(t, {
+    architecture: "x86_64",
+    exportedSymbols: [compatibleSymbol],
+  });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fixture.bin}:${previousPath}`;
+  try {
+    assert.deepEqual(assertIosExpoModulesCoreAbi(fixture.app, "x86_64"), {
+      consumers: 1,
+      requiredSymbols: 1,
     });
   } finally {
     process.env.PATH = previousPath;

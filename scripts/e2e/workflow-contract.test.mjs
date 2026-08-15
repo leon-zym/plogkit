@@ -43,8 +43,8 @@ test("CI and local E2E share exact repository-owned host tool versions", () => {
   assert.match(workflow, /actions\/setup-java@v5\.7\.0/g);
   assert.match(workflow, /java-version-file: \.java-version/g);
   assert.match(workflow, /MAESTRO_VERSION="\$\(< \.maestro-version\)"/g);
-  assert.equal((workflow.match(/checksums_sha256\.txt/g) ?? []).length, 6);
-  assert.equal((workflow.match(/shasum -a 256 -c checksums_sha256\.txt/g) ?? []).length, 2);
+  assert.equal((workflow.match(/checksums_sha256\.txt/g) ?? []).length, 12);
+  assert.equal((workflow.match(/shasum -a 256 -c checksums_sha256\.txt/g) ?? []).length, 4);
   assert.doesNotMatch(workflow, /get\.maestro\.mobile\.dev/);
   assert.match(
     workflow,
@@ -73,7 +73,7 @@ test("each mobile job has one complete E2E step and diagnostic-upload headroom",
   const workflow = readFileSync(workflowPath, "utf8");
   assert.equal((workflow.match(/^\s+timeout-minutes: 165$/gm) ?? []).length, 2);
   assert.equal((workflow.match(/^\s+timeout-minutes: 135$/gm) ?? []).length, 2);
-  assert.equal((workflow.match(/run: pnpm e2e:ios/g) ?? []).length, 1);
+  assert.equal((workflow.match(/run: pnpm e2e:ios$/gm) ?? []).length, 1);
   assert.equal((workflow.match(/run: pnpm e2e:android/g) ?? []).length, 1);
   assert.equal((workflow.match(/path: \$\{\{ runner\.temp \}\}\/plogkit-e2e$/gm) ?? []).length, 2);
   assert.match(
@@ -96,4 +96,28 @@ test("manual dispatch selects only a platform and optional business flow", () =>
   assert.match(workflow, /flow:[\s\S]*required: false[\s\S]*type: string/);
   assert.doesNotMatch(workflow, /ios_runner|macos-26-xlarge/);
   assert.doesNotMatch(workflow, /soak|iterations|--phase/);
+});
+
+test("the iOS isolation experiment reuses one sealed package on same and fresh Intel hosts", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.match(
+    workflow,
+    /ios_execution:[\s\S]*default: same-host[\s\S]*- same-host[\s\S]*- isolation-pair/,
+  );
+  assert.equal((workflow.match(/runs-on: macos-26-intel/g) ?? []).length, 2);
+  assert.equal((workflow.match(/--build-package/g) ?? []).length, 1);
+  assert.equal((workflow.match(/--accept-package/g) ?? []).length, 2);
+  assert.match(
+    workflow,
+    /Build sealed iOS acceptance package[\s\S]*Run same-host iOS acceptance control[\s\S]*Upload sealed iOS acceptance package/,
+  );
+  assert.match(
+    workflow,
+    /needs: ios-isolation-control[\s\S]*always\(\).*package-ready == 'true'[\s\S]*actions\/download-artifact@v8\.0\.1[\s\S]*Run fresh-host iOS packaged acceptance/,
+  );
+  assert.equal((workflow.match(/name: ios-sealed-acceptance-package/g) ?? []).length, 2);
+  assert.equal((workflow.match(/actions\/upload-artifact@v7\.0\.1/g) ?? []).length, 5);
+  assert.match(workflow, /retention-days: 1/);
+  assert.equal((workflow.match(/E2E_IOS_RUNNER_LABEL: macos-26-intel/g) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /retry|sleep|macos-15|macos-26-xlarge|continue-on-error/);
 });

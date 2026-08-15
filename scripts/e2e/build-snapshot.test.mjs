@@ -69,6 +69,7 @@ test("a run snapshot atomically owns the exact build and Maestro inputs under ar
   assert.equal(snapshot.fixtures[1], join(snapshot.e2eRoot, "fixtures", "landscape.jpg"));
 
   assert.equal(provenance.repositorySha256, repositorySha256);
+  assert.equal(provenance.schemaVersion, 1);
   assert.equal(provenance.builds.android.artifact.path, `android/build/${basename(artifact)}`);
   assert.match(provenance.builds.android.artifact.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(

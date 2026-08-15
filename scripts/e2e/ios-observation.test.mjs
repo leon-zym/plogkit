@@ -114,6 +114,22 @@ test("iOS observations reject runner labels unavailable to this workflow", (t) =
   assert.equal(readSnapshot(directory).run.runner, null);
 });
 
+test("iOS observations distinguish the Intel same-host and fresh-host experiment jobs", (t) => {
+  for (const job of ["ios-isolation-control", "ios-isolation-fresh-host"]) {
+    const directory = createTemporaryTestDirectory(t, `plogkit-ios-observation-${job}-`);
+    createIosObservationRecorder({
+      directory,
+      environment: {
+        E2E_IOS_RUNNER_LABEL: "macos-26-intel",
+        GITHUB_JOB: job,
+      },
+    });
+
+    assert.equal(readSnapshot(directory).run.runner, "macos-26-intel");
+    assert.equal(readSnapshot(directory).run.job, job);
+  }
+});
+
 test("iOS observations keep only bounded numeric host evidence", async (t) => {
   const directory = createTemporaryTestDirectory(t, "plogkit-ios-host-observation-");
   const recorder = createIosObservationRecorder({

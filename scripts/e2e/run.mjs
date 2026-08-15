@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -17,6 +17,7 @@ import {
   buildIos,
   captureIosPhotoResources,
   installAndSeedIos,
+  iosAcceptanceContract,
   iosBuildArtifact,
   iosBuildSidecars,
   prepareIosDevice,
@@ -24,6 +25,11 @@ import {
   validateIosSimulatorEnvironment,
   validateIosToolchain,
 } from "./ios.mjs";
+import {
+  captureRepositoryCommit,
+  createAcceptancePackage,
+  loadAcceptancePackage,
+} from "./acceptance-package.mjs";
 import { createStandaloneBuildEnvironment, validateHostEnvironment } from "./environment.mjs";
 import { captureBuildInputs, createRunSnapshot } from "./build-snapshot.mjs";
 import { assessPhotoResourceDelta, startExportAssertionBridge } from "./export-assertion.mjs";
@@ -63,7 +69,13 @@ function recorderErrorIdentity(error) {
 }
 
 function createIosObservation(options, cleanup) {
-  if (!options.platforms.includes("ios") || !process.env.E2E_PUBLIC_ARTIFACTS_DIR) return null;
+  if (
+    options.mode === "build-package" ||
+    !options.platforms.includes("ios") ||
+    !process.env.E2E_PUBLIC_ARTIFACTS_DIR
+  ) {
+    return null;
+  }
   try {
     return createIosRunObservationRecorder({
       artifactRoot: options.artifactRoot,
@@ -76,9 +88,11 @@ function createIosObservation(options, cleanup) {
   }
 }
 
-function parseArguments(argv) {
+export function parseArguments(argv) {
   const target = argv[0] ?? "all";
   let flow = process.env.E2E_FLOW || null;
+  let mode = "complete";
+  let packageDirectory = null;
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--flow") {
@@ -92,6 +106,16 @@ function parseArguments(argv) {
       if (!flow) {
         throw new Error("--flow requires a flow basename such as f06-session-persistence.");
       }
+    } else if (argument === "--build-package" || argument === "--accept-package") {
+      if (packageDirectory !== null) {
+        throw new Error("Select exactly one sealed-package mode per E2E invocation.");
+      }
+      packageDirectory = argv[index + 1];
+      if (!packageDirectory || packageDirectory.startsWith("--")) {
+        throw new Error(`${argument} requires an acceptance package directory.`);
+      }
+      mode = argument === "--build-package" ? "build-package" : "accept-package";
+      index += 1;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
@@ -103,18 +127,28 @@ function parseArguments(argv) {
   if (flow && !/^[a-z0-9-]+(?:\.yaml)?$/.test(flow)) {
     throw new Error("--flow must be a flow basename such as f06-session-persistence.");
   }
+  if (mode !== "complete" && target !== "ios") {
+    throw new Error("Sealed acceptance packages are only supported for iOS.");
+  }
+  if (mode === "build-package" && flow) {
+    throw new Error("A sealed-package build cannot select a business flow.");
+  }
   return {
     flow: flow ? flow.replace(/\.yaml$/, "") : null,
+    mode,
+    packageDirectory,
     platforms: target === "all" ? ["ios", "android"] : [target],
     target,
   };
 }
 
-function validateBeforePlatformLock({ flow, platforms }) {
-  for (const fixture of sourceFixtures) {
-    if (!existsSync(fixture)) throw new Error(`Missing E2E fixture: ${fixture}`);
+function validateBeforePlatformLock({ flow, mode, platforms }) {
+  if (mode !== "accept-package") {
+    for (const fixture of sourceFixtures) {
+      if (!existsSync(fixture)) throw new Error(`Missing E2E fixture: ${fixture}`);
+    }
   }
-  if (flow && !existsSync(resolve(root, `e2e/flows/${flow}.yaml`))) {
+  if (mode !== "accept-package" && flow && !existsSync(resolve(root, `e2e/flows/${flow}.yaml`))) {
     throw new Error(`Unknown E2E flow: ${flow}`);
   }
   const hostEnvironment = validateHostEnvironment();
@@ -126,8 +160,8 @@ function validateBeforePlatformLock({ flow, platforms }) {
   return hostEnvironment;
 }
 
-async function validateLockedPlatformEnvironment(platforms, { artifactRoot, cleanup }) {
-  if (platforms.includes("ios")) {
+async function validateLockedPlatformEnvironment(platforms, { artifactRoot, cleanup, mode }) {
+  if (platforms.includes("ios") && mode !== "build-package") {
     await validateIosSimulatorEnvironment({ artifactRoot, cleanup });
   }
 }
@@ -325,7 +359,7 @@ async function runAcceptance(platforms, { artifactRoot, cleanup, flow, observati
   log("result", `All ${platforms.join(" + ")} E2E suites passed.`);
 }
 
-async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation) {
+async function buildRunSnapshot(options, cleanup, artifactRoot, hostEnvironment, observation) {
   const repositorySha256 = captureBuildInputs(root);
   await build(options.platforms, cleanup, hostEnvironment, observation);
   const snapshot = await observeIosStage(observation, "ios-input-snapshot", () =>
@@ -342,7 +376,77 @@ async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, o
       ? "Captured immutable Release run inputs."
       : `Captured immutable Release run inputs: ${snapshot.provenance}`,
   );
+  return { repositorySha256, snapshot };
+}
+
+async function runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation) {
+  const { snapshot } = await buildRunSnapshot(
+    options,
+    cleanup,
+    artifactRoot,
+    hostEnvironment,
+    observation,
+  );
   await runAcceptance(options.platforms, {
+    artifactRoot,
+    cleanup,
+    flow: options.flow,
+    observation,
+    snapshot,
+  });
+}
+
+async function buildSealedIosPackage(options, cleanup, artifactRoot, hostEnvironment) {
+  const { repositorySha256, snapshot } = await buildRunSnapshot(
+    options,
+    cleanup,
+    artifactRoot,
+    hostEnvironment,
+    null,
+  );
+  const packageDirectory = resolve(options.packageDirectory);
+  const relativePackagePath = relative(artifactRoot, packageDirectory);
+  if (
+    relativePackagePath === "" ||
+    (!relativePackagePath.startsWith("..") && !isAbsolute(relativePackagePath))
+  ) {
+    throw new Error(
+      "The sealed acceptance package destination must be outside temporary artifacts.",
+    );
+  }
+  const packaged = createAcceptancePackage({
+    commitSha: captureRepositoryCommit(root),
+    contract: iosAcceptanceContract(),
+    packageDirectory,
+    platform: "ios",
+    repositorySha256,
+    snapshot,
+  });
+  log(
+    "ios",
+    process.env.CI
+      ? "Created sealed iOS acceptance package."
+      : `Created sealed iOS acceptance package: ${packaged.manifest}`,
+  );
+}
+
+async function runSealedIosAcceptance(options, cleanup, artifactRoot, observation) {
+  const repositorySha256 = captureBuildInputs(root);
+  const snapshot = await observeIosStage(observation, "ios-input-snapshot", () =>
+    loadAcceptancePackage({
+      commitSha: captureRepositoryCommit(root),
+      contract: iosAcceptanceContract(),
+      extractionRoot: artifactRoot,
+      packageDirectory: resolve(options.packageDirectory),
+      platform: "ios",
+      repositorySha256,
+    }),
+  );
+  if (options.flow && !existsSync(join(snapshot.e2eRoot, "flows", `${options.flow}.yaml`))) {
+    throw new Error(`Unknown E2E flow in sealed acceptance package: ${options.flow}`);
+  }
+  log("setup", "Verified sealed iOS acceptance package identity and contents.");
+  await runAcceptance(["ios"], {
     artifactRoot,
     cleanup,
     flow: options.flow,
@@ -361,6 +465,7 @@ async function main() {
   const publishFailureArtifacts = async () => {
     if (
       artifactRoot === null ||
+      options.mode === "build-package" ||
       !options.platforms.includes("ios") ||
       !process.env.E2E_PUBLIC_ARTIFACTS_DIR
     ) {
@@ -382,7 +487,7 @@ async function main() {
   });
   let operationError = null;
   try {
-    validateMaestroVersion();
+    if (options.mode !== "build-package") validateMaestroVersion();
     const hostEnvironment = validateBeforePlatformLock(options);
     artifactRoot = createArtifactRoot();
     try {
@@ -399,15 +504,29 @@ async function main() {
     }
     observation = createIosObservation({ ...options, artifactRoot }, cleanup);
     await observeIosStage(observation, "ios-simulator-environment", () =>
-      validateAfterAcquiringPlatformLocks(options.platforms, { artifactRoot, cleanup }),
+      validateAfterAcquiringPlatformLocks(options.platforms, {
+        artifactRoot,
+        cleanup,
+        mode: options.mode,
+      }),
     );
     log(
       "setup",
       process.env.CI
-        ? `Running ${options.target} Release E2E.`
-        : `Running ${options.target} Release E2E; artifacts: ${artifactRoot}`,
+        ? options.mode === "build-package"
+          ? "Building a sealed iOS Release acceptance package."
+          : options.mode === "accept-package"
+            ? "Running iOS Release E2E from a sealed acceptance package."
+            : `Running ${options.target} Release E2E.`
+        : `Running ${options.target} ${options.mode}; artifacts: ${artifactRoot}`,
     );
-    await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation);
+    if (options.mode === "build-package") {
+      await buildSealedIosPackage(options, cleanup, artifactRoot, hostEnvironment);
+    } else if (options.mode === "accept-package") {
+      await runSealedIosAcceptance(options, cleanup, artifactRoot, observation);
+    } else {
+      await runCompleteE2e(options, cleanup, artifactRoot, hostEnvironment, observation);
+    }
   } catch (error) {
     operationError = error;
   }

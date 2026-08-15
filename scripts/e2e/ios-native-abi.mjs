@@ -27,25 +27,31 @@ function binaryArchitectures(binary) {
     .filter(Boolean);
 }
 
-function assertArm64Only(binaries) {
+function assertArchitecture(architecture) {
+  if (!["arm64", "x86_64"].includes(architecture)) {
+    throw new Error(`Unsupported iOS Simulator architecture: ${architecture}.`);
+  }
+}
+
+function assertArchitectureOnly(binaries, architecture) {
   for (const { architectures, name } of binaries) {
-    if (architectures.length !== 1 || architectures[0] !== "arm64") {
+    if (architectures.length !== 1 || architectures[0] !== architecture) {
       throw new Error(
-        `${name} must contain only arm64 for the iOS Release simulator ` +
+        `${name} must contain only ${architecture} for the iOS Release simulator ` +
           `contract, but contains: ${architectures.join(" ") || "none"}.`,
       );
     }
   }
 }
 
-function inspectConsumer(binary, name, coreExports) {
+function inspectConsumer(binary, name, coreExports, architecture) {
   const architectures = binaryArchitectures(binary);
-  if (!architectures.includes("arm64")) {
-    throw new Error(`${name} does not contain the required arm64 simulator slice.`);
+  if (!architectures.includes(architecture)) {
+    throw new Error(`${name} does not contain the required ${architecture} simulator slice.`);
   }
   const requirements = [
     ...symbolsFromNm(
-      capture("xcrun", ["nm", "-arch", "arm64", "-u", binary], {
+      capture("xcrun", ["nm", "-arch", architecture, "-u", binary], {
         timeoutMs: 15000,
       }),
     ),
@@ -61,7 +67,8 @@ function inspectConsumer(binary, name, coreExports) {
   return { architectures, name, requirements };
 }
 
-export function assertIosExpoModulesCoreAbi(app) {
+export function assertIosExpoModulesCoreAbi(app, architecture = "arm64") {
+  assertArchitecture(architecture);
   const appBinary = join(app, "PlogKit");
   if (!existsSync(appBinary) || !statSync(appBinary).isFile()) {
     throw new Error(`iOS Release is missing its PlogKit executable: ${appBinary}`);
@@ -73,17 +80,19 @@ export function assertIosExpoModulesCoreAbi(app) {
   }
 
   const coreArchitectures = binaryArchitectures(coreBinary);
-  if (!coreArchitectures.includes("arm64")) {
-    throw new Error("ExpoModulesCore does not contain the required arm64 simulator slice.");
+  if (!coreArchitectures.includes(architecture)) {
+    throw new Error(
+      `ExpoModulesCore does not contain the required ${architecture} simulator slice.`,
+    );
   }
   const coreExports = symbolsFromNm(
-    capture("xcrun", ["nm", "-arch", "arm64", "-gU", coreBinary], {
+    capture("xcrun", ["nm", "-arch", architecture, "-gU", coreBinary], {
       timeoutMs: 15000,
     }),
   );
   let consumers = 0;
   let requiredSymbols = 0;
-  const appConsumer = inspectConsumer(appBinary, "PlogKit", coreExports);
+  const appConsumer = inspectConsumer(appBinary, "PlogKit", coreExports, architecture);
   const inspectedBinaries = [
     appConsumer,
     { architectures: coreArchitectures, name: "ExpoModulesCore" },
@@ -105,7 +114,12 @@ export function assertIosExpoModulesCoreAbi(app) {
       );
     }
     if (framework.frameworkName === "ExpoModulesCore") continue;
-    const consumer = inspectConsumer(framework.binary, framework.frameworkName, coreExports);
+    const consumer = inspectConsumer(
+      framework.binary,
+      framework.frameworkName,
+      coreExports,
+      architecture,
+    );
     inspectedBinaries.push(consumer);
     if (consumer.requirements.length === 0) continue;
     consumers += 1;
@@ -116,6 +130,6 @@ export function assertIosExpoModulesCoreAbi(app) {
       "iOS Release did not expose any native imports to validate against ExpoModulesCore.",
     );
   }
-  assertArm64Only(inspectedBinaries);
+  assertArchitectureOnly(inspectedBinaries, architecture);
   return { consumers, requiredSymbols };
 }
