@@ -291,7 +291,7 @@ function boundedCommandError(command, args, result, { includeOutputInError, maxB
       result.terminationError.message,
     { cause: error },
   );
-  aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
+  aggregate.code = error.code ?? "E2E_PROCESS_TREE_TERMINATION_FAILED";
   return aggregate;
 }
 
@@ -420,10 +420,10 @@ export function run(
               .join("; ")}`,
         { cause: primaryError },
       );
-      if (terminationError) {
-        aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
-      } else if (primaryError.code) {
+      if (primaryError.code) {
         aggregate.code = primaryError.code;
+      } else if (terminationError) {
+        aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
       }
       reject(attachCommandMetadata(aggregate));
     };
