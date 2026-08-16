@@ -36,6 +36,7 @@ const iosPrepareEvidenceProbeTimeoutMs = 5000;
 const iosGuestHealthTimeoutMs = 60000;
 const iosGuestHealthMaxBytes = 1024 * 1024;
 const iosCleanupStageErrorMaxBytes = 64 * 1024;
+const cocoaPodsVersionProbeTimeoutMs = 60 * 1000;
 
 function boundedEvidence(value, maxBytes) {
   const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -59,7 +60,13 @@ export function validateIosHost() {
   }
 }
 
-export function validateIosToolchain() {
+export function validateIosToolchain({
+  captureCocoaPodsVersion = (timeoutMs) =>
+    capture("pod", ["--version"], {
+      timeoutMs,
+    }),
+  cocoaPodsProbeTimeoutMs = cocoaPodsVersionProbeTimeoutMs,
+} = {}) {
   const xcodePath = capture("xcode-select", ["-p"], {
     allowFailure: true,
     timeoutMs: 15000,
@@ -72,11 +79,26 @@ export function validateIosToolchain() {
   if (xcodeVersion) {
     for (const line of xcodeVersion.split("\n")) log("ios", `  ${line}`);
   }
-  const cocoaPodsVersion = capture("pod", ["--version"], {
-    allowFailure: true,
-    timeoutMs: 15000,
-  });
-  log("ios", `CocoaPods: ${cocoaPodsVersion ?? "unknown"}`);
+  let cocoaPodsVersion;
+  try {
+    cocoaPodsVersion = captureCocoaPodsVersion(cocoaPodsProbeTimeoutMs);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`CocoaPods ${requiredCocoaPodsVersion} is required but was not found on PATH.`, {
+        cause: error,
+      });
+    }
+    if (error?.code === "ETIMEDOUT") {
+      throw Object.assign(
+        new Error(`CocoaPods version probe timed out after ${cocoaPodsProbeTimeoutMs}ms.`, {
+          cause: error,
+        }),
+        { code: "E2E_COMMAND_TIMEOUT" },
+      );
+    }
+    throw new Error("Unable to execute the installed CocoaPods version probe.", { cause: error });
+  }
+  log("ios", `CocoaPods: ${cocoaPodsVersion}`);
   const selectedXcodeVersion = xcodeVersion?.match(/^Xcode\s+(.+)$/m)?.[1] ?? "unknown";
   const selectedXcodeBuild = xcodeVersion?.match(/^Build version\s+(.+)$/m)?.[1] ?? "unknown";
   if (selectedXcodeVersion !== requiredXcodeVersion || selectedXcodeBuild !== requiredXcodeBuild) {
@@ -87,7 +109,7 @@ export function validateIosToolchain() {
   }
   if (cocoaPodsVersion !== requiredCocoaPodsVersion) {
     throw new Error(
-      `CocoaPods ${requiredCocoaPodsVersion} is required, but ${cocoaPodsVersion ?? "unknown"} is installed.`,
+      `CocoaPods ${requiredCocoaPodsVersion} is required, but ${cocoaPodsVersion} is installed.`,
     );
   }
   log("ios", "iOS toolchain validation passed.");

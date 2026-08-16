@@ -6,3 +6,5 @@ appId: com.leonzym.plogkit
       TARGET_ID: commit-text
 - tapOn:
     id: commit-text
+- assertNotVisible:
+    id: commit-text

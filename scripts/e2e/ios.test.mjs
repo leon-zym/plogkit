@@ -604,6 +604,40 @@ test("iOS rejects a host outside the pinned Xcode toolchain", async (t) => {
   }, /Xcode 26\.6 \(17F113\) is required, but Xcode 27\.0 \(27A5218g\) is selected/);
 });
 
+test("iOS preserves a CocoaPods cold-start timeout instead of reporting an unknown version", async (t) => {
+  const directory = createTemporaryTestDirectory(t, "plogkit-ios-cocoapods-timeout-");
+  writeExecutable(
+    join(directory, "xcode-select"),
+    "#!/bin/sh\nprintf '%s\\n' '/Applications/Xcode_26.6.app/Contents/Developer'\n",
+  );
+  writeExecutable(
+    join(directory, "xcodebuild"),
+    "#!/bin/sh\nprintf '%s\\n' 'Xcode 26.6' 'Build version 17F113'\n",
+  );
+  writeExecutable(join(directory, "pod"), "#!/bin/sh\nprintf '%s\\n' '1.17.0'\n");
+  const timeoutError = Object.assign(new Error("spawnSync pod ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+
+  await withEnvironment({ PATH: `${directory}:${process.env.PATH}` }, async () => {
+    assert.throws(
+      () =>
+        validateIosToolchain({
+          captureCocoaPodsVersion(timeoutMs) {
+            assert.equal(timeoutMs, 60_000);
+            throw timeoutError;
+          },
+        }),
+      (error) => {
+        assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+        assert.match(error.message, /CocoaPods version probe timed out after 60000ms/);
+        assert.doesNotMatch(error.message, /unknown is installed/);
+        return true;
+      },
+    );
+  });
+});
+
 function writeIosSimulatorHostBinary(binaries) {
   writeExecutable(
     join(binaries, "xcrun"),

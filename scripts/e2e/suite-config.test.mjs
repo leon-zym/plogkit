@@ -132,6 +132,31 @@ test("the export flow asserts the system photo delta after each successful expor
   assert.ok(successOffsets[1] < assertionCalls[1].index);
 });
 
+test("text edit flows require the editor panel to close before their next assertion", () => {
+  const commitSubflow = readFileSync(
+    join(root, "e2e/subflows/scroll-and-apply-text-edits.yaml"),
+    "utf8",
+  );
+  const addTextFlow = readFileSync(join(root, "e2e/flows/f01-add-text.yaml"), "utf8");
+  const exportFlow = readFileSync(join(root, "e2e/flows/f04-export.yaml"), "utf8");
+
+  assert.match(
+    commitSubflow,
+    /- tapOn:\n    id: commit-text\n- assertNotVisible:\n    id: commit-text/,
+    "the shared text commit must prove that the editor panel closed",
+  );
+  assert.match(
+    addTextFlow,
+    /- runFlow: \.\.\/subflows\/scroll-and-apply-text-edits\.yaml\n- assertVisible:\n    id: canvas-text-hit-0-\.\*/,
+  );
+  assert.match(
+    exportFlow,
+    /- runFlow: \.\.\/subflows\/scroll-and-apply-text-edits\.yaml\n- tapOn:\n    id: editor-open-export/,
+  );
+  assert.doesNotMatch(addTextFlow, /- assertVisible: 周末的海边日记/);
+  assert.doesNotMatch(exportFlow, /- assertVisible: "导出后更新 ✨"/);
+});
+
 test("the iOS picker waits for two interactive photos before selecting them", () => {
   const source = readFileSync(join(root, "e2e/subflows/select-two-photos-ios.yaml"), "utf8");
   const gridWait = source.indexOf("visible:\n      id: PXGGridLayout-Info");

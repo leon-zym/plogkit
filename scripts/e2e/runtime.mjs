@@ -291,22 +291,14 @@ function boundedCommandError(command, args, result, { includeOutputInError, maxB
       result.terminationError.message,
     { cause: error },
   );
-  aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
+  aggregate.code = error.code ?? "E2E_PROCESS_TREE_TERMINATION_FAILED";
   return aggregate;
 }
 
 export async function captureBoundedCommand(
   command,
   args,
-  {
-    cleanup,
-    cwd,
-    env = process.env,
-    includeOutputInError = true,
-    maxBytes,
-    terminate,
-    timeoutMs,
-  },
+  { cleanup, cwd, env = process.env, includeOutputInError = true, maxBytes, terminate, timeoutMs },
 ) {
   const result = await captureDiagnostic(command, args, {
     captureStdout: true,
@@ -428,10 +420,10 @@ export function run(
               .join("; ")}`,
         { cause: primaryError },
       );
-      if (terminationError) {
-        aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
-      } else if (primaryError.code) {
+      if (primaryError.code) {
         aggregate.code = primaryError.code;
+      } else if (terminationError) {
+        aggregate.code = "E2E_PROCESS_TREE_TERMINATION_FAILED";
       }
       reject(attachCommandMetadata(aggregate));
     };
@@ -761,16 +753,32 @@ const MAESTRO_VERSION = readFileSync(join(runtimeRoot, ".maestro-version"), "utf
 const MAESTRO_FLOW_TIMEOUT_MS = 10 * 60 * 1000;
 const MAESTRO_SUITE_TIMEOUT_MS = 60 * 60 * 1000;
 const IOS_MAESTRO_DRIVER_STARTUP_TIMEOUT_MS = 2 * 60 * 1000;
+const MAESTRO_VERSION_PROBE_TIMEOUT_MS = 60 * 1000;
 
-export function validateMaestroVersion() {
+export function validateMaestroVersion({
+  captureVersion = (timeoutMs) =>
+    capture("maestro", ["--version"], {
+      env: createMaestroEnvironment(),
+      timeoutMs,
+    }),
+  timeoutMs = MAESTRO_VERSION_PROBE_TIMEOUT_MS,
+} = {}) {
   let output;
   try {
-    output = capture("maestro", ["--version"], {
-      env: createMaestroEnvironment(),
-      timeoutMs: 15000,
-    });
-  } catch {
-    throw new Error(`Maestro ${MAESTRO_VERSION} is required but was not found on PATH.`);
+    output = captureVersion(timeoutMs);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`Maestro ${MAESTRO_VERSION} is required but was not found on PATH.`, {
+        cause: error,
+      });
+    }
+    if (error?.code === "ETIMEDOUT") {
+      throw Object.assign(
+        new Error(`Maestro version probe timed out after ${timeoutMs}ms.`, { cause: error }),
+        { code: "E2E_COMMAND_TIMEOUT" },
+      );
+    }
+    throw new Error("Unable to execute the installed Maestro version probe.", { cause: error });
   }
   const installedVersion = output.match(/\d+\.\d+\.\d+/)?.[0];
   if (!installedVersion) {

@@ -150,7 +150,8 @@ test("bounded commands can omit sensitive output from their primary error", asyn
     captureBoundedCommand(command, [], {
       includeOutputInError: false,
       maxBytes: 1024,
-      timeoutMs: 1000,
+      // This asserts redaction, not process-start latency; shared CI needs scheduling headroom.
+      timeoutMs: 5000,
     }),
     (error) => {
       assert.doesNotMatch(error.message, /Users\/runner|private-catalog/);
@@ -184,6 +185,27 @@ test("bounded command finalization failures are not replayed by global cleanup",
 
   await cleanup.run();
   assert.equal(terminationAttempts, 1);
+});
+
+test("bounded command timeouts preserve their primary failure identity when finalization fails", async () => {
+  const terminationError = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+
+  await assert.rejects(
+    captureBoundedCommand(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      maxBytes: 1024,
+      terminate: async (child) => {
+        child.kill("SIGKILL");
+        throw terminationError;
+      },
+      timeoutMs: 500,
+    }),
+    (error) => {
+      assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+      assert.equal(error.cause.code, "E2E_COMMAND_TIMEOUT");
+      assert.equal(error.errors.includes(terminationError), true);
+      return true;
+    },
+  );
 });
 
 test(
@@ -372,6 +394,7 @@ test("run preserves a command failure when its output artifact also fails", asyn
     (error) => {
       assert.ok(error instanceof AggregateError);
       assert.match(error.cause.message, /Command failed \(23\):/);
+      assert.equal(error.code, undefined);
       assert.equal(error.errors[0], error.cause);
       assert.match(error.errors[1].message, /Unable to write command output/);
       return true;
@@ -393,6 +416,27 @@ test("run bounds a hung process tree and reports the stage timeout", async () =>
     },
   );
   assert.ok(Date.now() - startedAt < 2000);
+});
+
+test("run preserves a timed-out command identity when process finalization fails", async () => {
+  const terminationError = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+
+  await assert.rejects(
+    run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+      terminate: async (child) => {
+        child.kill("SIGKILL");
+        throw terminationError;
+      },
+      timeoutMs: 500,
+    }),
+    (error) => {
+      assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+      assert.equal(error.cause.code, "E2E_COMMAND_TIMEOUT");
+      assert.equal(error.errors.includes(terminationError), true);
+      return true;
+    },
+  );
 });
 
 test(
@@ -567,6 +611,28 @@ esac
       "utf8",
     ),
     /original error: Command failed \(1\): adb <arguments redacted>/,
+  );
+});
+
+test("Maestro version validation distinguishes a bounded cold start from a missing executable", () => {
+  const timeoutError = Object.assign(new Error("spawnSync maestro ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+
+  assert.throws(
+    () =>
+      validateMaestroVersion({
+        captureVersion(timeoutMs) {
+          assert.equal(timeoutMs, 60_000);
+          throw timeoutError;
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "E2E_COMMAND_TIMEOUT");
+      assert.match(error.message, /version probe timed out after 60000ms/i);
+      assert.doesNotMatch(error.message, /not found on PATH/i);
+      return true;
+    },
   );
 });
 

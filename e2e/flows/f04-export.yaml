@@ -45,7 +45,6 @@ tags:
 - pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: "导出后更新 ✨"
 - tapOn:
     id: editor-open-export
 - runFlow:
