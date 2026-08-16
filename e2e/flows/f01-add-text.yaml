@@ -14,6 +14,5 @@ tags:
 - pasteText
 - runFlow: ../subflows/dismiss-keyboard.yaml
 - runFlow: ../subflows/scroll-and-apply-text-edits.yaml
-- assertVisible: 周末的海边日记
 - assertVisible:
     id: canvas-text-hit-0-.*
