@@ -99,6 +99,14 @@ pnpm android
 
 PlogKit 的日常开发使用包含项目实际原生依赖的标准 `expo-dev-client` development build，不使用 Expo Go。L4 E2E 使用独立的 clean Release standalone 构建路径，不启动 dev client UI 或 Metro。
 
+### Xcode 27 与 iOS 27 启动兼容
+
+SDK 57 使用 `expo-build-properties` 的 `ios.enableSceneSupport: true` 显式采用 UIKit UIScene 生命周期。Expo 至少需要 57.0.23，插件至少需要 57.0.20；当前精确依赖见 `package.json`。这是 [Expo 官方的 SDK 57 修复方案](https://github.com/expo/expo/issues/46664)，用于解决以 Xcode 27 / iOS 27 SDK 构建后启动时缺少 scene 生命周期的问题。
+
+升级依赖后必须重新生成并构建原生 App；Metro 刷新或 OTA 更新无法应用该修复。生成的 `Info.plist` 应包含 `UIApplicationSceneManifest` 并注册 `EXExpoAppSceneDelegate`，`AppDelegate.swift` 应遵循 `ExpoReactNativeFactoryProvider`，不再直接创建启动窗口。不要手工修改生成文件。
+
+`pnpm test:orchestration` 包含通过 Expo config introspection 检查生成 scene manifest 的回归测试；它不替代原生编译和设备启动验收。使用 Xcode 27 构建后的 iOS 27 真机验收应覆盖冷启动、退出后重启、前后台切换、`plogkit://` 深链接启动，以及照片导入和导出。模拟器 L4 仍使用本文既定工具链；Xcode 27 的兼容性检查不能作为该完整套件通过的证据。
+
 ## 日常开发
 
 只修改 JavaScript、TypeScript 或资源文件时，无需重新编译已安装的 development build。启动 Metro：

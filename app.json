@@ -30,6 +30,14 @@
       "expo-router",
       "expo-dev-client",
       [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow PlogKit to import the photos you choose.",
